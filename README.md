@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ![Cat Bot PFP](https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png&h=25) Cat Bot [![top.gg](https://top.gg/api/widget/servers/966695034340663367.svg?noavatar=true)](https://top.gg/bot/966695034340663367) [![Discord Server](https://img.shields.io/discord/966586000417619998?label=discord&logo=discord)](https://discord.gg/cat-stand-966586000417619998) [![Wiki](https://img.shields.io/badge/Wiki-blue?label=Cat%20Bot&logo=wiki.js)](https://wiki.minkos.lol)
 
 Discord Cat Bot Source Code
@@ -45,3 +46,12 @@ Please note that self-hosting is hacky and isn't supported; instructions below a
 Cat Bot is licensed under GNU Affero General Public License v3.0 license. View `LICENSE` for more information.
 
 CatPG, our custom-made `asyncpg` wrapper, is licensed under MIT License instead. The license text is present in the beginning of `catpg.py` file.
+=======
+# cat-botmcdiller
+
+Discord Cat Bot by milenakos, edited by fillermcdiller
+
+not public as of rn, don't plan on doing that. Used in my discord server.
+
+Hosted on 10 year old pc with Debian 13
+>>>>>>> c4e158a99e9060fb7f3b314071f1539adeae21fd
