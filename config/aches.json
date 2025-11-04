@@ -1,4 +1,4 @@
-﻿{
+{
   "first": {"title": "First cat!", "description": "the journey begins...", "is_hidden": false, "category": "Cat Hunt"},
   "second": {"title": "Pro Catcher", "description": "get 100 cats", "is_hidden": false, "category": "Cat Hunt"},
   "third": {"title": "Overpopulated", "description": "get 1000 cats", "is_hidden": false, "category": "Cat Hunt"},
@@ -91,7 +91,7 @@
   "pig100": {"title": "Pig Champion", "description": "Finish with 100+ score in /pig", "is_hidden": false, "category": "Hard"},
 
   "catn": {"title": "Cat'n", "description": "no cat??? :megamind:", "is_hidden": true, "category": "Hidden"},
-    "coupon_user": {"title": "Coupon User", "description": "use a coupon for a 10% discount on all cats!!!", "is_hidden": true, "category": "Hidden"},
+  "coupon_user": {"title": "Coupon User", "description": "use a coupon for a 10% discount on all cats!!!", "is_hidden": true, "category": "Hidden"},
   "dataminer": {"title": "Dataminer", "description": "say `cat!n4lltvuCOKe2iuDCmc6JsU7Jmg4vmFBj8G8l5xvoDHmCoIJMcxkeXZObR6HbIV6`", "is_hidden": true, "category": "Hidden"},
   "blackhole": {"title": "Blackhole", "description": "WHERE THE FU ARE WE", "is_hidden": true, "category": "Hidden"},
   "cat_rain": {"title": "It's Raining Cats", "description": "participate in a cat rain", "is_hidden": true, "category": "Hidden"},
@@ -100,8 +100,8 @@
   "freak": {"title": "Freak 😼", "description": "breed a cat", "is_hidden": false, "category": "Cat Hunt"},
   "full_stack": {"title": "Full Stack", "description": "obtain 64 of one cat", "is_hidden": false, "category": "Cat Hunt"},
   "unfunny": {"title": "Unfunny :P", "description": "say \"67\"", "is_hidden": false, "category": "Random"},
-  "genetically_gifted": {"title": "Genetically Gifted", "description": "get an offspring under 1% chance, and make cat profit :D", "is_hidden": true, "category": "Hard"},
-  "tylenol": {"title": "Tylenol", "description": "breed and receive a worse cat", "is_hidden": false, "category": "Silly"},
+  "genetically_gifted": {"title": "Genetically Gifted", "description": "breed a cat which is under 1% chance, and better than your input cats", "is_hidden": true, "category": "Hard"},
+  "tylenol": {"title": "You Failure", "description": "breed and receive a worse cat", "is_hidden": false, "category": "Silly"},
   "grinder": {"title": "Grinder", "description": "complete a battlepass", "is_hidden": false, "category": "Hard"},
 
   "thanksforplaying": {"title": "Thanks For Playing", "description": "Complete the story", "is_hidden": false, "category": "Cat Hunt"}

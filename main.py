@@ -257,18 +257,19 @@ VIEW_TIMEOUT = 86400
 # store credits usernames to prevent excessive api calls
 gen_credits = {}
 
-# due to some stupid individuals spamming the hell out of reactions, we ratelimit them
-# you can do 50 reactions before they stop, limit resets on global cat loop
+    # Rate limits and cooldowns
+# Reactions rate limit (50 per cycle)
 reactions_ratelimit = {}
 
-# sort of the same thing but for pointlaughs and per channel instead of peruser
+# Channel-based point laugh rate limit 
 pointlaugh_ratelimit = {}
 
-# cooldowns for /fake cat /catch
-catchcooldown = {}
-fakecooldown = {}
+# Message-based cooldowns
+message_cooldown = {}
 
-# cat bot auto-claims in the channel user last ran /vote in
+# Command cooldowns
+catchcooldown = {}
+fakecooldown = {}# cat bot auto-claims in the channel user last ran /vote in
 # this is a failsafe to store the fact they voted until they ran that atleast once
 pending_votes = []
 
@@ -294,6 +295,32 @@ temp_belated_storage = {}
 # to prevent weird cookie things without destroying the database with load
 temp_cookie_storage = {}
 
+# active adventures storage (user_id -> adventure data)
+active_adventures = {}
+
+# adventures persistence file
+ADVENTURES_PATH = "data/adventures.json"
+
+
+def load_adventures():
+    global active_adventures
+    try:
+        if os.path.exists(ADVENTURES_PATH):
+            with open(ADVENTURES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # ensure keys are strings
+                active_adventures = {str(k): v for k, v in data.items()}
+    except Exception:
+        active_adventures = {}
+
+
+def save_adventures():
+    try:
+        os.makedirs(os.path.dirname(ADVENTURES_PATH), exist_ok=True)
+        with open(ADVENTURES_PATH, "w", encoding="utf-8") as f:
+            json.dump(active_adventures, f)
+    except Exception:
+        pass
 # docs suggest on_ready can be called multiple times
 on_ready_debounce = False
 
@@ -364,11 +391,39 @@ async def achemb(message, ach_id, send_type, author_string=None):
 
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=author)
 
-    if profile[ach_id]:
+    # Safely handle missing DB columns for achievements.
+    # If the column doesn't exist in the profile record then __getitem__ will
+    # raise KeyError (coming from catpg.Model.__getitem__). Instead of crashing
+    # the bot, bail out and log a helpful message so the migration can be run.
+    try:
+        if profile[ach_id]:
+            return
+    except KeyError:
+        # DB is missing the achievement column. Log and stop.
+        try:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Achievement column '%s' missing on profile table. Run the migration to add new achievement columns.",
+                ach_id,
+            )
+        except Exception:
+            pass
         return
 
-    profile[ach_id] = True
-    await profile.save()
+    try:
+        profile[ach_id] = True
+        await profile.save()
+    except KeyError:
+        # Column was present for read but missing for write (paranoia); log and return.
+        try:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Failed to set achievement '%s' because the DB column is missing. Run the migration to add it.",
+                ach_id,
+            )
+        except Exception:
+            pass
+        return
     ach_data = ach_list[ach_id]
     desc = ach_data["description"]
     if ach_id == "dataminer":
@@ -451,14 +506,25 @@ async def _check_full_stack_and_huzzful(profile, message, cat_type: str):
     except Exception:
         pass
 
+    # Normalize the cat type to the canonical form used in the DB columns.
+    # `cattype_lc_dict` maps lowercase names to canonical names (e.g. 'egirl' -> 'eGirl').
     try:
-        if cat_type == "eGirl":
+        canonical = cattype_lc_dict.get(cat_type.lower(), cat_type)
+    except Exception:
+        canonical = cat_type
+
+    # Huzzful: catching an eGirl (case-insensitive)
+    try:
+        if canonical.lower() == "egirl":
             await achemb(message, "huzzful", "send")
     except Exception:
+        # don't raise — achievement logic should never crash the bot
         pass
 
+    # Full Stack: having 64+ of the canonical cat type (use DB column name)
     try:
-        if profile[f"cat_{cat_type}"] >= 64:
+        colname = f"cat_{canonical}"
+        if profile[colname] >= 64:
             await achemb(message, "full_stack", "send")
     except Exception:
         pass
@@ -929,7 +995,7 @@ async def postpone_reminder(interaction):
 
 # a loop for various maintaince which is ran every 5 minutes
 async def maintaince_loop():
-    global pointlaugh_ratelimit, reactions_ratelimit, last_loop_time, loop_count, catchcooldown, fakecooldown, temp_belated_storage, temp_cookie_storage
+    global pointlaugh_ratelimit, reactions_ratelimit, last_loop_time, loop_count, catchcooldown, fakecooldown, temp_belated_storage, temp_cookie_storage, last_random_rain_time, active_adventures
     pointlaugh_ratelimit = {}
     reactions_ratelimit = {}
     catchcooldown = {}
@@ -973,6 +1039,139 @@ async def maintaince_loop():
     async for channel in Channel.limit(["channel_id"], "yet_to_spawn < $1 AND cat = 0", time.time(), refetch=False):
         await spawn_cat(str(channel.channel_id))
         await asyncio.sleep(0.1)
+
+    # Process any completed adventures
+    try:
+        finished = []
+        now = time.time()
+        for user_id_str, adv in list(active_adventures.items()):
+            if adv.get("end_time", 0) <= now:
+                finished.append((int(user_id_str), adv))
+
+        for user_id, adv in finished:
+            try:
+                # fetch profile and global user
+                guild_id = adv.get("guild_id")
+                channel_id = adv.get("channel_id")
+                cat_sent = adv.get("cat")
+                channel_obj = bot.get_channel(channel_id) if channel_id else None
+
+                profile = None
+                if guild_id:
+                    try:
+                        profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+                    except Exception:
+                        profile = None
+
+                global_user = await User.get_or_create(user_id=user_id)
+
+                # Choose reward
+                roll = random.random()
+                reward_text = ""
+                embed = discord.Embed(title="Adventure Complete!", color=Colors.green)
+
+                # compute reward scaling based on cat rarity/value
+                try:
+                    base_value = type_dict.get(cat_sent, 100)
+                except Exception:
+                    base_value = 100
+                rarity_factor = 1000.0 / float(base_value)
+                # normalize multiplier into a reasonable band
+                multiplier = max(0.5, min(5.0, rarity_factor / 10.0))
+
+                # Rare lucky reward
+                if random.randint(1, 500) == 1:
+                    # jackpot: give a legendary cat and 60 rain minutes
+                    rare_cat = random.choice([c for c in cattypes if c in ["Legendary", "Mythic", "Divine"]])
+                    if profile:
+                        profile[f"cat_{rare_cat}"] += 1
+                        # also restore the adventuring cat
+                        try:
+                            profile[f"cat_{cat_sent}"] += 1
+                        except Exception:
+                            pass
+                        await profile.save()
+                    global_user.rain_minutes += int(60 * multiplier)
+                    await global_user.save()
+                    reward_text = f"🌟 Your {cat_sent} returned with a **{rare_cat}** cat and brought **{int(60 * multiplier)}** rain minutes!"
+                    embed.description = reward_text
+                elif roll < 0.45:
+                    # Battlepass XP reward (scaled)
+                    base_xp = random.randint(100, 500)
+                    xp = max(1, int(base_xp * multiplier))
+                    if profile:
+                        profile.progress = (profile.progress or 0) + xp
+                        # restore the adventuring cat
+                        try:
+                            profile[f"cat_{cat_sent}"] += 1
+                        except Exception:
+                            pass
+                        await profile.save()
+                    reward_text = f"⚔️ Your {cat_sent} trained hard and brought back **{xp}** battlepass XP!"
+                    embed.description = reward_text
+                elif roll < 0.9:
+                    # Cats reward (scaled amount and possibly better cats)
+                    base_amount = random.randint(1, 3)
+                    amount = max(1, int(base_amount * multiplier))
+                    amount = min(amount, 10)
+                    # choose a cat type biased by type_dict
+                    cat_type = random.choices(cattypes, weights=type_dict.values())[0]
+                    if profile:
+                        profile[f"cat_{cat_type}"] += amount
+                        # restore the adventuring cat
+                        try:
+                            profile[f"cat_{cat_sent}"] += 1
+                        except Exception:
+                            pass
+                        await profile.save()
+                    reward_text = f"🎁 Your {cat_sent} returned with **{amount}x {cat_type}** cat(s)!"
+                    embed.description = reward_text
+                else:
+                    # Rain minutes (scaled)
+                    base_minutes = random.randint(5, 30)
+                    minutes = max(1, int(base_minutes * multiplier))
+                    global_user.rain_minutes += minutes
+                    await global_user.save()
+                    # restore the adventuring cat
+                    if profile:
+                        try:
+                            profile[f"cat_{cat_sent}"] += 1
+                            await profile.save()
+                        except Exception:
+                            pass
+                    reward_text = f"☔ Your {cat_sent} attracted **{minutes}** minutes of Cat Rain!"
+                    embed.description = reward_text
+
+                # send notification to channel if possible, else DM the user
+                try:
+                    if channel_obj and channel_obj.permissions_for(bot.user).send_messages:
+                        await channel_obj.send(f"<@{user_id}> {reward_text}", embed=embed)
+                    else:
+                        person = await bot.fetch_user(user_id)
+                        await person.send(reward_text, embed=embed)
+                except Exception:
+                    try:
+                        person = await bot.fetch_user(user_id)
+                        await person.send(reward_text, embed=embed)
+                    except Exception:
+                        pass
+
+            except Exception:
+                pass
+            # remove from active adventures and persist
+            try:
+                del active_adventures[str(user_id)]
+            except KeyError:
+                pass
+        # persist adventures file if any changes
+        try:
+            os.makedirs(os.path.dirname(ADVENTURES_PATH), exist_ok=True)
+            with open(ADVENTURES_PATH, "w", encoding="utf-8") as f:
+                json.dump(active_adventures, f)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     # THIS IS CONSENTUAL AND TURNED OFF BY DEFAULT DONT BAN ME
     #
@@ -1140,6 +1339,46 @@ async def maintaince_loop():
 
     loop_count += 1
 
+    # Once-per-day random cat rain
+    try:
+        # 86400 seconds = 24 hours
+        if time.time() > last_random_rain_time + 86400:
+            candidates = []
+            # select channels that are currently not raining and have no active cat
+            async for ch in Channel.limit(["channel_id"], "cat_rains = 0 AND cat = 0", refetch=False):
+                try:
+                    channel_obj = bot.get_channel(int(ch.channel_id))
+                    if not channel_obj:
+                        continue
+                    perms = channel_obj.permissions_for(bot.user)
+                    # require basic send/view perms
+                    if not (perms.view_channel and perms.send_messages and perms.attach_files):
+                        continue
+                    candidates.append(int(ch.channel_id))
+                except Exception:
+                    continue
+
+            if candidates:
+                chosen = random.choice(candidates)
+                channel_db = await Channel.get_or_none(channel_id=chosen)
+                if channel_db:
+                    rain_length = 5  # minutes
+                    channel_db.cat_rains = time.time() + (rain_length * 60)
+                    channel_db.yet_to_spawn = 0
+                    await channel_db.save()
+                    # spawn initial cat immediately
+                    await spawn_cat(str(chosen))
+                    last_random_rain_time = time.time()
+                    try:
+                        notify_ch = bot.get_channel(config.RAIN_CHANNEL_ID)
+                        if notify_ch:
+                            await notify_ch.send(f"🌧️ Random Cat Rain started in <#{chosen}> for {rain_length} minutes!")
+                    except Exception:
+                        pass
+    except Exception:
+        # Never crash maintenance loop because of random rain
+        pass
+
 
 # fetch app emojis early
 async def on_connect():
@@ -1208,15 +1447,168 @@ async def on_ready():
         ]
     )
 
+    # load persisted adventures
+    try:
+        load_adventures()
+    except Exception:
+        pass
+
+
+@bot.tree.command(description="Send one of your cats on an adventure for 3 hours")
+@discord.app_commands.autocomplete(cat=cat_command_autocomplete)
+async def adventure(interaction: discord.Interaction, cat: Optional[str] = None):
+    """Send one of the user's cats on a 3-hour adventure. Rewards are granted when it returns.
+
+    Parameters
+    ----------
+    cat: Optional[str]
+        Which cat to send (case-insensitive). If omitted a random owned cat is chosen.
+    """
+    await interaction.response.defer()
+    user_id = interaction.user.id
+
+    # single active adventure per user
+    if str(user_id) in active_adventures:
+        adv = active_adventures[str(user_id)]
+        end = adv.get("end_time")
+        await interaction.followup.send(f"You already have an active adventure returning <t:{int(end)}:R>.")
+        return
+
+    if not interaction.guild:
+        await interaction.followup.send("Adventures must be started from a server.")
+        return
+
+    profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=user_id)
+
+    # find owned cats
+    owned = []
+    for c in cattypes:
+        try:
+            if profile[f"cat_{c}"] > 0:
+                owned.append(c)
+        except Exception:
+            continue
+
+    if not owned:
+        await interaction.followup.send("You don't have any cats to send on an adventure. Get some cats first!")
+        return
+
+    # choose cat: either user-specified or random
+    chosen = None
+    if cat:
+        # match case-insensitive to known cat types
+        for c in cattypes:
+            if c.lower() == cat.lower():
+                chosen = c
+                break
+        if not chosen:
+            await interaction.followup.send("I couldn't find that cat type in your collection. Pick a valid cat type.")
+            return
+        if chosen not in owned:
+            await interaction.followup.send(f"You don't own any {chosen} cats to send.")
+            return
+    else:
+        chosen = random.choice(owned)
+    duration = 3 * 3600  # 3 hours
+    end_time = time.time() + duration
+
+    active_adventures[str(user_id)] = {
+        "user_id": user_id,
+        "guild_id": interaction.guild.id,
+        "channel_id": interaction.channel.id if interaction.channel else None,
+        "cat": chosen,
+        "start_time": time.time(),
+        "end_time": end_time,
+    }
+    save_adventures()
+
+    embed = discord.Embed(title="Adventure Started!", color=Colors.yellow)
+    embed.description = f"Your **{chosen}** has left on an adventure and will return <t:{int(end_time)}:R>. Good luck!"
+    await interaction.followup.send(f"<@{user_id}>", embed=embed)
+    # temporarily remove the cat from inventory while away
+    try:
+        if profile[f"cat_{chosen}"] > 0:
+            profile[f"cat_{chosen}"] -= 1
+            await profile.save()
+    except Exception:
+        # ignore if column missing or save fails; adventure still starts
+        pass
+
+
+
+@bot.tree.command(description="Show your active adventure (if any)")
+async def adventures(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    user_id = interaction.user.id
+    adv = active_adventures.get(str(user_id))
+    if not adv:
+        await interaction.followup.send("You have no active adventures right now.")
+        return
+
+    cat = adv.get("cat")
+    start = adv.get("start_time")
+    end = adv.get("end_time")
+    channel_id = adv.get("channel_id")
+    remaining = int(end - time.time()) if end else 0
+
+    embed = discord.Embed(title="Active Adventure", color=Colors.yellow)
+    embed.add_field(name="Cat", value=str(cat or "Unknown"), inline=True)
+    embed.add_field(name="Returns In", value=f"<t:{int(end)}:R>" if end else "Unknown", inline=True)
+    if channel_id:
+        embed.set_footer(text=f"Started in channel {channel_id}")
+    await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="adventure_list", description="Admin: list all active adventures")
+async def adventure_list(interaction: discord.Interaction):
+    # allow only guild admins or bot owner
+    try:
+        if interaction.user.id != OWNER_ID and not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("You don't have permission to run this command.", ephemeral=True)
+            return
+    except Exception:
+        # fallback allow owner
+        if interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("You don't have permission to run this command.", ephemeral=True)
+            return
+
+    await interaction.response.defer(ephemeral=True)
+    if not active_adventures:
+        await interaction.followup.send("No active adventures.")
+        return
+
+    embed = discord.Embed(title="Active Adventures", color=Colors.yellow)
+    for uid_str, adv in list(active_adventures.items())[:30]:
+        uid = int(uid_str)
+        cat = adv.get("cat")
+        guild_id = adv.get("guild_id")
+        channel_id = adv.get("channel_id")
+        end = adv.get("end_time")
+        owner = None
+        try:
+            owner = await bot.fetch_user(uid)
+            owner_text = owner.name
+        except Exception:
+            owner_text = str(uid)
+
+        location = f"<#{channel_id}>" if channel_id else f"Guild {guild_id}"
+        embed.add_field(name=f"{owner_text}", value=f"Cat: {cat}\nReturns: <t:{int(end)}:R>\nLoc: {location}", inline=False)
+
+    await interaction.followup.send(embed=embed)
+
 
 # this is all the code which is ran on every message sent
-# a lot of it is for easter eggs or achievements
+# a lot of it is for easter eggs and achievements
 async def on_message(message: discord.Message):
     global emojis, last_loop_time
-    text = message.content
+    
+    # Fast early returns before any processing
     if not bot.user or message.author.id == bot.user.id:
         return
 
+    text = message.content.lower()  # Cache lowercase content
+    
+    # Only run maintenance check after fast returns
     if time.time() > last_loop_time + 300:
         last_loop_time = time.time()
         await maintaince_loop()
@@ -1284,6 +1676,14 @@ async def on_message(message: discord.Message):
             "https://tenor.com/view/cat-staring-cat-gif-16983064494644320763",
         ],
     ]
+
+    # Unfunny achievement: exact message "67"
+    try:
+        if text.strip() == "67":
+            await achemb(message, "unfunny", "send")
+    except Exception:
+        # never crash on achievement checks
+        pass
 
     # here are some automation hooks for giving out purchases and similiar
     if config.RAIN_CHANNEL_ID and message.channel.id == config.RAIN_CHANNEL_ID and text.lower().startswith("cat!rain"):
@@ -1669,12 +2069,21 @@ async def on_message(message: discord.Message):
 
     # this is run whether someone says "cat" (very complex)
     if text.lower() == "cat":
+        # Fast initial checks before any DB queries
+        if message.channel.id in temp_catches_storage:
+            return
+            
+        # Combine DB queries into one operation where possible
         user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.author.id)
         channel = await Channel.get_or_none(channel_id=message.channel.id)
+        
+        # Early return conditions
         if not channel or not channel.cat or channel.cat in temp_catches_storage or user.timeout > time.time():
-            # laugh at this user
+            # laugh at this user but only if conditions are right
             # (except if rain is active, we dont have perms or channel isnt setupped, or we laughed way too much already)
-            if channel and channel.cat_rains < time.time() and perms.add_reactions and pointlaugh_ratelimit.get(message.channel.id, 0) < 10:
+            if (channel and channel.cat_rains < time.time() and 
+                perms.add_reactions and 
+                pointlaugh_ratelimit.get(message.channel.id, 0) < 10):
                 try:
                     await message.add_reaction(get_emoji("pointlaugh"))
                     pointlaugh_ratelimit[message.channel.id] = pointlaugh_ratelimit.get(message.channel.id, 0) + 1
