@@ -1,0 +1,10 @@
+aiohttp[speedups]
+discord.py[speed]
+Pillow
+Pilmoji
+emoji==1.7
+requests
+discord-emoji
+winuvloop
+psutil
+asyncpg
