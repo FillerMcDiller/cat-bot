@@ -176,7 +176,7 @@ vote_button_texts = [
 # various hints/fun facts
 hints = [
     "Cat Bot has a wiki! <https://wiki.minkos.lol>",
-    "Cat Bot is open source! <https://github.com/milenakos/cat-bot>",
+    "Cat Bot is open source! <https://github.com/FillerMcDiller/cat-bot",
 ]
 
 import json, os
@@ -240,7 +240,7 @@ funny = [
     "aw dangit",
     "why don't you press buttons from your commands",
     "you're only making me angrier",
-    "fuck off",
+    "get a j*b",
     "stop clicking it you clicker",
 ]
 
@@ -256,7 +256,7 @@ class Colors:
 
 
 # rain shill message for footers
-rain_shill = "😺 Cat Day Sale /rain"
+rain_shill = "rains are pretty cool, you know? ☔"
 
 # timeout for views
 # higher one means buttons work for longer but uses more ram to keep track of them
@@ -341,7 +341,7 @@ emojis = {}
 RAIN_ID = 1270470307102195752
 
 # for dev commands, this is fetched in on_ready
-OWNER_ID = 553093932012011520
+OWNER_ID = 726686526133501952
 
 # for funny stats, you can probably edit maintaince_loop to restart every X of them
 loop_count = 0
@@ -3273,8 +3273,9 @@ class AdminPanelModal(discord.ui.Modal):
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give cats to"))
             self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Cat type to give"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount to give"))
-        elif action == "Start Rain":
-            self.add_item(discord.ui.TextInput(label="Duration", placeholder="Duration (e.g. 5m, 1h)"))
+        elif action == "Give Rains":
+            self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give Rains to"))
+            self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of Rain Minutes to give"))
         elif action == "Give XP":
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give XP to"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of XP to give"))
@@ -3291,7 +3292,7 @@ class AdminPanelModal(discord.ui.Modal):
             
     async def find_member(self, name: str) -> discord.Member:
         """Find a member by name, nickname, ID, or mention"""
-        name = name.lower().strip()
+        name = name.strip()
         print(f"[DEBUG] Searching for user: {name}")
         
         # Try to parse as ID first
@@ -3325,9 +3326,9 @@ class AdminPanelModal(discord.ui.Modal):
 
         # Search by name (includes partial matches)
         for member in self.guild.members:
-            member_name = member.name.lower()
-            member_display = member.display_name.lower()
-            member_full = str(member).lower()
+            member_name = member.name
+            member_display = member.display_name
+            member_full = str(member)
             
             # Check exact matches first
             if name in [member_name, member_display, member_full]:
@@ -3354,15 +3355,18 @@ class AdminPanelModal(discord.ui.Modal):
             await user.save()
             await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} cats to {member.mention}", ephemeral=True)
         
-        elif self.action == "Start Rain":
-            duration = parse_time(self.children[0].value)
-            if not duration:
-                await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
+       
+        elif self.action == "Give Rains":
+            member = await self.find_member(self.children[0].value)
+            if not member:
+                await interaction.response.send_message(f"Couldn't find user '{self.children[0].value}'!", ephemeral=True)
                 return
                 
-            time_str = f"{duration//3600}h {(duration%3600)//60}m {duration%60}s"
-            await interaction.response.send_message(f"Starting a {time_str} rain!", ephemeral=True)
-            await start_rain(interaction.channel, duration)
+            user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+            user.rain_minutes += int(self.children[1].value)
+            await user.save()
+            await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} packs to {member.mention}", ephemeral=True)
+        
         
         elif self.action == "Give XP":
             member = await self.find_member(self.children[0].value)
