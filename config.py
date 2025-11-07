@@ -19,7 +19,7 @@ DB_PASS = os.environ["DBPASS"] = "cat"
 #
 
 # channel id for db backups, private extremely recommended
-BACKUP_ID = 1060545763194707998
+BACKUP_ID = 1436486865489236299
 
 # top.gg vote webhook verification key, setting this to None disables all voting stuff
 WEBHOOK_VERIFY = None
@@ -38,4 +38,4 @@ DONOR_CHANNEL_ID = 1249343008890028144
 
 # cat bot will also log all rain uses/movements here
 # cat!rain commands here can be used without author check and will dm reciever a thanks message
-RAIN_CHANNEL_ID = 1404728377671290881
+RAIN_CHANNEL_ID = 1436486865489236299
