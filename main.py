@@ -3365,7 +3365,7 @@ class AdminPanelModal(discord.ui.Modal):
             user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
             user.rain_minutes += int(self.children[1].value)
             await user.save()
-            await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} packs to {member.mention}", ephemeral=True)
+            await interaction.response.send_message(f"Gave {self.children[1].value} rains to {member.mention}", ephemeral=True)
         
         
         elif self.action == "Give XP":
