@@ -247,7 +247,8 @@ CREATE TABLE public.profile (
     event_rain_points integer DEFAULT 0,
     best_pig_score integer DEFAULT 0,
     pig50 boolean default false,
-    pig100 boolean default false
+    pig100 boolean default false,
+    last_steal bigint DEFAULT 0
 );
 
 

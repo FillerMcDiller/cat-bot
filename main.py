@@ -47,6 +47,9 @@ import config
 import msg2img
 from catpg import RawSQL
 from database import Channel, Prism, Profile, Reminder, User
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -88,6 +91,11 @@ type_dict = {
 # this list stores unique non-duplicate cattypes
 cattypes = list(type_dict.keys())
 
+# Global tracking variables
+RAIN_CHANNELS = {}  # Tracks active rain events
+active_adventures = {}  # Tracks active adventures
+active_reminders = {}  # Tracks active reminders
+
 # generate a dict with lowercase'd keys
 cattype_lc_dict = {i.lower(): i for i in cattypes}
 
@@ -103,7 +111,7 @@ pack_data = [
     {"name": "Gold", "value": 230, "upgrade": 30, "totalvalue": 400},
     {"name": "Platinum", "value": 630, "upgrade": 30, "totalvalue": 800},
     {"name": "Diamond", "value": 860, "upgrade": 30, "totalvalue": 1200},
-    {"name": "Celestial", "value": 2000, "upgrade": 30, "totalvalue": 2000},# is that a madeline celeste reference????
+    {"name": "Celestial", "value": 2000, "upgrade": 30, "totalvalue": 2000}  # is that a madeline celeste reference????
 ]
 
 prism_names_start = [
@@ -676,12 +684,12 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             xp_progress -= active_level_data["xp"]
             user.progress = xp_progress
             cat_emojis = None
-            if active_level_data["reward"] in cattypes:
-                user[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
-            elif active_level_data["reward"] == "Rain":
+            if active_level_data["reward"] == "Rain":
                 user.rain_minutes += active_level_data["amount"]
-            else:
-              user[f"pack_{active_level_data['reward'].lower()}"] += 1
+            elif active_level_data["reward"] in ["Wooden", "Stone", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Celestial"]:
+                user[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
+            elif active_level_data["reward"] in cattypes:
+                user[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
             await user.save()
             # after incrementing user.battlepass and saving inside the battlepass loop:
             try:
@@ -877,12 +885,33 @@ async def cat_type_autocomplete(interaction: discord.Interaction, current: str) 
 
 
 # function to autocomplete /cat, it only shows the cats you have
+# Helper function to check if a user has an available cat (not on adventure)
+async def get_available_cat_count(profile: Profile, cat_type: str) -> int:
+    """Returns the number of available cats of the given type (excluding those on adventure)"""
+    total = profile[f"cat_{cat_type}"]
+    if total <= 0:
+        return 0
+    # Check if this cat type is on adventure
+    user_adv = active_adventures.get(str(profile.user_id))
+    if user_adv and user_adv["cat"] == cat_type:
+        return total - 1
+    return total
+
 async def cat_command_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
     choices = []
+    user_adv = active_adventures.get(str(interaction.user.id))
+    adventuring_cat = user_adv["cat"] if user_adv else None
+    
     for choice in cattypes:
-        if current.lower() in choice.lower() and user[f"cat_{choice}"] > 0:
-            choices.append(discord.app_commands.Choice(name=choice, value=choice))
+        total = user[f"cat_{choice}"]
+        if current.lower() in choice.lower() and total > 0:
+            name = choice
+            if choice == adventuring_cat:
+                name += f" (x{total - 1}, 1 On Adventure)"
+            else:
+                name += f" (x{total})"
+            choices.append(discord.app_commands.Choice(name=name, value=choice))
     return choices[:25]
 
 
@@ -904,8 +933,9 @@ async def gift_autocomplete(interaction: discord.Interaction, current: str) -> l
     actual_user = await User.get_or_create(user_id=interaction.user.id)
     choices = []
     for choice in cattypes:
-        if current.lower() in choice.lower() and user[f"cat_{choice}"] > 0:
-            choices.append(discord.app_commands.Choice(name=f"{choice} (x{user[f'cat_{choice}']})", value=choice))
+        available = await get_available_cat_count(user, choice) 
+        if current.lower() in choice.lower() and available > 0:
+            choices.append(discord.app_commands.Choice(name=f"{choice} (x{available})", value=choice))
     if current.lower() in "rain" and actual_user.rain_minutes > 0:
         choices.append(discord.app_commands.Choice(name=f"Rain ({actual_user.rain_minutes} minutes)", value="rain"))
     for choice in pack_data:
@@ -1100,14 +1130,34 @@ async def maintaince_loop():
                     base_xp = random.randint(100, 500)
                     xp = max(1, int(base_xp * multiplier))
                     if profile:
-                        profile.progress = (profile.progress or 0) + xp
-                        # restore the adventuring cat
-                        try:
-                            profile[f"cat_{cat_sent}"] += 1
-                        except Exception:
-                            pass
+                        old_xp = profile.progress or 0
+                        current_xp = old_xp + xp
+                        
+                        # Check for level ups using same logic as progress function
+                        level_complete = False
+                        if profile.battlepass >= len(battle["seasons"][str(profile.season)]):
+                            level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+                        else:
+                            level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+                            
+                        if current_xp >= level_data["xp"]:
+                            xp_progress = current_xp
+                            while xp_progress >= level_data["xp"]:
+                                profile.battlepass += 1
+                                xp_progress -= level_data["xp"]
+                                if profile.battlepass >= len(battle["seasons"][str(profile.season)]):
+                                    level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+                                else:
+                                    level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+                                level_complete = True
+                            profile.progress = xp_progress
+                        else:
+                            profile.progress = current_xp
+                        
                         await profile.save()
                     reward_text = f"⚔️ Your {cat_sent} trained hard and brought back **{xp}** battlepass XP!"
+                    if level_complete:
+                        reward_text += f"\n🎉 You leveled up to level {profile.battlepass}!"
                     embed.description = reward_text
                 elif roll < 0.9:
                     # Cats reward (scaled amount and possibly better cats)
@@ -1132,13 +1182,6 @@ async def maintaince_loop():
                     minutes = max(1, int(base_minutes * multiplier))
                     global_user.rain_minutes += minutes
                     await global_user.save()
-                    # restore the adventuring cat
-                    if profile:
-                        try:
-                            profile[f"cat_{cat_sent}"] += 1
-                            await profile.save()
-                        except Exception:
-                            pass
                     reward_text = f"☔ Your {cat_sent} attracted **{minutes}** minutes of Cat Rain!"
                     embed.description = reward_text
 
@@ -1393,6 +1436,51 @@ async def on_ready():
         return
     on_ready_debounce = True
     print("cat is now online")
+    
+    # Start the daily random rain task
+    bot.loop.create_task(schedule_daily_rain())
+
+async def schedule_daily_rain():
+    while True:
+        # Wait until next day
+        now = datetime.datetime.now()
+        tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+        seconds_until_tomorrow = (tomorrow - now).total_seconds()
+        await asyncio.sleep(seconds_until_tomorrow)
+        
+        try:
+            # Pick a random time during the next day
+            random_seconds = random.randint(0, 24 * 60 * 60)  # Random time in the day
+            await asyncio.sleep(random_seconds)
+            
+            # Get a random channel that has had cat activity
+            channels = await Channel.collect(filter="cat > 0")
+            if not channels:
+                continue
+                
+            channel = random.choice(channels)
+            discord_channel = bot.get_channel(channel.channel_id)
+            if not discord_channel:
+                continue
+            
+            # Start a 5-minute rain
+            await discord_channel.send("☔ A mysterious rain has started! Cats will spawn frequently for the next 5 minutes!")
+            
+            # Do the rain spawns
+            for _ in range(30):  # About 30 spawns over 5 minutes
+                try:
+                    if random.random() < 0.8:  # 80% chance each cycle
+                        await spawn_cat(discord_channel, force_spawn=True)
+                except Exception as e:
+                    print(f"Error in daily rain spawn: {e}")
+                    continue
+                    
+                await asyncio.sleep(10)  # 10 second delay between spawns
+                
+            await discord_channel.send("The rain has stopped!")
+            
+        except Exception as e:
+            print(f"Error in daily rain scheduler: {e}")
     emojis = {emoji.name: str(emoji) for emoji in await bot.fetch_application_emojis()}
     appinfo = bot.application
     if appinfo.team and appinfo.team.owner_id:
@@ -1480,11 +1568,12 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
 
     profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=user_id)
 
-    # find owned cats
+    # find available cats (not on adventure)
     owned = []
     for c in cattypes:
         try:
-            if profile[f"cat_{c}"] > 0:
+            available = await get_available_cat_count(profile, c)
+            if available > 0:
                 owned.append(c)
         except Exception:
             continue
@@ -1523,16 +1612,8 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
     save_adventures()
 
     embed = discord.Embed(title="Adventure Started!", color=Colors.yellow)
-    embed.description = f"Your **{chosen}** has left on an adventure and will return <t:{int(end_time)}:R>. Good luck!"
+    embed.description = f"Your **{chosen}** has left on an adventure and will return <t:{int(end_time)}:R>. Good luck!\n*(Your cat will be marked as (On Adventure) in menus)*"
     await interaction.followup.send(f"<@{user_id}>", embed=embed)
-    # temporarily remove the cat from inventory while away
-    try:
-        if profile[f"cat_{chosen}"] > 0:
-            profile[f"cat_{chosen}"] -= 1
-            await profile.save()
-    except Exception:
-        # ignore if column missing or save fails; adventure still starts
-        pass
 
 
 
@@ -3149,6 +3230,331 @@ async def tiktok(message: discord.Interaction, text: str):
     await progress(message, profile, "tiktok")
 
 
+class GiveawayView(discord.ui.View):
+    def __init__(self, cat_type: str):
+        super().__init__(timeout=None)  # No timeout for giveaways
+        self.cat_type = cat_type
+        self.participants = set()
+        
+    @discord.ui.button(label="Enter Giveaway!", style=ButtonStyle.green)
+    async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.participants.add(interaction.user.id)
+        await interaction.response.send_message("You've entered the giveaway! Good luck!", ephemeral=True)
+
+def parse_time(time_str: str) -> int:
+    """Convert a time string like '1h' or '30m' to seconds"""
+    if not time_str:
+        return 0
+    
+    units = {
+        's': 1,
+        'm': 60,
+        'h': 3600,
+        'd': 86400
+    }
+    
+    unit = time_str[-1].lower()
+    if unit not in units:
+        return 0
+    
+    try:
+        value = int(time_str[:-1])
+        return value * units[unit]
+    except ValueError:
+        return 0
+
+class AdminPanelModal(discord.ui.Modal):
+    def __init__(self, action: str, guild: discord.Guild):
+        super().__init__(title=f"Admin Panel - {action}")
+        self.action = action
+        self.guild = guild
+        
+        if action == "Give Cats":
+            self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give cats to"))
+            self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Cat type to give"))
+            self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount to give"))
+        elif action == "Start Rain":
+            self.add_item(discord.ui.TextInput(label="Duration", placeholder="Duration (e.g. 5m, 1h)"))
+        elif action == "Give XP":
+            self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give XP to"))
+            self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of XP to give"))
+        elif action == "Give Packs":
+            self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give packs to"))
+            self.add_item(discord.ui.TextInput(label="Pack Type", placeholder="Pack type to give"))
+            self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount to give"))
+        elif action == "Speak":
+            self.add_item(discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, placeholder="Message to send"))
+            self.add_item(discord.ui.TextInput(label="Image URL (optional)", required=False, placeholder="URL to an image/gif"))
+        elif action == "Start Giveaway":
+            self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Type of cat to give away"))
+            self.add_item(discord.ui.TextInput(label="Duration", placeholder="Duration (e.g. 5m, 1h)"))
+            
+    async def find_member(self, name: str) -> discord.Member:
+        """Find a member by name, nickname, ID, or mention"""
+        name = name.lower().strip()
+        print(f"[DEBUG] Searching for user: {name}")
+        
+        # Try to parse as ID first
+        try:
+            if name.isdigit():
+                member = self.guild.get_member(int(name))
+                if member:
+                    print(f"[DEBUG] Found user by ID: {member}")
+                    return member
+                member = await self.guild.fetch_member(int(name))
+                if member:
+                    print(f"[DEBUG] Found user by ID (fetched): {member}")
+                    return member
+        except (ValueError, discord.NotFound, discord.HTTPException) as e:
+            print(f"[DEBUG] ID lookup failed: {str(e)}")
+
+        # Try mention format (strips <@!> or <@>)
+        if name.startswith('<@') and name.endswith('>'):
+            try:
+                user_id = int(''.join(c for c in name if c.isdigit()))
+                member = self.guild.get_member(user_id)
+                if member:
+                    print(f"[DEBUG] Found user by mention: {member}")
+                    return member
+                member = await self.guild.fetch_member(user_id)
+                if member:
+                    print(f"[DEBUG] Found user by mention (fetched): {member}")
+                    return member
+            except (ValueError, discord.NotFound, discord.HTTPException) as e:
+                print(f"[DEBUG] Mention lookup failed: {str(e)}")
+
+        # Search by name (includes partial matches)
+        for member in self.guild.members:
+            member_name = member.name.lower()
+            member_display = member.display_name.lower()
+            member_full = str(member).lower()
+            
+            # Check exact matches first
+            if name in [member_name, member_display, member_full]:
+                print(f"[DEBUG] Found user by exact name match: {member}")
+                return member
+                
+            # Then check partial matches
+            if name in member_name or name in member_display or name in member_full:
+                print(f"[DEBUG] Found user by partial name match: {member}")
+                return member
+
+        print(f"[DEBUG] No user found for: {name}")
+        return None
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.action == "Give Cats":
+            member = await self.find_member(self.children[0].value)
+            if not member:
+                await interaction.response.send_message(f"Couldn't find user '{self.children[0].value}'!", ephemeral=True)
+                return
+                
+            user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+            user[f"cat_{self.children[1].value}"] += int(self.children[2].value)
+            await user.save()
+            await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} cats to {member.mention}", ephemeral=True)
+        
+        elif self.action == "Start Rain":
+            duration = parse_time(self.children[0].value)
+            if not duration:
+                await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
+                return
+                
+            time_str = f"{duration//3600}h {(duration%3600)//60}m {duration%60}s"
+            await interaction.response.send_message(f"Starting a {time_str} rain!", ephemeral=True)
+            await start_rain(interaction.channel, duration)
+        
+        elif self.action == "Give XP":
+            member = await self.find_member(self.children[0].value)
+            if not member:
+                await interaction.response.send_message(f"Couldn't find user '{self.children[0].value}'!", ephemeral=True)
+                return
+                
+            user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+            user.progress += int(self.children[1].value)
+            await user.save()
+            await interaction.response.send_message(f"Gave {self.children[1].value} XP to {member.mention}", ephemeral=True)
+        
+        elif self.action == "Give Packs":
+            member = await self.find_member(self.children[0].value)
+            if not member:
+                await interaction.response.send_message(f"Couldn't find user '{self.children[0].value}'!", ephemeral=True)
+                return
+                
+            user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+            user[f"pack_{self.children[1].value.lower()}"] += int(self.children[2].value)
+            await user.save()
+            await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} packs to {member.mention}", ephemeral=True)
+        
+        elif self.action == "Speak":
+            embed = None
+            if self.children[1].value:
+                embed = discord.Embed()
+                embed.set_image(url=self.children[1].value)
+            await interaction.channel.send(content=self.children[0].value, embed=embed)
+            await interaction.response.send_message("Message sent!", ephemeral=True)
+        
+        elif self.action == "Start Giveaway":
+            duration = parse_time(self.children[1].value)
+            if not duration:
+                await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
+                return
+                
+            end_time = int(time.time() + duration)
+            embed = discord.Embed(
+                title=f"🎉 Cat Giveaway! 🎉",
+                description=f"Win a {get_emoji(self.children[0].value.lower() + 'cat')} {self.children[0].value} cat!\n\n"
+                          f"To enter, click the button below or say `W cat!` in chat.\n"
+                          f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>",
+                color=Colors.green
+            )
+            view = GiveawayView(self.children[0].value)
+            msg = await interaction.channel.send(embed=embed, view=view)
+            await interaction.response.send_message("Giveaway started!", ephemeral=True)
+            
+            # Wait for giveaway duration
+            await asyncio.sleep(duration)
+            
+            # Include people who said "W cat!"
+            async for message in interaction.channel.history(after=msg):
+                if message.content.lower().strip() in ["w cat!", "w cat"]:
+                    view.participants.add(message.author.id)
+            
+            if view.participants:
+                winner_id = random.choice(list(view.participants))
+                winner = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=winner_id)
+                winner[f"cat_{view.cat_type}"] += 1
+                await winner.save()
+                
+                embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(view.cat_type.lower() + 'cat')} {view.cat_type} cat!"
+                await msg.edit(embed=embed, view=None)
+                await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {view.cat_type} cat giveaway!")
+            else:
+                embed.description = "No one entered the giveaway 😢"
+                await msg.edit(embed=embed, view=None)
+
+class AdminPanel(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__()
+        self.guild = guild
+        
+    @discord.ui.button(label="Give Cats", style=ButtonStyle.blurple)
+    async def give_cats(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Give Cats", self.guild))
+        
+    @discord.ui.button(label="Start Rain", style=ButtonStyle.blurple)
+    async def start_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Start Rain", interaction.guild))
+        
+    @discord.ui.button(label="Give XP", style=ButtonStyle.blurple)
+    async def give_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Give XP", interaction.guild))
+        
+    @discord.ui.button(label="Give Packs", style=ButtonStyle.blurple)
+    async def give_packs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Give Packs", interaction.guild))
+        
+    @discord.ui.button(label="Speak", style=ButtonStyle.green)
+    async def speak(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Speak", interaction.guild))
+        
+    @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green)
+    async def start_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Start Giveaway", interaction.guild))
+
+@bot.tree.command(description="Open the admin control panel")
+@discord.app_commands.default_permissions(administrator=True)
+async def admin(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+        
+    embed = discord.Embed(
+        title="🔧 Admin Control Panel",
+        description="Use the buttons below to manage Cat Bot:",
+        color=Colors.brown
+    )
+    await interaction.response.send_message(embed=embed, view=AdminPanel(guild=interaction.guild), ephemeral=True)
+
+async def start_rain(channel, duration):
+    # Remember the channel for rain
+    channel_data = await Channel.get_or_create(channel_id=channel.id)
+    channel_data.cat_rains += 1
+    await channel_data.save()
+    
+    await channel.send("☔ A rain has started! Cats will spawn frequently!")
+    
+    # Increase spawn rate for the duration
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        try:
+            if random.random() < 0.8:  # 80% chance to spawn each cycle
+                await spawn_cat(channel, force_spawn=True)
+        except Exception as e:
+            print(f"Error during rain spawn: {e}")
+            continue
+            
+        await asyncio.sleep(10)  # Wait 10 seconds between spawns
+    
+    await channel.send("The rain has stopped!")
+
+@bot.tree.command(description="(ADMIN) Start a cat giveaway")
+@discord.app_commands.describe(
+    cat_type="Type of cat to give away",
+    duration="Duration (e.g. 1h, 30m, 5m, 60s)"
+)
+@discord.app_commands.default_permissions(administrator=True)
+async def giveaway(interaction: discord.Interaction, cat_type: str, duration: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+        
+    if cat_type not in cattypes:
+        await interaction.response.send_message(f"Invalid cat type! Valid types: {', '.join(cattypes)}", ephemeral=True)
+        return
+        
+    duration_seconds = parse_time(duration)
+    if not duration_seconds:
+        await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
+        return
+        
+    if cat_type not in cattypes:
+        await interaction.response.send_message(f"Invalid cat type! Valid types: {', '.join(cattypes)}", ephemeral=True)
+        return
+        
+    end_time = int(time.time() + duration_seconds)
+    embed = discord.Embed(
+        title=f"🎉 Cat Giveaway! 🎉",
+        description=f"Win a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!\n\n"
+                  f"To enter, click the button below or say `W cat!` in chat.\n"
+                  f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>",
+        color=Colors.green
+    )
+    view = GiveawayView(cat_type)
+    msg = await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("Giveaway started!", ephemeral=True)
+    
+    # Wait for giveaway duration
+    await asyncio.sleep(duration_seconds)
+    
+    # Include people who said "W cat!"
+    async for message in interaction.channel.history(after=msg):
+        if message.content.lower().strip() in ["w cat!", "w cat"]:
+            view.participants.add(message.author.id)
+    
+    if view.participants:
+        winner_id = random.choice(list(view.participants))
+        winner = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=winner_id)
+        winner[f"cat_{cat_type}"] += 1
+        await winner.save()
+        
+        embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!"
+        await msg.edit(embed=embed, view=None)
+        await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
+    else:
+        embed.description = "No one entered the giveaway 😢"
+        await msg.edit(embed=embed, view=None)
+
 @bot.tree.command(description="(ADMIN) Prevent someone from catching cats for a certain time period")
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.describe(person="A person to timeout!", timeout="How many seconds? (0 to reset)")
@@ -3525,10 +3931,26 @@ async def gen_stats(profile, star):
 @bot.tree.command(name="stats", description="View some advanced stats")
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="Person to view the stats of!")
-async def stats_command(message: discord.Interaction, person_id: Optional[discord.User]):
+async def stats_command(message: discord.Interaction, person_id: Optional[discord.User] = None):
     await message.response.defer()
-    if not person_id:
-        person_id = message.user
+    try:
+        if not person_id:
+            person_id = message.user
+        else:
+            # Try to get member directly from the guild first
+            member = message.guild.get_member(person_id.id)
+            if not member:
+                try:
+                    member = await message.guild.fetch_member(person_id.id)
+                except discord.NotFound:
+                    print(f"[DEBUG] User not found in guild: {person_id.id}")
+                    await message.followup.send("Couldn't find that user in this server!", ephemeral=True)
+                    return
+            person_id = member
+    except Exception as e:
+        print(f"[ERROR] Failed to resolve user in stats: {str(e)}")
+        await message.followup.send("There was an error finding that user. Make sure to use their Discord name, ID, or mention them!", ephemeral=True)
+        return
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=person_id.id)
     star = "*" if not profile.new_user else ""
 
@@ -3621,8 +4043,11 @@ async def gen_inventory(message, person_id):
     total = 0
     valuenum = 0
 
-    # for every cat
+    # for every cat, check if on adventure
     cat_desc = ""
+    user_adv = active_adventures.get(str(person_id.id))
+    adventuring_cat = user_adv["cat"] if user_adv else None
+    
     for i in cattypes:
         icon = get_emoji(i.lower() + "cat")
         cat_num = person[f"cat_{i}"]
@@ -3631,7 +4056,10 @@ async def gen_inventory(message, person_id):
         if cat_num != 0:
             total += cat_num
             valuenum += (sum(type_dict.values()) / type_dict[i]) * cat_num
-            cat_desc += f"{icon} **{i}** {cat_num:,}\n"
+            if i == adventuring_cat:
+                cat_desc += f"{icon} **{i}** {cat_num:,} (1 On Adventure)\n"
+            else:
+                cat_desc += f"{icon} **{i}** {cat_num:,}\n"
         else:
             give_collector = False
 
@@ -3680,10 +4108,26 @@ async def gen_inventory(message, person_id):
 @bot.tree.command(description="View your inventory")
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="Person to view the inventory of!")
-async def inventory(message: discord.Interaction, person_id: Optional[discord.User]):
+async def inventory(message: discord.Interaction, person_id: Optional[discord.User] = None):
     await message.response.defer()
-    if not person_id:
-        person_id = message.user
+    try:
+        if not person_id:
+            person_id = message.user
+        else:
+            # Try to get member directly from the guild first
+            member = message.guild.get_member(person_id.id)
+            if not member:
+                try:
+                    member = await message.guild.fetch_member(person_id.id)
+                except discord.NotFound:
+                    print(f"[DEBUG] User not found in guild: {person_id.id}")
+                    await message.followup.send("Couldn't find that user in this server!", ephemeral=True)
+                    return
+            person_id = member
+    except Exception as e:
+        print(f"[ERROR] Failed to resolve user in inventory: {str(e)}")
+        await message.followup.send("There was an error finding that user. Make sure to use their Discord name, ID, or mention them!", ephemeral=True)
+        return
     person = await Profile.get_or_create(guild_id=message.guild.id, user_id=person_id.id)
     user = await User.get_or_create(user_id=message.user.id)
     stats = await gen_stats(person, "")
@@ -3805,11 +4249,11 @@ async def rain(message: discord.Interaction):
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     user.rain_minutes = 10
     if not user.rain_minutes:
-        user.rain_minutes = 10
+        user.rain_minutes = 0
         await user.save()
 
     if not user.claimed_free_rain:
-        user.rain_minutes += 10
+        user.rain_minutes += 2
         user.claimed_free_rain = True
         await user.save()
 
@@ -4107,33 +4551,314 @@ Blessing message preview:
         await message.response.send_message("Success! Here is a preview:", embed=embedVar)
 
 
+class PackButton(discord.ui.Button):
+    def __init__(self, pack_name: str, pack_count: int):
+        super().__init__(
+            emoji=get_emoji(pack_name.lower() + "pack"),
+            label=f"{pack_name} ({pack_count:,})",
+            style=ButtonStyle.blurple,
+            custom_id=f"pack_{pack_name}"
+        )
+        self.pack_name = pack_name
+
+    async def callback(self, interaction: discord.Interaction):
+        view: PacksView = self.view
+        await view.handle_pack_open(interaction, self.pack_name)
+
+class OpenAllButton(discord.ui.Button):
+    def __init__(self, total_packs: int):
+        super().__init__(
+            label=f"Open all! ({total_packs:,})",
+            style=ButtonStyle.blurple,
+            custom_id="open_all"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: PacksView = self.view
+        await view.handle_open_all(interaction)
+
+class PacksView(discord.ui.View):
+    def __init__(self, user: Profile):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.user = user
+        
+        # Add buttons for each pack type
+        for pack in pack_data:
+            try:
+                pack_name = pack['name']
+                pack_count = user[f"pack_{pack_name.lower()}"]
+                if pack_count > 0:
+                    self.add_item(PackButton(pack_name, pack_count))
+            except Exception:
+                continue
+                
+        # Add "Open All" button if total packs > 10
+        total_packs = sum(user[f"pack_{p['name'].lower()}"] for p in pack_data)
+        if total_packs > 10:
+            self.add_item(OpenAllButton(total_packs))
+            
+        if not self.children:  # No buttons added
+            self.add_item(discord.ui.Button(label="No packs available!", disabled=True))
+
+    async def handle_pack_open(self, interaction: discord.Interaction, pack_name: str):
+        if interaction.user.id != self.user.user_id:
+            await do_funny(interaction)
+            return
+
+        level = next((i for i, p in enumerate(pack_data) if p["name"] == pack_name), 0)
+        
+        await interaction.response.defer()
+        await self.user.refresh_from_db()
+        
+        if self.user[f"pack_{pack_name.lower()}"] < 1:
+            return
+            
+        chosen_type, cat_amount, upgrades, reward_texts = await self.get_pack_rewards(level)
+        self.user[f"cat_{chosen_type}"] += cat_amount
+        self.user.pack_upgrades += upgrades
+        self.user.packs_opened += 1
+        self.user[f"pack_{pack_name.lower()}"] -= 1
+        await self.user.save()
+        
+        try:
+            if self.user[f"cat_{chosen_type}"] >= 64:
+                await achemb(interaction, "full_stack", "send")
+        except Exception:
+            pass
+            
+        embed = discord.Embed(title=reward_texts[0], color=Colors.brown)
+        await interaction.edit_original_response(embed=embed)
+        
+        for reward_text in reward_texts[1:]:
+            await asyncio.sleep(1)
+            things = reward_text.split("\n", 1)
+            embed = discord.Embed(title=things[0], description=things[1], color=Colors.brown)
+            await interaction.edit_original_response(embed=embed)
+            
+        await asyncio.sleep(1)
+        new_view = PacksView(self.user)
+        await interaction.edit_original_response(view=new_view)
+
+    async def handle_open_all(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.user_id:
+            await do_funny(interaction)
+            return
+
+        await interaction.response.defer()
+        await self.user.refresh_from_db()
+
+        pack_results = []
+        for pack in pack_data:
+            pack_name = pack['name'].lower()
+            pack_count = self.user[f"pack_{pack_name}"]
+            if pack_count > 0:
+                level = next((i for i, p in enumerate(pack_data) if p["name"].lower() == pack_name), 0)
+                chosen_type, cat_amount, upgrades = await self.get_pack_rewards(level, is_single=False)
+                pack_results.append(f"{get_emoji(pack_name + 'pack')} {pack_count}x")
+                self.user[f"cat_{chosen_type}"] += cat_amount
+                self.user.pack_upgrades += upgrades
+                self.user.packs_opened += pack_count
+                self.user[f"pack_{pack_name}"] = 0
+
+        await self.user.save()
+        
+        embed = discord.Embed(
+            title="Mass Pack Opening!",
+            description=" ".join(pack_results),
+            color=Colors.brown
+        )
+        await interaction.edit_original_response(embed=embed)
+        
+        await asyncio.sleep(1)
+        new_view = PacksView(self.user)
+        await interaction.edit_original_response(view=new_view)
+
+    async def get_pack_rewards(self, level: int, is_single=True):
+        reward_texts = []
+        build_string = ""
+        upgrades = 0
+        
+        # Original pack reward logic preserved
+        while random.randint(1, 100) <= pack_data[level]["upgrade"]:
+            if is_single:
+                reward_texts.append(f"{get_emoji(pack_data[level]['name'].lower() + 'pack')} {pack_data[level]['name']}\n" + build_string)
+                build_string = f"Upgraded from {get_emoji(pack_data[level]['name'].lower() + 'pack')} {pack_data[level]['name']}!\n" + build_string
+            else:
+                build_string += f" -> {get_emoji(pack_data[level + 1]['name'].lower() + 'pack')}"
+            level += 1
+            upgrades += 1
+        
+        final_level = pack_data[level]
+        if is_single:
+            reward_texts.append(f"{get_emoji(final_level['name'].lower() + 'pack')} {final_level['name']}\n" + build_string)
+
+        # Select cat type and amount
+        goal_value = final_level["value"]
+        chosen_type = random.choice(cattypes)
+        cat_emoji = get_emoji(chosen_type.lower() + "cat")
+        pre_cat_amount = goal_value / (sum(type_dict.values()) / type_dict[chosen_type])
+        
+        if pre_cat_amount % 1 > random.random():
+            cat_amount = math.ceil(pre_cat_amount)
+        else:
+            cat_amount = math.floor(pre_cat_amount)
+            
+        if pre_cat_amount < 1:
+            if is_single:
+                reward_texts.append(reward_texts[-1] + f"\n{round(pre_cat_amount * 100, 2)}% chance for a {cat_emoji} {chosen_type} cat")
+                reward_texts.append(reward_texts[-1] + ".")
+                reward_texts.append(reward_texts[-1] + ".")
+                reward_texts.append(reward_texts[-1] + ".")
+            else:
+                build_string += f" {round(pre_cat_amount * 100, 2)}% {cat_emoji}? "
+            if cat_amount == 1:
+                if is_single:
+                    reward_texts.append(reward_texts[-1] + "\n✅ Success!")
+                else:
+                    build_string += f"✅ -> {cat_emoji} 1"
+            else:
+                if is_single:
+                    reward_texts.append(reward_texts[-1] + "\n❌ Fail!")
+                else:
+                    build_string += f"❌ -> {get_emoji('finecat')} 1"
+                chosen_type = "Fine"
+                cat_amount = 1
+        elif not is_single:
+            build_string += f" {cat_emoji} {cat_amount:,}"
+            
+        if is_single:
+            reward_texts.append(reward_texts[-1] + f"\nYou got {get_emoji(chosen_type.lower() + 'cat')} {cat_amount:,} {chosen_type} cats!")
+            return chosen_type, cat_amount, upgrades, reward_texts
+            
+        return chosen_type, cat_amount, upgrades, build_string
+    
+    @discord.ui.button(label="Refresh", style=ButtonStyle.secondary, custom_id="refresh")
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user.user_id:
+            await do_funny(interaction)
+            return
+            
+        await self.user.refresh_from_db()
+        new_view = PacksView(self.user)
+        await interaction.response.edit_message(view=new_view)
+    
+    async def open_pack_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user.user_id:
+            await do_funny(interaction)
+            return
+            
+        pack_name = button.custom_id.split('_')[1]
+        level = next((i for i, p in enumerate(pack_data) if p["name"] == pack_name), 0)
+        
+        await interaction.response.defer()
+        await self.user.refresh_from_db()
+        
+        if self.user[f"pack_{pack_name.lower()}"] < 1:
+            return
+            
+        chosen_type, cat_amount, upgrades, reward_texts = await self.get_pack_rewards(level)
+        self.user[f"cat_{chosen_type}"] += cat_amount
+        self.user.pack_upgrades += upgrades
+        self.user.packs_opened += 1
+        self.user[f"pack_{pack_name.lower()}"] -= 1
+        await self.user.save()
+        
+        try:
+            if self.user[f"cat_{chosen_type}"] >= 64:
+                await achemb(interaction, "full_stack", "send")
+        except Exception:
+            pass
+            
+        embed = discord.Embed(title=reward_texts[0], color=Colors.brown)
+        await interaction.edit_original_response(embed=embed)
+        
+        for reward_text in reward_texts[1:]:
+            await asyncio.sleep(1)
+            things = reward_text.split("\n", 1)
+            embed = discord.Embed(title=things[0], description=things[1], color=Colors.brown)
+            await interaction.edit_original_response(embed=embed)
+            
+        await asyncio.sleep(1)
+        new_view = PacksView(self.user)
+        await interaction.edit_original_response(view=new_view)
+
 @bot.tree.command(description="View and open packs")
 async def packs(message: discord.Interaction):
-    def gen_view(user):
-        view = discord.ui.View(timeout=VIEW_TIMEOUT)
-        empty = True
-        total_amount = 0
-        for pack in pack_data:
-            if user[f"pack_{pack['name'].lower()}"] < 1:
-                continue
-            empty = False
-            amount = user[f"pack_{pack['name'].lower()}"]
-            total_amount += amount
-            button = discord.ui.Button(
-                emoji=get_emoji(pack["name"].lower() + "pack"),
-                label=f"{pack['name']} ({amount:,})",
-                style=ButtonStyle.blurple,
-                custom_id=pack["name"],
+    await message.response.defer()
+    
+    try:
+        user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+        description = "Each pack starts at one of eight tiers of increasing value - Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond, or Celestial - and can repeatedly move up tiers with a 30% chance per upgrade. This means that even a pack starting at Wooden, through successive upgrades, can reach the Celestial tier.\n[Chance Info](<https://catbot.minkos.lol/packs>)\n\nClick the buttons below to start opening packs!"
+        embed = discord.Embed(title=f"{get_emoji('bronzepack')} Packs", description=description, color=Colors.brown)
+        
+        # Show adventure status if one is active
+        user_adv = active_adventures.get(str(message.user.id))
+        if user_adv:
+            embed.add_field(
+                name="Active Adventure",
+                value=f"You have a {user_adv['cat']} cat on an adventure that returns <t:{int(user_adv['end_time'])}:R>!",
+                inline=False
             )
-            button.callback = open_pack
-            view.add_item(button)
-        if empty:
-            view.add_item(discord.ui.Button(label="No packs left!", disabled=True))
-        if total_amount > 10:
-            button = discord.ui.Button(label=f"Open all! ({total_amount:,})", style=ButtonStyle.blurple)
-            button.callback = open_all_packs
-            view.add_item(button)
-        return view
+        
+        view = PacksView(user)
+        await message.followup.send(embed=embed, view=view)
+        
+    except Exception as e:
+        await message.followup.send(f"Error loading packs: {str(e)}", ephemeral=True)
+    def gen_view(user):
+        try:
+            print("[DEBUG] Starting view generation")
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
+            empty = True
+            total_amount = 0
+            print("[DEBUG] Checking packs:", pack_data)
+            
+            for pack in pack_data:
+                try:
+                    pack_name = pack['name'].lower()
+                    print(f"[DEBUG] Checking pack {pack_name}")
+                    pack_count = user[f"pack_{pack_name}"]
+                    print(f"[DEBUG] User has {pack_count} of {pack_name}")
+                    
+                    if pack_count < 1:
+                        continue
+                        
+                    empty = False
+                    total_amount += pack_count
+                    
+                    button = discord.ui.Button(
+                        emoji=get_emoji(pack_name + "pack"),
+                        label=f"{pack['name']} ({pack_count:,})",
+                        style=ButtonStyle.blurple,
+                        custom_id=pack["name"],
+                    )
+                    button.callback = open_pack
+                    view.add_item(button)
+                    print(f"[DEBUG] Added button for {pack_name}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to process pack {pack.get('name', 'unknown')}: {e}")
+                    continue
+            
+            print(f"[DEBUG] View generation complete. Empty: {empty}, Total: {total_amount}")
+            if empty:
+                view.add_item(discord.ui.Button(label="No packs left!", disabled=True))
+                
+            if total_amount > 10:
+                button = discord.ui.Button(
+                    label=f"Open all! ({total_amount:,})", 
+                    style=ButtonStyle.blurple,
+                    custom_id="open_all"
+                )
+                button.callback = open_all_packs
+                view.add_item(button)
+                
+            return view
+        except Exception as e:
+            print(f"[ERROR] Failed to generate view: {e}")
+            # Return a basic view with an error message
+            view = discord.ui.View(timeout=VIEW_TIMEOUT)
+            view.add_item(discord.ui.Button(label="Error loading packs", disabled=True))
+            return view
 
     def get_pack_rewards(level: int, is_single=True):
         # returns cat_type, cat_amount, upgrades, verbal_output
@@ -4292,11 +5017,138 @@ async def packs(message: discord.Interaction):
         await interaction.edit_original_response(view=gen_view(user))
 
 async def packs(message: discord.Interaction):
-    description = "Each pack starts at one of eight tiers of increasing value - Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond, or Celestial - and can repeatedly move up tiers with a 30% chance per upgrade. This means that even a pack starting at Wooden, through successive upgrades, can reach the Celestial tier.\n[Chance Info](<https://catbot.minkos.lol/packs>)\n\nClick the buttons below to start opening packs!"
-    embed = discord.Embed(title=f"{get_emoji('bronzepack')} Packs", description=description, color=Colors.brown)
-    user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-    await message.response.send_message(embed=embed, view=gen_view(user))
+    try:
+        print(f"[DEBUG] /packs command started for user {message.user.id}")
+        await message.response.defer()  # Prevent the command from timing out
+        print("[DEBUG] Response deferred")
+        
+        try:
+            user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+            print(f"[DEBUG] User profile fetched: {user is not None}")
+        except Exception as e:
+            print(f"[ERROR] Failed to get profile: {e}")
+            await message.followup.send("Failed to load profile. Please try again.", ephemeral=True)
+            return
+            
+        description = "Each pack starts at one of eight tiers of increasing value - Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond, or Celestial - and can repeatedly move up tiers with a 30% chance per upgrade. This means that even a pack starting at Wooden, through successive upgrades, can reach the Celestial tier.\n[Chance Info](<https://catbot.minkos.lol/packs>)\n\nClick the buttons below to start opening packs!"
+        embed = discord.Embed(title=f"{get_emoji('bronzepack')} Packs", description=description, color=Colors.brown)
+        
+        # Show adventure status if one is active
+        user_adv = active_adventures.get(str(message.user.id))
+        if user_adv:
+            print(f"[DEBUG] User has active adventure: {user_adv['cat']}")
+            embed.add_field(
+                name="Active Adventure", 
+                value=f"You have a {user_adv['cat']} cat on an adventure that returns <t:{int(user_adv['end_time'])}:R>!\nPacks will be awarded when your cat returns.",
+                inline=False
+            )
+            
+        print("[DEBUG] Generating view")
+        view = gen_view(user)
+        print("[DEBUG] View generated")
+        
+        print("[DEBUG] Sending followup")
+        await message.followup.send(embed=embed, view=view)
+        print("[DEBUG] Command completed successfully")
+        
+    except Exception as e:
+        print(f"[ERROR] Unhandled error in /packs: {e}")
+        try:
+            await message.followup.send("An error occurred while loading packs. Please try again.", ephemeral=True)
+        except Exception:
+            pass
 
+
+@bot.tree.command(description="Attempt to steal a cat from another player (1 hour cooldown)")
+@discord.app_commands.describe(target="The player to attempt to steal from")
+async def steal(interaction: discord.Interaction, target: discord.User):
+    if interaction.user.id == target.id:
+        await interaction.response.send_message("You can't steal from yourself!", ephemeral=True)
+        return
+
+    # Get profiles
+    thief = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+    victim = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=target.id)
+    
+    # Check cooldown
+    now = time.time()
+    if float(now) - float(thief.last_steal or 0) < 3600:  # 1 hour cooldown
+        remaining = int(3600 - (now - thief.last_steal))
+        await interaction.response.send_message(
+            f"You must wait {remaining // 60}m {remaining % 60}s before stealing again!",
+            ephemeral=True
+        )
+        return
+
+    # Check if target has any cats
+    available_cats = []
+    for cat_type in cattypes:
+        if victim[f"cat_{cat_type}"] > 0:
+            user_adv = active_adventures.get(str(target.id))
+            if user_adv and user_adv["cat"] == cat_type:
+                continue  # Skip cats that are on adventure
+            available_cats.append(cat_type)
+
+    if not available_cats:
+        await interaction.response.send_message(
+            f"{target.name} has no cats available to steal!",
+            ephemeral=True
+        )
+        return
+
+    # Calculate success chance based on rarity
+    chosen_type = random.choice(available_cats)
+    base_chance = {
+        "Fine": 50,
+        "Nice": 40,
+        "Good": 30,
+        "Rare": 20,
+        "Epic": 10,
+        "Legendary": 5,
+        "Mythic": 3,
+        "Ultimate": 2,
+        "Professor": 1,
+        "eGirl": 1
+    }.get(chosen_type, 50)
+
+    success = random.randint(1, 100) <= base_chance
+
+    await interaction.response.defer()
+
+    if success:
+        # Transfer one cat
+        victim[f"cat_{chosen_type}"] -= 1
+        thief[f"cat_{chosen_type}"] += 1
+        thief.last_steal = now
+        await victim.save()
+        await thief.save()
+
+        embed = discord.Embed(
+            title="🦹‍♂️ Successful Heist!",
+            description=f"You successfully stole 1 {get_emoji(chosen_type.lower() + 'cat')} {chosen_type} cat from {target.name}!",
+            color=Colors.green
+        )
+        await interaction.followup.send(embed=embed)
+
+        # DM the victim
+        try:
+            victim_embed = discord.Embed(
+                title="😿 Cat Stolen!",
+                description=f"{interaction.user.name} stole 1 {get_emoji(chosen_type.lower() + 'cat')} {chosen_type} cat from you!",
+                color=Colors.red
+            )
+            await target.send(embed=victim_embed)
+        except:
+            pass  # Ignore if we can't DM
+    else:
+        thief.last_steal = now
+        await thief.save()
+        embed = discord.Embed(
+            title="🚨 Heist Failed!",
+            description=f"You failed to steal a cat from {target.name}!",
+            color=Colors.red
+        )
+        await interaction.followup.send(embed=embed)
 
 @bot.tree.command(description="why would anyone think a cattlepass would be a good idea")
 async def battlepass(message: discord.Interaction):
@@ -4457,11 +5309,41 @@ async def battlepass(message: discord.Interaction):
         if user.battlepass >= len(battle["seasons"][str(user.season)]) - 1:
             description += f"*Extra:* {get_emoji('stonepack')} per 1500 XP"
 
-        embedVar = discord.Embed(
-            title=f"Cattlepass Season {user.season}",
-            description=description,
-            color=Colors.brown,
-        ).set_footer(text=rain_shill)
+        # Split description if too long
+        if len(description) > 6000:  # Leave some buffer for other content
+            # Split on double newlines to keep sections together
+            sections = description.split('\n\n')
+            primary_desc = []
+            secondary_desc = []
+            current_length = 0
+            
+            for section in sections:
+                if current_length + len(section) + 2 < 3500:  # Leave room for transition text
+                    primary_desc.append(section)
+                    current_length += len(section) + 2  # +2 for \n\n
+                else:
+                    secondary_desc.append(section)
+            
+            # Create embeds
+            embedVar = discord.Embed(
+                title=f"Cattlepass Season {user.season}",
+                description='\n\n'.join(primary_desc) + "\n\n*See next message for rewards...*",
+                color=Colors.brown,
+            ).set_footer(text=rain_shill)
+            
+            # Create secondary embed
+            if secondary_desc:
+                embedVar2 = discord.Embed(
+                    title=f"Cattlepass Season {user.season} (Rewards)",
+                    description='\n\n'.join(secondary_desc),
+                    color=Colors.brown,
+                ).set_footer(text=rain_shill)
+        else:
+            embedVar = discord.Embed(
+                title=f"Cattlepass Season {user.season}",
+                description=description,
+                color=Colors.brown,
+            ).set_footer(text=rain_shill)
         view = View(timeout=VIEW_TIMEOUT)
 
         button = Button(emoji="🔄", label="Refresh", style=ButtonStyle.blurple)
@@ -4479,9 +5361,19 @@ async def battlepass(message: discord.Interaction):
             embedVar.set_author(name="You have unread news! /news")
 
         if first:
-            await interaction.followup.send(embed=embedVar, view=view)
+            # Send embeds
+            if len(description) > 6000 and 'embedVar2' in locals():
+                await interaction.followup.send(embed=embedVar, view=view)
+                await interaction.channel.send(embed=embedVar2)
+            else:
+                await interaction.followup.send(embed=embedVar, view=view)
         else:
-            await interaction.edit_original_response(embed=embedVar, view=view)
+            # Edit original response
+            if len(description) > 6000 and 'embedVar2' in locals():
+                await interaction.edit_original_response(embed=embedVar, view=view)
+                await interaction.channel.send(embed=embedVar2)
+            else:
+                await interaction.edit_original_response(embed=embedVar, view=view)
 
     await gen_main(message, True)
 
@@ -5006,8 +5898,9 @@ async def gift(
 
     if cat_type in cattypes:
         user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-        # if we even have enough cats
-        if user[f"cat_{cat_type}"] >= amount:
+        # if we even have enough available cats (not on adventure)
+        available = await get_available_cat_count(user, cat_type)
+        if available >= amount:
             reciever = await Profile.get_or_create(guild_id=message.guild.id, user_id=person_id)
             user[f"cat_{cat_type}"] -= amount
             reciever[f"cat_{cat_type}"] += amount
@@ -5671,9 +6564,11 @@ async def cat(message: discord.Interaction, cat_type: Optional[str]):
 
     # check the user has the cat if required
     user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-    if cat_type and user[f"cat_{cat_type}"] <= 0:
-        await message.response.send_message("you dont have that cat", ephemeral=True)
-        return
+    if cat_type:
+        available = await get_available_cat_count(user, cat_type)
+        if available <= 0:
+            await message.response.send_message("you dont have any available cats of that type (they might be on an adventure)", ephemeral=True)
+            return
 
     image = f"images/spawn/{cat_type.lower()}_cat.png" if cat_type else "images/cat.png"
     file = discord.File(image, filename=image)
@@ -6361,7 +7256,8 @@ async def light_market(message):
         async def make_cataine(interaction):
             nonlocal message, type, amount
             await user.refresh_from_db()
-            if user[f"cat_{type}"] < amount or user.cataine_active > time.time():
+            available = await get_available_cat_count(user, type)
+            if available < amount or user.cataine_active > time.time():
                 return
             user[f"cat_{type}"] -= amount
             user.cataine_active = int(time.time()) + 43200

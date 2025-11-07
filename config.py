@@ -1,7 +1,15 @@
-import os
-# discord bot token
-TOKEN = "MTM4NzMwNTE1OTI2NDMwOTM5OQ.G-FBIm.UfgVZ5dUlJ2glyxtu099msIO8yESymOIAL_n38"
 
+import dotenv
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+if TOKEN:
+    TOKEN = TOKEN.strip().replace('\ufeff', '')  # remove BOM and whitespace
+else:
+    raise RuntimeError("TOKEN not found in .env!")
 # db password for postgres
 # user - cat_bot, database - cat_bot, ip - localhost, port - default
 DB_PASS = os.environ["DBPASS"] = "cat"

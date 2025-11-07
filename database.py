@@ -55,6 +55,7 @@ class Profile(catpg.Model):
         "cat_Real",
         "cat_Ultimate",
         "cat_eGirl",
+        "last_steal",  # Added for stealing cooldown
     ]
 
 
