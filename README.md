@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # ![Cat Bot PFP](https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png&h=25) Cat Bot [![top.gg](https://top.gg/api/widget/servers/966695034340663367.svg?noavatar=true)](https://top.gg/bot/966695034340663367) [![Discord Server](https://img.shields.io/discord/966586000417619998?label=discord&logo=discord)](https://discord.gg/cat-stand-966586000417619998) [![Wiki](https://img.shields.io/badge/Wiki-blue?label=Cat%20Bot&logo=wiki.js)](https://wiki.minkos.lol)
 
 Discord Cat Bot Source Code
@@ -55,3 +56,17 @@ not public as of rn, don't plan on doing that. Used in my discord server.
 
 Hosted on 10 year old pc with Debian 13
 >>>>>>> c4e158a99e9060fb7f3b314071f1539adeae21fd
+=======
+
+# CAT BOT
+
+FillerMcDiller's cat bot source code
+
+just a lil public repository I made to have my bot as a resource
+# cat-botmcdiller
+ORIGINAL BOT BY MILENAKOS
+self-hosted edit of it
+
+Hosted on 10 year old pc with Debian 13
+>>>>>>> this is so auraful!
+>>>>>>> cecfd1166729bb523bc005358dc29054597b95ae
