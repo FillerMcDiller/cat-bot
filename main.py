@@ -48,6 +48,7 @@ import msg2img
 from catpg import RawSQL
 from database import Channel, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -214,10 +215,63 @@ print("Aches.json absolute path:", os.path.abspath("config/aches.json"))
 ach_names = ach_list.keys()
 ach_titles = {value["title"].lower(): key for (key, value) in ach_list.items()}
 
+RESTART_INTERVAL = 20        # 6 hours in seconds
+WARNING_BEFORE = 60               # 1 minute warning
+RESTART_WARNING_CHANNEL_ID = 123456789012345678  # replace with your channel ID
+
 bot = commands.AutoShardedBot(
-    command_prefix="this is a placebo bot which will be replaced when this will get loaded",
-    intents=discord.Intents.default(),
+    command_prefix="!",
+    intents=discord.Intents.default()
 )
+
+@bot.event
+async def on_ready():
+    print(f"Bot ready! Logged in as {bot.user} | WS latency: {round(bot.latency*1000)}ms")
+
+
+async def scheduled_restart():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        # Wait until 1 minute before restart
+        await asyncio.sleep(RESTART_INTERVAL - WARNING_BEFORE)
+
+        # Send warning message
+        try:
+            channel = bot.get_channel(RESTART_WARNING_CHANNEL_ID)
+            if channel:
+                await channel.send("⚠️ Bot will restart in 1 minute for maintenance. Please wait…")
+        except Exception as e:
+            print(f"[Restart Warning Error] {e}")
+
+        # Wait remaining 1 minute
+        await asyncio.sleep(WARNING_BEFORE)
+
+        print("🔄 Restarting bot now...")
+        await bot.close()  # clean disconnect
+
+        # Restart process using the same Python interpreter (inside venv)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+async def cleanup_cooldowns():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            # your actual cleanup logic here
+            print("🧹 Cleaning up cooldowns...")
+            # Example: catchcooldown.clear()
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+        await asyncio.sleep(300)  # wait 5 minutes before next cleanup
+
+
+# Use proper setup_hook to start background tasks safely
+async def setup_hook():
+    bot.loop.create_task(scheduled_restart())
+    bot.loop.create_task(cleanup_cooldowns())
+
+bot.setup_hook = setup_hook
+
 
 funny = [
     "why did you click this this arent yours",
@@ -4781,15 +4835,6 @@ async def packs(message: discord.Interaction):
         description = "Each pack starts at one of eight tiers of increasing value - Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond, or Celestial - and can repeatedly move up tiers with a 30% chance per upgrade. This means that even a pack starting at Wooden, through successive upgrades, can reach the Celestial tier.\n[Chance Info](<https://catbot.minkos.lol/packs>)\n\nClick the buttons below to start opening packs!"
         embed = discord.Embed(title=f"{get_emoji('bronzepack')} Packs", description=description, color=Colors.brown)
         
-        # Show adventure status if one is active
-        user_adv = active_adventures.get(str(message.user.id))
-        if user_adv:
-            embed.add_field(
-                name="Active Adventure",
-                value=f"You have a {user_adv['cat']} cat on an adventure that returns <t:{int(user_adv['end_time'])}:R>!",
-                inline=False
-            )
-        
         view = PacksView(user)
         await message.followup.send(embed=embed, view=view)
         
@@ -5135,7 +5180,7 @@ async def steal(interaction: discord.Interaction, target: discord.User):
         await thief.save()
         embed = discord.Embed(
             title="🚨 Heist Failed!",
-            description=f"You failed to steal a cat from {target.name}!",
+            description=f"You failed to steal a {get_emoji(chosen_type.lower() + 'cat')} {chosen_type}  cat from {target.name}!",
             color=Colors.red
         )
         await interaction.followup.send(embed=embed)
@@ -7576,35 +7621,43 @@ async def catch_tip(message: discord.Interaction):
     )
 
 
-async def catch(message: discord.Interaction, msg: discord.Message):
-    perms = await fetch_perms(message)
-    if not perms.attach_files:
-        await message.response.send_message("i cant attach files here!", ephemeral=True)
-        return
-    if message.user.id in catchcooldown and catchcooldown[message.user.id] + 6 > time.time():
-        await message.response.send_message("your phone is overheating bro chill", ephemeral=True)
-        return
-    await message.response.defer()
+async def catch(interaction: discord.Interaction, msg: discord.Message):
+    user = interaction.user
+    now = time.time()
 
+    # Cooldown check first
+    if user.id in catchcooldown and catchcooldown[user.id] + 6 > now:
+        await interaction.response.send_message("your phone is overheating bro chill", ephemeral=True)
+        return
+
+    catchcooldown[user.id] = now  # immediately update cooldown
+
+    perms = await fetch_perms(interaction)
+    if not perms.attach_files:
+        await interaction.response.send_message("i cant attach files here!", ephemeral=True)
+        return
+
+    # Defer response right away (so Discord doesn't timeout)
+    await interaction.response.defer(thinking=True)
+
+    # Run image conversion in a thread pool
     event_loop = asyncio.get_event_loop()
     result = await event_loop.run_in_executor(None, msg2img.msg2img, msg)
 
-    await message.followup.send("cought in 4k", file=result)
+    await interaction.followup.send("caught in 4k", file=result)
+    await achemb(interaction, "4k", "send")
 
-    catchcooldown[message.user.id] = time.time()
-
-    await achemb(message, "4k", "send")
-
-    if msg.author.id == bot.user.id and "cought in 4k" in msg.content:
-        await achemb(message, "8k", "send")
+    if msg.author.id == bot.user.id and "caught in 4k" in msg.content:
+        await achemb(interaction, "8k", "send")
 
     try:
-        is_cat = (await Channel.get_or_none(channel_id=message.channel.id)).cat
+        is_cat = (await Channel.get_or_none(channel_id=interaction.channel.id)).cat
     except Exception:
         is_cat = False
 
     if int(is_cat) == int(msg.id):
-        await achemb(message, "not_like_that", "send")
+        await achemb(interaction, "not_like_that", "send")
+
 
 
 @bot.tree.command(description="View the leaderboards")
