@@ -3446,9 +3446,9 @@ class AdminPanel(discord.ui.View):
     async def give_cats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Give Cats", self.guild))
         
-    @discord.ui.button(label="Start Rain", style=ButtonStyle.blurple)
-    async def start_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(AdminPanelModal("Start Rain", interaction.guild))
+    @discord.ui.button(label="Give Rains", style=ButtonStyle.blurple)
+    async def give_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Give Rains", interaction.guild))
         
     @discord.ui.button(label="Give XP", style=ButtonStyle.blurple)
     async def give_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -3480,27 +3480,14 @@ async def admin(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=AdminPanel(guild=interaction.guild), ephemeral=True)
 
-async def start_rain(channel, duration):
+async def give_rain(channel, duration):
     # Remember the channel for rain
     channel_data = await Channel.get_or_create(channel_id=channel.id)
     channel_data.cat_rains += 1
     await channel_data.save()
-    
-    await channel.send("☔ A rain has started! Cats will spawn frequently!")
-    
-    # Increase spawn rate for the duration
-    end_time = time.time() + duration
-    while time.time() < end_time:
-        try:
-            if random.random() < 0.8:  # 80% chance to spawn each cycle
-                await spawn_cat(channel, force_spawn=True)
-        except Exception as e:
-            print(f"Error during rain spawn: {e}")
-            continue
-            
-        await asyncio.sleep(10)  # Wait 10 seconds between spawns
-    
-    await channel.send("The rain has stopped!")
+    channel.message = await channel.send(f"🌧️")
+    user.global_rain_minutes += amount
+    await user.save()
 
 @bot.tree.command(description="(ADMIN) Start a cat giveaway")
 @discord.app_commands.describe(
@@ -4251,7 +4238,7 @@ __Highlighted Stat__
 async def rain(message: discord.Interaction):
     user = await User.get_or_create(user_id=message.user.id)
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-    user.rain_minutes = 10
+    user.rain_minutes = 0
     if not user.rain_minutes:
         user.rain_minutes = 0
         await user.save()
@@ -4270,8 +4257,7 @@ async def rain(message: discord.Interaction):
         title="☔ Cat Rains",
         description=f"""Cat Rains are power-ups which spawn cats instantly for a limited amounts of time in channel of your choice.
 
-You can get those by buying them at our [store](<https://catbot.shop>) or by winning them in an event.
-This bot is developed by a single person so buying one would be very appreciated.
+You can get those by buying them at the [store](<https://catbot.shop>) or by winning them in an event.
 As a bonus, you will get access to /editprofile command!
 Fastest times are not saved during rains.
 
@@ -4284,12 +4270,12 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
         def __init__(self, type):
             super().__init__(
                 title="Start a Cat Rain!",
-                timeout=3600,
+                timeout=36000,
             )
 
             self.input = discord.ui.TextInput(
                 min_length=1,
-                max_length=2,
+                max_length=10,
                 label="Duration in minutes",
                 style=discord.TextStyle.short,
                 required=True,
