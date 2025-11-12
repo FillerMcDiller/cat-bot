@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from typing import Literal, Optional, Union
 
 import aiohttp
@@ -71,6 +72,7 @@ type_dict = {
     "Baby": 230,
     "Epic": 200,
     "Sus": 175,
+    "Zombie": 160,
     "Brave": 150,
     "Rickroll": 125,
     "Reverse": 100,
@@ -79,18 +81,124 @@ type_dict = {
     "Legendary": 35,
     "Mythic": 25,
     "8bit": 20,
+    "Chef": 18,
     "Jamming": 17,
     "Corrupt": 15,
     "Professor": 10,
     "Water": 8.5,
+    "Fire": 8.5,
+    "Candy": 8,
     "Divine": 8,
+    "Alien": 6,
     "Real": 5,
     "Ultimate": 3,
     "eGirl": 2,
+    "TV": 1,
+    "Donut": 0.5,
 }
 
 # this list stores unique non-duplicate cattypes
 cattypes = list(type_dict.keys())
+
+# A small list of sample cat names for naming individual cats
+cat_names = [
+    "Mittens",
+    "Whiskers",
+    "Bella",
+    "Luna",
+    "Oliver",
+    "Simba",
+    "Chloe",
+    "Leo",
+    "Loki",
+    "Milo",
+    "Coco",
+    "Nala",
+    "Oscar",
+    "Gizmo",
+    "Pumpkin",
+    "Socks",
+    "Pepper",
+    "Ginger",
+    "Poppy",
+    "Toby",
+]
+
+# Persistent per-user cat instances storage (simple JSON file to avoid DB migrations)
+CAT_DB_PATH = "data/cats.json"
+
+
+def _ensure_cat_db() -> dict:
+    try:
+        os.makedirs(os.path.dirname(CAT_DB_PATH), exist_ok=True)
+    except Exception:
+        pass
+    if not os.path.exists(CAT_DB_PATH):
+        with open(CAT_DB_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        return {}
+    try:
+        with open(CAT_DB_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_cat_db(data: dict):
+    try:
+        os.makedirs(os.path.dirname(CAT_DB_PATH), exist_ok=True)
+    except Exception:
+        pass
+    with open(CAT_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def get_user_cats(guild_id: int, user_id: int) -> list:
+    db = _ensure_cat_db()
+    return db.get(str(guild_id), {}).get(str(user_id), [])
+
+
+def save_user_cats(guild_id: int, user_id: int, cats: list):
+    db = _ensure_cat_db()
+    db.setdefault(str(guild_id), {})[str(user_id)] = cats
+    _save_cat_db(db)
+
+
+async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
+    """Create `amount` cat instances for the given profile and increment aggregated counts.
+
+    Each instance: {id, type, name, bond, hp, dmg, acquired_at}
+    """
+    try:
+        guild_id = profile.guild_id
+        user_id = profile.user_id
+    except Exception:
+        return
+
+    cats = get_user_cats(guild_id, user_id)
+    for _ in range(amount):
+        cid = uuid.uuid4().hex[:8]
+        base_value = type_dict.get(cat_type, 100)
+        instance = {
+            "id": cid,
+            "type": cat_type,
+            "name": random.choice(cat_names),
+            "bond": 0,
+            "hp": max(1, math.ceil(base_value / 10)),
+            "dmg": max(1, math.ceil(base_value / 50)),
+            "acquired_at": int(time.time()),
+        }
+        cats.append(instance)
+
+    save_user_cats(guild_id, user_id, cats)
+
+    # keep aggregated DB counters in sync
+    try:
+        profile[f"cat_{cat_type}"] += amount
+        await profile.save()
+    except Exception:
+        pass
+
 
 # Global tracking variables
 RAIN_CHANNELS = {}  # Tracks active rain events
@@ -1183,32 +1291,72 @@ async def maintaince_loop():
                     # Battlepass XP reward (scaled)
                     base_xp = random.randint(100, 500)
                     xp = max(1, int(base_xp * multiplier))
+                    level_embeds = []
+                    level_complete = False
                     if profile:
                         old_xp = profile.progress or 0
                         current_xp = old_xp + xp
-                        
-                        # Check for level ups using same logic as progress function
-                        level_complete = False
+
+                        # Determine current level data
                         if profile.battlepass >= len(battle["seasons"][str(profile.season)]):
                             level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
                         else:
                             level_data = battle["seasons"][str(profile.season)][profile.battlepass]
-                            
+
+                        # Handle level ups and award rewards similar to progress()
                         if current_xp >= level_data["xp"]:
                             xp_progress = current_xp
                             while xp_progress >= level_data["xp"]:
+                                # award this level's reward
+                                active_level_data = level_data
                                 profile.battlepass += 1
-                                xp_progress -= level_data["xp"]
+                                xp_progress -= active_level_data["xp"]
+
+                                # Apply reward (profile-level packs/cats; global_user holds rain minutes)
+                                try:
+                                    if active_level_data["reward"] == "Rain":
+                                        global_user.rain_minutes += active_level_data["amount"]
+                                        await global_user.save()
+                                    elif active_level_data["reward"] in [p["name"] for p in pack_data]:
+                                        pack_name = active_level_data["reward"]
+                                        profile[f"pack_{pack_name.lower()}"] += active_level_data["amount"]
+                                    elif active_level_data["reward"] in cattypes:
+                                        profile[f"cat_{active_level_data["reward"]}"] += active_level_data["amount"]
+                                except Exception:
+                                    pass
+
+                                # Build a small embed announcing the level up
+                                try:
+                                    if active_level_data["reward"] == "Rain":
+                                        description = f"You got ☔ {active_level_data['amount']}m of Rain"
+                                    elif active_level_data["reward"] in cattypes:
+                                        description = f"You got {get_emoji(active_level_data['reward'].lower() + 'cat')} {active_level_data['amount']} {active_level_data['reward']}!"
+                                    else:
+                                        description = f"You got a {get_emoji(active_level_data['reward'].lower() + 'pack')} {active_level_data['reward']} pack! Do /packs to open it!"
+                                    title = f"Level {profile.battlepass} Complete!"
+                                    embed_level_up = discord.Embed(title=title, description=description, color=Colors.yellow)
+                                    level_embeds.append(embed_level_up)
+                                except Exception:
+                                    pass
+
+                                # advance to the next level data
                                 if profile.battlepass >= len(battle["seasons"][str(profile.season)]):
                                     level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
                                 else:
                                     level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+
                                 level_complete = True
+
                             profile.progress = xp_progress
                         else:
                             profile.progress = current_xp
-                        
-                        await profile.save()
+
+                        # persist profile changes (cats/packs/progress/levels)
+                        try:
+                            await profile.save()
+                        except Exception:
+                            pass
+
                     reward_text = f"⚔️ Your {cat_sent} trained hard and brought back **{xp}** battlepass XP!"
                     if level_complete:
                         reward_text += f"\n🎉 You leveled up to level {profile.battlepass}!"
@@ -1221,13 +1369,25 @@ async def maintaince_loop():
                     # choose a cat type biased by type_dict
                     cat_type = random.choices(cattypes, weights=type_dict.values())[0]
                     if profile:
-                        profile[f"cat_{cat_type}"] += amount
-                        # restore the adventuring cat
+                        # create individual cat instances and keep aggregated counters in sync
                         try:
-                            profile[f"cat_{cat_sent}"] += 1
+                            await add_cat_instances(profile, cat_type, amount)
                         except Exception:
-                            pass
-                        await profile.save()
+                            # fallback: update aggregated count
+                            try:
+                                profile[f"cat_{cat_type}"] += amount
+                                await profile.save()
+                            except Exception:
+                                pass
+                        # restore the adventuring cat as an instance as well
+                        try:
+                            await add_cat_instances(profile, cat_sent, 1)
+                        except Exception:
+                            try:
+                                profile[f"cat_{cat_sent}"] += 1
+                                await profile.save()
+                            except Exception:
+                                pass
                     reward_text = f"🎁 Your {cat_sent} returned with **{amount}x {cat_type}** cat(s)!"
                     embed.description = reward_text
                 else:
@@ -3539,9 +3699,11 @@ async def give_rain(channel, duration):
     channel_data = await Channel.get_or_create(channel_id=channel.id)
     channel_data.cat_rains += 1
     await channel_data.save()
-    channel.message = await channel.send(f"🌧️")
-    user.global_rain_minutes += amount
-    await user.save()
+    # Notify the channel that a rain event has started
+    try:
+        await channel.send("🌧️ A Cat Rain has started in this channel!")
+    except Exception:
+        pass
 
 @bot.tree.command(description="(ADMIN) Start a cat giveaway")
 @discord.app_commands.describe(
@@ -3823,7 +3985,11 @@ async def last(message: discord.Interaction):
 
 @bot.tree.command(description="View all the juicy numbers behind cat types")
 async def catalogue(message: discord.Interaction):
-    embed = discord.Embed(title=f"{get_emoji('staring_cat')} The Catalogue", color=Colors.brown)
+    # Build a list of fields first, then paginate into embeds of at most 25 fields (Discord limit)
+    await message.response.defer()
+
+    fields = []
+    total_weight = sum(type_dict.values())
     for cat_type in cattypes:
         in_server = await Profile.sum(f"cat_{cat_type}", f'guild_id = $1 AND "cat_{cat_type}" > 0', message.guild.id)
         title = f"{get_emoji(cat_type.lower() + 'cat')} {cat_type}"
@@ -3831,14 +3997,119 @@ async def catalogue(message: discord.Interaction):
             in_server = 0
             title = f"{get_emoji('mysterycat')} ???"
 
-        title += f" ({round((type_dict[cat_type] / sum(type_dict.values())) * 100, 2)}%)"
+        title += f" ({round((type_dict[cat_type] / total_weight) * 100, 2)}%)"
+        value = f"{round(total_weight / type_dict[cat_type], 2)} value\n{in_server:,} in this server"
+        fields.append((title, value))
 
-        embed.add_field(
-            name=title,
-            value=f"{round(sum(type_dict.values()) / type_dict[cat_type], 2)} value\n{in_server:,} in this server",
-        )
+    # chunk into pages of 25 fields
+    page_size = 25
+    chunks = [fields[i : i + page_size] for i in range(0, len(fields), page_size)]
 
-    await message.response.send_message(embed=embed)
+    def make_embed(page_index: int) -> discord.Embed:
+        embed = discord.Embed(title=f"{get_emoji('staring_cat')} The Catalogue", color=Colors.brown)
+        for name, val in chunks[page_index]:
+            embed.add_field(name=name, value=val)
+        embed.set_footer(text=f"Page {page_index + 1}/{len(chunks)}")
+        return embed
+
+    # If only one page, send it and return
+    if len(chunks) == 1:
+        await message.followup.send(embed=make_embed(0))
+        return
+
+    # Otherwise create a View with Prev/Next buttons
+    class CatalogueView(View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=VIEW_TIMEOUT)
+            self.page = 0
+            self.author_id = author_id
+
+        @discord.ui.button(label="◀ Prev", style=ButtonStyle.secondary)
+        async def prev_button(self, interaction: discord.Interaction, button: Button):
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message("Only the command author can change pages.", ephemeral=True)
+                return
+            self.page = (self.page - 1) % len(chunks)
+            await interaction.response.edit_message(embed=make_embed(self.page), view=self)
+
+        @discord.ui.button(label="Next ▶", style=ButtonStyle.secondary)
+        async def next_button(self, interaction: discord.Interaction, button: Button):
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message("Only the command author can change pages.", ephemeral=True)
+                return
+            self.page = (self.page + 1) % len(chunks)
+            await interaction.response.edit_message(embed=make_embed(self.page), view=self)
+
+    view = CatalogueView(author_id=message.user.id)
+    await message.followup.send(embed=make_embed(0), view=view)
+
+
+@bot.tree.command(name="catpedia", description="Show detailed information about a cat (Catpedia)")
+@discord.app_commands.describe(catname="Name of the cat type to view")
+async def catpedia(message: discord.Interaction, catname: str):
+    """Show detailed information about a specific cat type.
+
+    Displays: Name, image (if available), rarity (%), value, base HP, base DMG, and a short fun description.
+    """
+    await message.response.defer()
+
+    # Normalize lookup to be case-insensitive
+    match = None
+    for ct in cattypes:
+        if ct.lower() == catname.lower():
+            match = ct
+            break
+
+    if not match:
+        # allow partial matches
+        for ct in cattypes:
+            if catname.lower() in ct.lower():
+                match = ct
+                break
+
+    if not match:
+        await message.followup.send(f"Couldn't find a cat named '{catname}'. Try /catalogue to see available types.")
+        return
+
+    # Build embed data
+    total_weight = sum(type_dict.values())
+    rarity_pct = round((type_dict.get(match, 0) / total_weight) * 100, 2) if total_weight else 0
+    value = round(total_weight / type_dict.get(match, 1), 2) if type_dict.get(match, 0) else "N/A"
+
+    # Base stats placeholders — adjust as you design combat balancing
+    base_hp = math.ceil(type_dict.get(match, 100) / 10)  # example formula
+    base_dmg = max(1, math.ceil(type_dict.get(match, 100) / 50))
+
+    # Image path: tries images/spawn/<lower>_cat.png, else fallback to images/<lower>.png
+    img_path = None
+    try_paths = [f"images/spawn/{match.lower()}_cat.png", f"images/{match.lower()}.png", f"images/{match.lower()}.jpg"]
+    for p in try_paths:
+        if os.path.exists(p):
+            img_path = p
+            break
+
+    desc = (
+        f"A {match} cat. {random.choice(['Loves napping in cardboard boxes.', 'Has an uncanny ability to find sunny spots.', 'May stare at you for hours without blinking.', 'Has a taste for shiny objects.'])} "
+        f"{random.choice(['A friendly companion.', 'A feisty fighter.', 'Rarely shares toys.', 'Perfect for discerning collectors.'])}"
+    )
+
+    embed = discord.Embed(title=f"{get_emoji(match.lower() + 'cat')} {match}", color=Colors.brown)
+    embed.add_field(name="Rarity", value=f"{rarity_pct}%")
+    embed.add_field(name="Value", value=f"{value}")
+    embed.add_field(name="Base HP", value=str(base_hp))
+    embed.add_field(name="Base DMG", value=str(base_dmg))
+    embed.add_field(name="Description", value=desc, inline=False)
+
+    if img_path:
+        try:
+            file = discord.File(img_path, filename=os.path.basename(img_path))
+            embed.set_image(url=f"attachment://{os.path.basename(img_path)}")
+            await message.followup.send(embed=embed, file=file)
+            return
+        except Exception:
+            pass
+
+    await message.followup.send(embed=embed)
 
 
 async def gen_stats(profile, star):

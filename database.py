@@ -55,6 +55,13 @@ class Profile(catpg.Model):
         "cat_Real",
         "cat_Ultimate",
         "cat_eGirl",
+        "cat_Chef",  # Added for Chef cat
+        "cat_Fire",  # Added for Fire cat
+        "cat_Alien",  # Added for Alien cat
+        "cat_Zombie",  # Added for Zombie cat
+        "cat_TV",  # Added for TV cat
+        "cat_Candy",  # Added for Candy cat
+        "cat_Donut",  # Added for Donut cats
         "last_steal",  # Added for stealing cooldown
     ]
 
