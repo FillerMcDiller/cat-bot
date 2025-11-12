@@ -102,6 +102,7 @@ CREATE TABLE public.profile (
     "cat_Professor" integer DEFAULT 0,
     "cat_Divine" integer DEFAULT 0,
     "cat_Real" integer DEFAULT 0,
+    "cat_Zombie" integer DEFAULT 0,
     "cat_Ultimate" integer DEFAULT 0,
     "cat_eGirl" integer DEFAULT 0,
     first boolean DEFAULT false,
