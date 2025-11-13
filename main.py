@@ -6885,7 +6885,8 @@ async def steal(interaction: discord.Interaction, target: discord.User):
         "Mythic": 3,
         "Ultimate": 2,
         "Professor": 1,
-        "eGirl": 1
+        "eGirl": 1,
+        "Donut": 0.25,
     }.get(chosen_type, 50)
 
     success = random.randint(1, 100) <= base_chance
