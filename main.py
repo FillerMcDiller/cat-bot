@@ -1730,8 +1730,17 @@ async def maintaince_loop():
                     except Exception:
                         pass
 
+                # Load active buffs (luck/xp) for this user so we can bias adventure rewards
+                try:
+                    buffs = get_active_buffs(guild_id or 0, user_id)
+                    luck_mult = float(buffs.get("luck", 0)) if buffs else 0
+                except Exception:
+                    luck_mult = 0
+
                 # Rare lucky reward
-                if random.randint(1, 500) == 1:
+                # base jackpot probability ~ 1/500; scale up slightly with luck_mult
+                base_jackpot_prob = 1.0 / 500.0
+                if random.random() < base_jackpot_prob * (1 + luck_mult):
                     # jackpot: give a legendary cat and 60 rain minutes
                     rare_cat = random.choice([c for c in cattypes if c in ["Legendary", "Mythic", "Divine"]])
                     if profile:
@@ -1757,9 +1766,10 @@ async def maintaince_loop():
                                 await profile.save()
                             except Exception:
                                 pass
-                    global_user.rain_minutes += int(60 * multiplier)
+                    # award extra rain scaled by luck
+                    global_user.rain_minutes += int(60 * multiplier * (1 + luck_mult))
                     await global_user.save()
-                    reward_text = f"🌟 Your {cat_sent} returned with a **{rare_cat}** cat and brought **{int(60 * multiplier)}** rain minutes!"
+                    reward_text = f"🌟 Your {cat_sent} returned with a **{rare_cat}** cat and brought **{int(60 * multiplier * (1 + luck_mult))}** rain minutes!"
                     embed.description = reward_text
                 elif roll < 0.45:
                     # Battlepass XP reward (scaled)
@@ -1847,6 +1857,11 @@ async def maintaince_loop():
                     # Cats reward (scaled amount and possibly better cats)
                     base_amount = random.randint(1, 3)
                     amount = max(1, int(base_amount * multiplier))
+                    # apply luck to increase the number of cats returned
+                    try:
+                        amount = max(1, int(amount * (1 + luck_mult)))
+                    except Exception:
+                        pass
                     amount = min(amount, 10)
                     # choose a cat type biased by type_dict
                     cat_type = random.choices(cattypes, weights=type_dict.values())[0]
@@ -1878,6 +1893,11 @@ async def maintaince_loop():
                 elif roll < 0.95:
                     # Kibble reward (small, scaled)
                     kibble_amt = max(1, int(round(10 * multiplier * random.random())))
+                    # apply luck to kibble amount
+                    try:
+                        kibble_amt = int(round(kibble_amt * (1 + luck_mult)))
+                    except Exception:
+                        pass
                     if profile:
                         try:
                             profile.kibble += kibble_amt
@@ -1902,7 +1922,8 @@ async def maintaince_loop():
                 else:
                     # Rain minutes (scaled)
                     base_minutes = random.randint(5, 30)
-                    minutes = max(1, int(base_minutes * multiplier))
+                    # apply luck to rain minutes as well
+                    minutes = max(1, int(base_minutes * multiplier * (1 + luck_mult)))
                     global_user.rain_minutes += minutes
                     await global_user.save()
                     # restore adventuring instance if present
