@@ -243,6 +243,7 @@ CREATE TABLE public.profile (
     highlighted_stat character varying(30) DEFAULT 'time_records'::character varying,
     puzzle_pieces integer DEFAULT 0,
     cookies bigint DEFAULT 0,
+    kibble bigint DEFAULT 0,
     cookieclicker boolean DEFAULT false,
     cookiesclicked boolean DEFAULT false,
     event_rain_points integer DEFAULT 0,

@@ -63,6 +63,7 @@ class Profile(catpg.Model):
         "cat_Candy",  # Added for Candy cat
         "cat_Donut",  # Added for Donut cats
         "last_steal",  # Added for stealing cooldown
+        "kibble",
     ]
 
 
