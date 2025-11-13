@@ -217,10 +217,20 @@ def _paginate_lines(lines: list[str], per_page: int = 15) -> list[str]:
     return pages
 
 
-def send_paginated_embed(interaction: discord.Interaction, title: str, pages: list[str], color=Colors.brown, footer: str = None, ephemeral: bool = True, locked: bool = False):
+def send_paginated_embed(interaction: discord.Interaction, title: str, pages: list[str], color=None, footer: str = None, ephemeral: bool = True, locked: bool = False):
     """Send a paginated embed with Prev/Next buttons. `pages` is a list of strings for each page body."""
     if not pages:
         return
+
+    # Resolve default color lazily so this function can be defined before Colors exists
+    if color is None:
+        try:
+            color = Colors.brown
+        except Exception:
+            try:
+                color = discord.Colour.from_str("#6E593C")
+            except Exception:
+                color = discord.Colour.dark_grey
 
     class Pager(View):
         def __init__(self, pages, author_id: int):
