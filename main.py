@@ -10966,6 +10966,12 @@ async def recieve_vote(request):
     except Exception:
         pass
 
+    # Log the vote to the central cat log channel (best-effort)
+    try:
+        asyncio.create_task(log_vote_to_channel(int(request_json["user"]), source="aiohttp"))
+    except Exception:
+        pass
+
     return web.Response(text="ok", status=200)
 
 
@@ -11298,6 +11304,11 @@ async def handle_vote(vote: dict):
         asyncio.create_task(reward_vote(int(user_id)))
     except Exception:
         pass
+    # also log to the central cat log channel so staff can see votes
+    try:
+        asyncio.create_task(log_vote_to_channel(int(user_id), source="fastapi"))
+    except Exception:
+        pass
     # Example: give a role, send a DM, etc.
     # user = await bot.fetch_user(user_id)
     # await user.send("Thanks for voting!")
@@ -11433,4 +11444,40 @@ async def reward_vote(user_id: int):
         except Exception:
             # per-guild failure shouldn't stop others
             continue
+
+
+async def log_vote_to_channel(user_id: int, source: str = "unknown"):
+    """Send a short log message to the configured cat log channel (uses RAIN_CHANNEL_ID).
+
+    This is intentionally defensive: it won't raise if the channel is missing or the bot
+    lacks permissions.
+    """
+    try:
+        chan_id = int(getattr(config, "RAIN_CHANNEL_ID", 0) or 0)
+        if not chan_id:
+            return
+        ch = None
+        try:
+            ch = bot.get_channel(chan_id)
+        except Exception:
+            ch = None
+        if ch is None:
+            try:
+                ch = await bot.fetch_channel(chan_id)
+            except Exception:
+                ch = None
+        if ch is None:
+            return
+
+        text = f"Vote received: <@{user_id}> (ID: {user_id}) — source: {source}"
+        try:
+            await ch.send(text)
+        except Exception:
+            # fallback: attempt to send a shorter message
+            try:
+                await ch.send(f"Vote received: {user_id} — {source}")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
