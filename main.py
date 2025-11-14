@@ -912,12 +912,12 @@ async def setup_hook():
     bot.loop.create_task(background_index_all_cats())
     # start internal HTTP endpoint to receive forwarded votes from external webhook process
     try:
-        # Prefer environment override from launcher (BOT_INTERNAL_PORT), fallback to config or default 3002
+        # Prefer environment override from launcher (BOT_INTERNAL_PORT), fallback to config or default 3001
         env_port = os.getenv("BOT_INTERNAL_PORT")
         if env_port:
             internal_port = int(env_port)
         else:
-            internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3002)
+            internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3001)
 
         # avoid accidentally starting internal server on the same port as the public webhook
         webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
@@ -937,7 +937,7 @@ async def setup_hook():
 bot.setup_hook = setup_hook
 
 
-async def start_internal_server(port: int = 3002):
+async def start_internal_server(port: int = 3001):
     """Start a small internal aiohttp server on localhost that accepts POST /_internal_vote
 
     This endpoint is intended to be called by the external `webhook_server.py` process which

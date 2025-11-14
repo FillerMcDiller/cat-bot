@@ -18,6 +18,7 @@ import asyncio
 import importlib
 import time
 import logging
+import os
 
 import discord
 import winuvloop
@@ -27,6 +28,8 @@ import config
 from config import TOKEN
 import database
 import catpg
+
+from webhook import start_webhook_thread  # <- your webhook integration
 
 winuvloop.install()
 
@@ -45,8 +48,6 @@ bot = commands.AutoShardedBot(
 async def setup_hook():
     await database.connect()
     await bot.load_extension("main")
-    # webhook process will be started by the launcher before bot.run
-
 
 async def reload(reload_db):
     try:
@@ -60,46 +61,33 @@ async def reload(reload_db):
         await database.connect()
     await bot.load_extension("main")
 
-
 bot.cat_bot_reload_hook = reload  # pyright: ignore
 
-def _start_webhook_process():
-    # Launch webhook_server.py in a new console so you get two terminals when running `python bot.py`.
-    import subprocess, sys, os
 
-    python = sys.executable
-    script = os.path.join(os.path.dirname(__file__), "webhook_server.py")
-    env = os.environ.copy()
-    env["WEBHOOK_PORT"] = str(getattr(config, "WEBHOOK_PORT", 3001) or 3001)
-    if getattr(config, "WEBHOOK_VERIFY", None):
-        env["WEBHOOK_VERIFY"] = str(getattr(config, "WEBHOOK_VERIFY"))
-    # choose internal port (bot listens here); avoid collision with webhook port
-    configured_internal = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 0)
-    webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
-    if configured_internal and configured_internal != 0:
-        internal_port = configured_internal
-    else:
-        internal_port = 3002
-    # if internal port collides with webhook port, bump it
-    if internal_port == webhook_port:
-        internal_port = webhook_port + 1
-        logging.warning("INTERNAL_WEBHOOK_PORT conflicted with WEBHOOK_PORT; using %s instead", internal_port)
+async def main():
+    loop = asyncio.get_event_loop()
 
-    env["BOT_INTERNAL_PORT"] = str(internal_port)
+    # Start the webhook on port 3001
+    webhook_auth = getattr(config, "WEBHOOK_VERIFY", "passtest")
+    start_webhook_thread(loop, reward_coro=reward_vote, port=3001, auth=webhook_auth)
 
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_CONSOLE
+    # Run the Discord bot
+    await bot.start(TOKEN)
 
+async def reward_vote(user_id: int):
+    """
+    This coroutine is called whenever a vote is received.
+    """
     try:
-        subprocess.Popen([python, script], env=env, creationflags=creationflags)
+        logging.info("Vote received from user %s!", user_id)
+        # Put your vote reward logic here
+        await asyncio.sleep(0.1)  # placeholder for async DB or other operations
     except Exception:
-        logging.exception("Failed to spawn webhook process")
+        logging.exception("Error rewarding vote for user %s", user_id)
 
-try:
+if __name__ == "__main__":
     config.HARD_RESTART_TIME = time.time()
-    # Spawn webhook console window before running the bot so you have two terminals.
-    _start_webhook_process()
-    bot.run(config.TOKEN)
-finally:
-    asyncio.run(database.close())
+    try:
+        asyncio.run(main())
+    finally:
+        asyncio.run(database.close())
