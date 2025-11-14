@@ -6,14 +6,7 @@ import asyncio
 from fastapi import FastAPI, Request
 
 
-def start_webhook_thread(loop: asyncio.AbstractEventLoop, reward_coro, port: int = 3001, auth: str | None = None):
-    """Start a FastAPI webhook server in a background thread.
-
-    - `loop`: the asyncio event loop where `reward_coro` should be executed.
-    - `reward_coro`: a coroutine function taking a single user_id: int.
-    - `port`: TCP port to listen on.
-    - `auth`: optional header value for `Authorization` to validate incoming requests.
-    """
+def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, auth: str | None = None):
     app = FastAPI()
 
     @app.post("/dblwebhook")
@@ -27,16 +20,29 @@ def start_webhook_thread(loop: asyncio.AbstractEventLoop, reward_coro, port: int
         except Exception:
             return {"error": "invalid payload"}, 400
 
-        try:
-            # schedule the reward coroutine on the provided loop
-            asyncio.run_coroutine_threadsafe(reward_coro(user_id), loop)
-        except Exception:
+        # If we were given a reward coroutine and loop, schedule it; otherwise just log
+        if reward_coro and loop:
             try:
-                logging.exception("Failed to schedule reward coroutine for vote")
+                asyncio.run_coroutine_threadsafe(reward_coro(user_id), loop)
             except Exception:
-                pass
+                try:
+                    logging.exception("Failed to schedule reward coroutine for vote")
+                except Exception:
+                    pass
+        else:
+            logging.info("Vote received for user %s (no reward handler attached)", user_id)
 
         return {"status": "ok"}
+
+    return app
+
+
+def start_webhook_thread(loop: asyncio.AbstractEventLoop, reward_coro, port: int = 3001, auth: str | None = None):
+    """Start a FastAPI webhook server in a background thread.
+
+    The webhook will schedule `reward_coro(user_id)` on `loop` when votes arrive.
+    """
+    app = _make_app(reward_coro=reward_coro, loop=loop, auth=auth)
 
     def _run_uvicorn():
         while True:
@@ -53,3 +59,13 @@ def start_webhook_thread(loop: asyncio.AbstractEventLoop, reward_coro, port: int
     t = threading.Thread(target=_run_uvicorn, daemon=True)
     t.start()
     return t
+
+
+if __name__ == "__main__":
+    # allow running standalone for manual testing: uses config via env if present
+    import os
+
+    port = int(os.getenv("WEBHOOK_PORT", "3001"))
+    auth = os.getenv("WEBHOOK_VERIFY")
+    app = _make_app(reward_coro=None, loop=None, auth=auth)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

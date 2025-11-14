@@ -50,7 +50,9 @@ async def setup_hook():
     try:
         import main as main_module
         import webhook_server
-        webhook_server.start_webhook_thread(bot.loop, main_module.reward_vote, port=3001, auth=getattr(config, "WEBHOOK_VERIFY", None))
+        port = getattr(config, "WEBHOOK_PORT", None) or int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
+        auth = getattr(config, "WEBHOOK_VERIFY", None)
+        webhook_server.start_webhook_thread(bot.loop, main_module.reward_vote, port=port, auth=auth)
     except Exception:
         logging.exception("Failed to start webhook server")
 
