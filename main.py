@@ -62,7 +62,8 @@ import os
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "aches.json", "battlepass.json")
 
 with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-    # your code here
+    ACHIEVEMENTS = load.json(f)
+    BATTLEPASS = load.json(f)
 
     
 # trigger warning, base64 encoded for your convinience
