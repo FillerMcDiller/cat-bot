@@ -22,10 +22,10 @@ DB_PASS = os.environ["DBPASS"] = "cat"
 BACKUP_ID = 1436486865489236299
 
 # top.gg vote webhook verification key, setting this to None disables all voting stuff
-WEBHOOK_VERIFY = None
+WEBHOOK_VERIFY = os.getenv("WEBHOOK_VERIFY")  
 
 # top.gg api token to occasionally post stats
-TOP_GG_TOKEN = None
+TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN")
 
 # only post stats if server count is above this, to prevent wrong stats
 MIN_SERVER_SEND = 100_000

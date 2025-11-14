@@ -1,5 +1,5 @@
-# Cat Bot - A Discord bot about catching cats.
-# Copyright (C) 2025 Lia Milenakos & Cat Bot Contributors
+# KITTAYYYYYYY - A Discord bot about catching cats.
+# Copyright (C) 2025 Lia Milenakos & KITTAYYYYYYY Contributors
 # -*- coding: utf-8 -*-
 #
 # This program is free software: you can redistribute it and/or modify
@@ -43,6 +43,8 @@ from discord import ButtonStyle
 from discord.ext import commands
 from discord.ui import Button, View
 from PIL import Image
+
+import topgg
 
 import config
 import msg2img
@@ -108,6 +110,11 @@ ITEM_PRICES = {
     "luck": {"I": 100, "II": 500, "III": 2500},
     "xp": {"I": 100, "II": 500, "III": 2500},
     "rains": {"I": 200, "II": 1000, "III": 5000},
+    # Toys (prices are per-item purchase; toys grant multiple 'uses' when bought)
+    "ball": {"I": 150, "II": 400, "III": 1200},
+    # Food
+    "dogtreat": {"I": 120},
+    "pancakes": {"I": 5000},
 }
 
 # Human-readable item definitions
@@ -134,6 +141,28 @@ SHOP_ITEMS = {
             "I": {"desc": "Gives 2 minutes of cat rains", "minutes": 2},
             "II": {"desc": "Gives 5 minutes of cat rains", "minutes": 5},
             "III": {"desc": "Gives 10 minutes of cat rains", "minutes": 10},
+        },
+    },
+    # Toys for cats — each purchased toy grants a number of uses (tracked as item count)
+    "ball": {
+        "title": "Cat Ball",
+        "tiers": {
+            "I": {"desc": "Good Ball — +5 bond per use (5 uses)", "uses": 5, "bond": 5},
+            "II": {"desc": "Great Ball — +10 bond per use (5 uses)", "uses": 5, "bond": 10},
+            "III": {"desc": "Superior Ball — +20 bond per use (5 uses)", "uses": 5, "bond": 20},
+        },
+    },
+    # Food items (one-time use)
+    "dogtreat": {
+        "title": "Dog Treat",
+        "tiers": {
+            "I": {"desc": "A tasty treat — +15 bond (one-time)", "bond": 15},
+        },
+    },
+    "pancakes": {
+        "title": "Pancakes",
+        "tiers": {
+            "I": {"desc": "Delicious pancakes — fully restores bond (one-time)", "bond": 100},
         },
     },
 }
@@ -507,6 +536,8 @@ async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
 RAIN_CHANNELS = {}  # Tracks active rain events
 active_adventures = {}  # Tracks active adventures
 active_reminders = {}  # Tracks active reminders
+# cooldown tracker for pet actions: key = (guild_id, user_id, instance_id) -> last_pet_ts
+pet_cooldowns = {}
 
 # generate a dict with lowercase'd keys
 cattype_lc_dict = {i.lower(): i for i in cattypes}
@@ -582,13 +613,19 @@ for i in prism_names_end:
         prism_names.append(j + i)
 
 vote_button_texts = [
-    "voting doesn't work with my bot, mb bro",
+    "vote please",
+    "click me to vote!",
+    "i need votes!",
+    "vote for kittay. kittay for president!",
+    "cool guys click here!",
+    "vote vote vote!",
+    "vote 4 kittay :P",
 ]
 
 # various hints/fun facts
 hints = [
-    "Cat Bot has a wiki! <https://wiki.minkos.lol>",
-    "Cat Bot is open source! <https://github.com/FillerMcDiller/cat-bot",
+    "KITTAYYYYYYY has a wiki! <https://wiki.minkos.lol>",
+    "KITTAYYYYYYY is open source! <https://github.com/FillerMcDiller/cat-bot>",
 ]
 
 import json, os
@@ -785,7 +822,7 @@ async def background_index_all_cats():
 funny = [
     "why did you click this this arent yours",
     "absolutely not",
-    "cat bot not responding, try again later",
+    "KITTAYYYYYYY not responding, try again later",
     "you cant",
     "can you please stop",
     "try again",
@@ -840,7 +877,7 @@ message_cooldown = {}
 
 # Command cooldowns
 catchcooldown = {}
-fakecooldown = {}# cat bot auto-claims in the channel user last ran /vote in
+fakecooldown = {}# KITTAYYYYYYY auto-claims in the channel user last ran /vote in
 # this is a failsafe to store the fact they voted until they ran that atleast once
 pending_votes = []
 
@@ -936,13 +973,13 @@ async def fetch_perms(message: discord.Message | discord.Interaction) -> discord
 
 # news stuff
 news_list = [
-    {"title": "Cat Bot Survey - win rains!", "emoji": "📜"},
+    {"title": "KITTAYYYYYYY Survey - win rains!", "emoji": "📜"},
     {"title": "New Cat Rains perks!", "emoji": "✨"},
-    {"title": "Cat Bot Christmas 2024", "emoji": "🎅"},
+    {"title": "KITTAYYYYYYY Christmas 2024", "emoji": "🎅"},
     {"title": "Battlepass Update", "emoji": "⬆️"},
     {"title": "Packs!", "emoji": "goldpack"},
-    {"title": "Message from CEO of Cat Bot", "emoji": "finecat"},
-    {"title": "Cat Bot Turns 3", "emoji": "🥳"},
+    {"title": "Message from CEO of KITTAYYYYYYY", "emoji": "finecat"},
+    {"title": "KITTAYYYYYYY Turns 3", "emoji": "🥳"},
     {"title": "100,000 SERVERS WHAT", "emoji": "🎉"},
     {"title": "Regarding recent instabilities", "emoji": "🗒️"},
     {"title": "NEW CATS, KIBBLE, AND.. ITEMS??? WOWOWOWOOWO!!!", "emoji": "🔥"},
@@ -1777,9 +1814,22 @@ async def maintaince_loop():
                             except Exception:
                                 pass
                     # award extra rain scaled by luck
-                    global_user.rain_minutes += int(60 * multiplier * (1 + luck_mult))
-                    await global_user.save()
-                    reward_text = f"🌟 Your {cat_sent} returned with a **{rare_cat}** cat and brought **{int(60 * multiplier * (1 + luck_mult))}** rain minutes!"
+                    minutes_awarded = int(60 * multiplier * (1 + luck_mult))
+                    try:
+                        if profile:
+                            profile.rain_minutes = (profile.rain_minutes or 0) + minutes_awarded
+                            await profile.save()
+                        else:
+                            global_user.rain_minutes = (global_user.rain_minutes or 0) + minutes_awarded
+                            await global_user.save()
+                    except Exception:
+                        # fallback to global user
+                        try:
+                            global_user.rain_minutes = (global_user.rain_minutes or 0) + minutes_awarded
+                            await global_user.save()
+                        except Exception:
+                            pass
+                    reward_text = f"🌟 Your {cat_sent} returned with a **{rare_cat}** cat and brought **{minutes_awarded}** rain minutes!"
                     embed.description = reward_text
                 elif roll < 0.45:
                     # Battlepass XP reward (scaled)
@@ -1934,8 +1984,20 @@ async def maintaince_loop():
                     base_minutes = random.randint(5, 30)
                     # apply luck to rain minutes as well
                     minutes = max(1, int(base_minutes * multiplier * (1 + luck_mult)))
-                    global_user.rain_minutes += minutes
-                    await global_user.save()
+                    minutes_awarded = max(1, int(base_minutes * multiplier * (1 + luck_mult)))
+                    try:
+                        if profile:
+                            profile.rain_minutes = (profile.rain_minutes or 0) + minutes_awarded
+                            await profile.save()
+                        else:
+                            global_user.rain_minutes = (global_user.rain_minutes or 0) + minutes_awarded
+                            await global_user.save()
+                    except Exception:
+                        try:
+                            global_user.rain_minutes = (global_user.rain_minutes or 0) + minutes_awarded
+                            await global_user.save()
+                        except Exception:
+                            pass
                     # restore adventuring instance if present
                     if inst:
                         try:
@@ -2012,7 +2074,7 @@ async def maintaince_loop():
         button = Button(
             emoji=get_emoji("topgg"),
             label=random.choice(vote_button_texts),
-            url="https://top.gg/bot/966695034340663367/vote",
+            url="https://top.gg/bot/1387305159264309399/vote",
         )
         view.add_item(button)
 
@@ -3267,7 +3329,7 @@ async def on_message(message: discord.Message):
                     button = Button(
                         emoji=get_emoji("topgg"),
                         label=random.choice(vote_button_texts),
-                        url="https://top.gg/bot/966695034340663367/vote",
+                        url="https://top.gg/bot/1387305159264309399/vote",
                     )
                 elif random.randint(0, 20) == 0:
                     button = Button(label="Join our Discord!", url="https://discord.gg/staring")
@@ -3580,14 +3642,14 @@ async def on_guild_join(guild):
             ch = guild.owner
 
     # you are free to change/remove this, its just a note for general user letting them know
-    unofficial_note = "**NOTE: This is an unofficial Cat Bot instance.**\n\n"
-    if not bot.user or bot.user.id == 966695034340663367:
+    unofficial_note = "**made by fillermcdiller <3**\n\n"
+    if not bot.user or bot.user.id == 1387305159264309399:
         unofficial_note = ""
     try:
         if ch.permissions_for(guild.me).send_messages:
             await ch.send(
                 unofficial_note
-                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/staring\nHave a nice day :)"
+                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/Zx6em4AEq2 \nHave a nice day/night :)"
             )
     except Exception:
         pass
@@ -3622,21 +3684,137 @@ async def help(message):
         )
         .add_field(
             name="Let's get funky!",
-            value='Cat Bot has various other mechanics to make fun funnier. You can collect various `/achievements`, for example saying "i read help", progress in the `/battlepass`, or have beef with the mafia over cataine addiction. The amount you worship is the limit!',
+            value='KITTAYYYYYYY has various other mechanics to make fun funnier. You can collect various `/achievements`, for example saying "i read help", progress in the `/battlepass`, or have beef with the mafia over cataine addiction. The amount you worship is the limit!',
             inline=False,
         )
         .add_field(
             name="Other features",
-            value="Cat Bot has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/staring).",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/staring).",
             inline=False,
         )
         .set_footer(
-            text=f"Cat Bot by Milenakos, {datetime.datetime.utcnow().year}",
+            text=f"KITTAYYYYYYY by FillerMcDiller, {datetime.datetime.utcnow().year}",
             icon_url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png",
         )
     )
 
-    await message.response.send_message(embeds=[embed1, embed2])
+    # Add a "List of Commands" button which opens a paginated command list
+    class HelpView(View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=VIEW_TIMEOUT)
+            self.author_id = author_id
+
+        @discord.ui.button(label="List of Commands", style=ButtonStyle.green)
+        async def list_commands(self, interaction2: discord.Interaction, button: Button):
+            if interaction2.user.id != self.author_id:
+                await do_funny(interaction2)
+                return
+            await interaction2.response.defer()
+
+            # Gather all application commands from the tree
+            cmds = []
+            try:
+                for c in bot.tree.walk_commands():
+                    # some commands may be groups, use name and description
+                    name = getattr(c, "name", None) or str(c)
+                    desc = getattr(c, "description", "") or "No description."
+                    # mark admin commands if description contains admin or command has default permissions
+                    is_admin = False
+                    try:
+                        if "admin" in desc.lower() or desc.strip().upper().startswith("(ADMIN)"):
+                            is_admin = True
+                    except Exception:
+                        pass
+                    cmds.append({"name": name, "desc": desc, "admin": is_admin})
+            except Exception:
+                # fallback: minimal manual list if tree walk fails
+                cmds = []
+
+            # Categorize commands heuristically
+            sections = {
+                "Admin": [],
+                "Economy": [],
+                "Cats": [],
+                "Fun": [],
+                "Gambling": [],
+                "Utility": [],
+                "Other": [],
+            }
+
+            def categorize(cmd):
+                key = (cmd["name"] + " " + cmd["desc"]).lower()
+                if cmd.get("admin") or "admin" in key or "give" in key or "manage" in key:
+                    return "Admin"
+                if any(k in key for k in ["shop", "pack", "kibble", "buy", "sell", "rain", "battlepass", "pack"]):
+                    return "Economy"
+                if any(k in key for k in ["cat", "cats", "play", "catch", "inventory", "rename", "catalogue", "catpedia", "purr"]):
+                    return "Cats"
+                if any(k in key for k in ["slot", "slots", "pig", "tictactoe", "tiktok", "8ball", "news", "wiki", "credits"]):
+                    return "Fun"
+                if any(k in key for k in ["slot", "casino", "gamble", "bet", "pig"]):
+                    return "Gambling"
+                if any(k in key for k in ["help", "info", "stats", "getid", "last", "catpedia", "wiki", "news"]):
+                    return "Utility"
+                return "Other"
+
+            for c in cmds:
+                sec = categorize(c)
+                sections.setdefault(sec, []).append((c["name"], c["desc"]))
+
+            # Sort commands alphabetically within each section
+            for sec in sections:
+                sections[sec].sort(key=lambda x: x[0].lower())
+
+            # Build flat lines with section headers and command lines
+            lines = []
+            for sec in ["Admin", "Economy", "Cats", "Fun", "Gambling", "Utility", "Other"]:
+                items = sections.get(sec, [])
+                if not items:
+                    continue
+                lines.append(f"__{sec}__")
+                for name, desc in items:
+                    lines.append(f"**/{name}** — {desc}")
+
+            # Paginate: 20 lines per page
+            page_size = 20
+            chunks = [lines[i : i + page_size] for i in range(0, len(lines), page_size)]
+
+            def make_embed(page_index: int) -> discord.Embed:
+                embed = discord.Embed(title="All Commands", color=Colors.brown)
+                embed.description = "\n".join(chunks[page_index])
+                embed.set_footer(text=f"Page {page_index + 1}/{len(chunks)}")
+                return embed
+
+            if not chunks:
+                await interaction2.followup.send("No commands found.", ephemeral=True)
+                return
+
+            class PagesView(View):
+                def __init__(self, author_id: int):
+                    super().__init__(timeout=VIEW_TIMEOUT)
+                    self.page = 0
+                    self.author_id = author_id
+
+                @discord.ui.button(label="◀ Prev", style=ButtonStyle.secondary)
+                async def prev_button(self, interaction3: discord.Interaction, button: Button):
+                    if interaction3.user.id != self.author_id:
+                        await do_funny(interaction3)
+                        return
+                    self.page = (self.page - 1) % len(chunks)
+                    await interaction3.response.edit_message(embed=make_embed(self.page), view=self)
+
+                @discord.ui.button(label="Next ▶", style=ButtonStyle.secondary)
+                async def next_button(self, interaction3: discord.Interaction, button: Button):
+                    if interaction3.user.id != self.author_id:
+                        await do_funny(interaction3)
+                        return
+                    self.page = (self.page + 1) % len(chunks)
+                    await interaction3.response.edit_message(embed=make_embed(self.page), view=self)
+
+            await interaction2.followup.send(embed=make_embed(0), view=PagesView(interaction2.user.id), ephemeral=True)
+
+    view = HelpView(author_id=message.user.id)
+    await message.response.send_message(embeds=[embed1, embed2], view=view)
 
 
 @bot.tree.command(description="Roll the credits")
@@ -3652,7 +3830,7 @@ async def credits(message: discord.Interaction):
 
     await message.response.defer()
 
-    embedVar = discord.Embed(title="Cat Bot", color=Colors.brown, description=gen_credits).set_thumbnail(
+    embedVar = discord.Embed(title="KITTAYYYYYYY", color=Colors.brown, description=gen_credits).set_thumbnail(
         url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png"
     )
 
@@ -3671,7 +3849,7 @@ def format_timedelta(start_timestamp, end_timestamp):
 
 @bot.tree.command(description="View various bot information and stats")
 async def info(message: discord.Interaction):
-    embed = discord.Embed(title="Cat Bot Info", color=Colors.brown)
+    embed = discord.Embed(title="KITTAYYYYYYY Info", color=Colors.brown)
     try:
         git_timestamp = int(subprocess.check_output(["git", "show", "-s", "--format=%ct"]).decode("utf-8"))
     except Exception:
@@ -3703,14 +3881,14 @@ DB Channels: `{await Channel.count():,}`
     await message.response.send_message(embed=embed)
 
 
-@bot.tree.command(description="Confused? Check out the Cat Bot Wiki!")
+@bot.tree.command(description="Confused? Check out the KITTAYYYYYYY Wiki!")
 async def wiki(message: discord.Interaction):
-    embed = discord.Embed(title="Cat Bot Wiki", color=Colors.brown)
+    embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
     embed.description = "\n".join(
         [
             "Main Page: https://wiki.minkos.lol/",
             "",
-            "[Cat Bot](https://wiki.minkos.lol/cat-bot)",
+            "[KITTAYYYYYYY](https://wiki.minkos.lol/cat-bot)",
             "[Cat Spawning](https://wiki.minkos.lol/spawning)",
             "[Commands](https://wiki.minkos.lol/commands)",
             "[Cat Types](https://wiki.minkos.lol/cat-types)",
@@ -3728,7 +3906,7 @@ async def wiki(message: discord.Interaction):
     await progress(message, profile, "wiki")
 
 
-@bot.tree.command(description="Read The Cat Bot Times™️")
+@bot.tree.command(description="Read The KITTAYYYYYYY Times™️")
 async def news(message: discord.Interaction):
     user = await User.get_or_create(user_id=message.user.id)
     buttons = []
@@ -3762,8 +3940,8 @@ async def news(message: discord.Interaction):
 
         if news_id == 0:
             embed = discord.Embed(
-                title="📜 Cat Bot Survey",
-                description="Hello and welcome to The Cat Bot Times:tm:! I kind of want to learn more about your time with Cat Bot because I barely know about it lmao. This should only take a couple of minutes.\n\nGood high-quality responses will win FREE cat rain prizes.\n\nSurvey is closed!",
+                title="📜 KITTAYYYYYYY Survey",
+                description="Hello and welcome to The KITTAYYYYYYY Times:tm:! I kind of want to learn more about your time with KITTAYYYYYYY because I barely know about it lmao. This should only take a couple of minutes.\n\nGood high-quality responses will win FREE cat rain prizes.\n\nSurvey is closed!",
                 color=Colors.brown,
                 timestamp=datetime.datetime.fromtimestamp(1731168230),
             )
@@ -3771,17 +3949,17 @@ async def news(message: discord.Interaction):
         elif news_id == 1:
             embed = discord.Embed(
                 title="✨ New Cat Rains perks!",
-                description="Hey there! Buying Cat Rains now gives you access to `/editprofile` command! You can add an image, change profile color, and add an emoji next to your name. Additionally, you will now get a special role in our [discord server](https://discord.gg/staring).\nEveryone who ever bought rains and all future buyers will get it.\nAnyone who bought these abilities separately in the past (known as 'Cat Bot Supporter') have received 10 minutes of Rains as compensation.\n\nThis is a really cool perk and I hope you like it!",
+                description="Hey there! Buying Cat Rains now gives you access to `/editprofile` command! You can add an image, change profile color, and add an emoji next to your name. Additionally, you will now get a special role in our [discord server](https://discord.gg/staring).\nEveryone who ever bought rains and all future buyers will get it.\nAnyone who bought these abilities separately in the past (known as 'KITTAYYYYYYY Supporter') have received 10 minutes of Rains as compensation.\n\nThis is a really cool perk and I hope you like it!",
                 color=Colors.brown,
                 timestamp=datetime.datetime.fromtimestamp(1732377932),
             )
-            button = discord.ui.Button(label="Cat Bot Store", url="https://catbot.shop")
+            button = discord.ui.Button(label="KITTAYYYYYYY Store", url="https://catbot.shop")
             view.add_item(button)
             await interaction.edit_original_response(content=None, view=view, embed=embed)
         elif news_id == 2:
             embed = discord.Embed(
-                title="☃️ Cat Bot Christmas",
-                description=f"⚡ **Cat Bot Wrapped 2024**\nIn 2024 Cat Bot got...\n- 🖥️ *45777* new servers!\n- 👋 *286607* new profiles!\n- {get_emoji('staring_cat')} okay so funny story due to the new 2.1 billion per cattype limit i added a few months ago 4 with 832 zeros cats were deleted... oopsie... there are currently *64105220101255* cats among the entire bot rn though\n- {get_emoji('cat_throphy')} *1518096* achievements get!\nSee last year's Wrapped [here](<https://discord.com/channels/966586000417619998/1021844042654417017/1188573593408385074>).\n\n❓ **New Year Update**\nSomething is coming...",
+                title="☃️ KITTAYYYYYYY Christmas",
+                description=f"⚡ **KITTAYYYYYYY Wrapped 2024**\nIn 2024 KITTAYYYYYYY got...\n- 🖥️ *45777* new servers!\n- 👋 *286607* new profiles!\n- {get_emoji('staring_cat')} okay so funny story due to the new 2.1 billion per cattype limit i added a few months ago 4 with 832 zeros cats were deleted... oopsie... there are currently *64105220101255* cats among the entire bot rn though\n- {get_emoji('cat_throphy')} *1518096* achievements get!\nSee last year's Wrapped [here](<https://discord.com/channels/966586000417619998/1021844042654417017/1188573593408385074>).\n\n❓ **New Year Update**\nSomething is coming...",
                 color=Colors.brown,
                 timestamp=datetime.datetime.fromtimestamp(1734458962),
             )
@@ -3822,10 +4000,10 @@ the extra reward is now a stone pack instead of 5 random cats too!
             await interaction.edit_original_response(content=None, view=view, embed=embed)
         elif news_id == 5:
             embed = discord.Embed(
-                title="Important Message from CEO of Cat Bot",
+                title="Important Message from CEO of KITTAYYYYYYY",
                 description="""(April Fools 2025)
 
-Dear Cat Bot users,
+Dear KITTAYYYYYYY users,
 
 I hope this message finds you well. I want to take a moment to address some recent developments within our organization that are crucial for our continued success.
 
@@ -3843,8 +4021,8 @@ Best regards,
             await interaction.edit_original_response(content=None, view=view, embed=embed)
         elif news_id == 6:
             embed = discord.Embed(
-                title="🥳 Cat Bot Turns 3",
-                description="""april 21st is a special day for cat bot! on this day is its birthday, and in 2025 its turning three!
+                title="🥳 KITTAYYYYYYY Turns 3",
+                description="""april 21st is a special day for KITTAYYYYYYY! on this day is its birthday, and in 2025 its turning three!
 happy birthda~~
 ...
 hold on...
@@ -3860,7 +4038,7 @@ update: the puzzle piece event has concluded""",
         elif news_id == 7:
             embed = discord.Embed(
                 title="🎉 100,000 SERVERS WHAT",
-                description="""wow! cat bot has reached 100,000 servers! this beyond insane i never thought this would happen thanks everyone
+                description="""wow! KITTAYYYYYYY has reached 100,000 servers! this beyond insane i never thought this would happen thanks everyone
 giving away a whole bunch of rain as celebration!
 
 1. cat stand giveaway (ENDED)
@@ -3871,7 +4049,7 @@ there will be a total of 10 winners who will get 40 minutes each! giveaway ends 
 again in our [discord server](<https://discord.gg/zrYstPe3W6>) a new channel has opened for art submissions!
 top 5 people who get the most community votes will get 250, 150, 100, 50 and 50 rain minutes respectively!
 
-3. cat bot event (ENDED)
+3. KITTAYYYYYYY event (ENDED)
 starting june 30th, for the next 5 days you will get points randomly on every catch! if you manage to collect 1,000 points before the time runs out you will get 2 minutes of rain!!
 
 4. sale (ENDED)
@@ -3883,7 +4061,7 @@ aaaaaaaaaaaaaaa""",
             )
             button = discord.ui.Button(label="Join our Server", url="https://discord.gg/staring")
             view.add_item(button)
-            button2 = discord.ui.Button(label="Cat Bot Store", url="https://catbot.shop")
+            button2 = discord.ui.Button(label="KITTAYYYYYYY Store", url="https://catbot.shop")
             view.add_item(button2)
             await interaction.edit_original_response(content=None, view=view, embed=embed)
 
@@ -3898,7 +4076,7 @@ it was mostly my fault, but i worked hard to fix everything and i think its most
 
 as a compensation i will give everyone who voted in the past 3 days 2 free gold packs! you can press the button below to claim them. (note you can only claim it in 1 server, choose wisely)
 
-thanks for using cat bot!""",
+thanks for using KITTAYYYYYYY!""",
                 color=Colors.brown,
                 timestamp=datetime.datetime.fromtimestamp(1752689941),
             )
@@ -3910,7 +4088,7 @@ thanks for using cat bot!""",
 
 stuff has been going on! i, FillerMcDiller, have added a whole bunch of new stuff to kittay!
 We have added 7 (thats right!) new cat types! You can check them out in the catalog (hint: egirl is NO LONGER the best cat)
-As well, there is now a new currency in cat bot, KIBBLE! You can earn kibble from various activities in cat bot, and spend them on a whole bunch of new items! Check out /shop to see what you can buy with it!
+As well, there is now a new currency in KITTAYYYYYYY, KIBBLE! You can earn kibble from various activities in KITTAYYYYYYY, and spend them on a whole bunch of new items! Check out /shop to see what you can buy with it!
 
 Anyways, I am constantly updating this bot and have many (MANY) more plans for the future, so stay tuned!
 - Filler <3""",
@@ -4317,7 +4495,7 @@ async def admin(interaction: discord.Interaction):
         
     embed = discord.Embed(
         title="🔧 Admin Control Panel",
-        description="Use the buttons below to manage Cat Bot:",
+        description="Use the buttons below to manage KITTAYYYYYYY:",
         color=Colors.brown
     )
     await interaction.response.send_message(embed=embed, view=AdminPanel(guild=interaction.guild), ephemeral=True)
@@ -4516,7 +4694,7 @@ async def changemessage(message: discord.Interaction):
                     "Success! Here is a preview:\n"
                     + input_value.replace("{emoji}", str(icon))
                     .replace("{type}", "Fine")
-                    .replace("{username}", "Cat Bot")
+                    .replace("{username}", "KITTAYYYYYYY")
                     .replace("{count}", "1")
                     .replace("{time}", "69 years 420 days")
                 )
@@ -4555,7 +4733,7 @@ async def changemessage(message: discord.Interaction):
         title="Change appear and cought messages",
         description="""below are buttons to change them.
 they are required to have all placeholders somewhere in them.
-you must include the placeholders exactly like they are shown below, the values will be replaced by cat bot when it uses them.
+you must include the placeholders exactly like they are shown below, the values will be replaced by KITTAYYYYYYY when it uses them.
 that being:
 
 for appear:
@@ -5102,23 +5280,225 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
         await message.followup.send(f"Couldn't find a cat named '{name}'. Check spelling or run `/cats <type>` to see your instances.", ephemeral=True)
         return
 
-    # single match — apply bond immediately
+    # Helper to build an embed for a single instance
+    def make_play_embed(inst: dict) -> discord.Embed:
+        title = f"{get_emoji(inst.get('type', '').lower() + 'cat')} {inst.get('name')} — {inst.get('type')}"
+        embed = discord.Embed(title=title, color=Colors.yellow)
+        embed.add_field(name="Bond", value=f"{inst.get('bond', 0)}/100", inline=True)
+        embed.add_field(name="HP", value=str(inst.get('hp')), inline=True)
+        embed.add_field(name="DMG", value=str(inst.get('dmg')), inline=True)
+        if inst.get('acquired_at'):
+            try:
+                embed.add_field(name="Acquired", value=f"<t:{int(inst.get('acquired_at'))}:f>", inline=False)
+            except Exception:
+                embed.add_field(name="Acquired", value=str(inst.get('acquired_at')), inline=False)
+        embed.description = "Choose an action below to interact with your cat. \n\n" + (inst.get('flavor') or "")
+        return embed
+
+    # View with interactive buttons for a single instance
+    class PlayView(View):
+        def __init__(self, guild_id: int, owner_id: int, instance_id: str):
+            super().__init__(timeout=180)
+            self.guild_id = guild_id
+            self.owner_id = owner_id
+            self.instance_id = instance_id
+
+        @discord.ui.button(label="Pet", style=ButtonStyle.green)
+        async def pet(self, interaction2: discord.Interaction, button: Button):
+            if interaction2.user.id != self.owner_id:
+                await do_funny(interaction2)
+                return
+            await interaction2.response.defer()
+            key = (self.guild_id, self.owner_id, self.instance_id)
+            now_ts = time.time()
+            last = pet_cooldowns.get(key, 0)
+            if now_ts - last < 10:
+                await interaction2.followup.send(f"You must wait {int(10 - (now_ts - last))}s before petting again.", ephemeral=True)
+                return
+
+            # fetch latest instances
+            cats_now = get_user_cats(self.guild_id, self.owner_id)
+            inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
+            if not inst:
+                await interaction2.followup.send("That instance no longer exists.", ephemeral=True)
+                return
+
+            gain = random.randint(1, 3)
+            inst['bond'] = min(100, inst.get('bond', 0) + gain)
+            save_user_cats(self.guild_id, self.owner_id, cats_now)
+            pet_cooldowns[key] = now_ts
+
+            # update embed in place
+            try:
+                new_embed = make_play_embed(inst)
+                await interaction2.edit_original_response(embed=new_embed, view=self)
+            except Exception:
+                pass
+
+            await interaction2.followup.send(f"You pet **{inst.get('name')}** — Bond +{gain} (now {inst['bond']}).", ephemeral=True)
+
+        @discord.ui.button(label="Use Item", style=ButtonStyle.blurple)
+        async def use_item(self, interaction2: discord.Interaction, button: Button):
+            if interaction2.user.id != self.owner_id:
+                await do_funny(interaction2)
+                return
+            await interaction2.response.defer()
+
+            # load user's items
+            items_now = get_user_items(self.guild_id, self.owner_id)
+            opts = []
+            emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"}
+            for k, v in (items_now or {}).items():
+                data = SHOP_ITEMS.get(k, {})
+                for tier_k, cnt in (v or {}).items():
+                    if not cnt or cnt <= 0:
+                        continue
+                    emoji_label = get_emoji(emoji_map.get(k, k))
+                    label = f"{emoji_label} {data.get('title')} {tier_k} (x{cnt})"
+                    opts.append(discord.SelectOption(label=label, value=f"{k}|{tier_k}"))
+
+            if not opts:
+                await interaction2.followup.send("You have no items to use.", ephemeral=True)
+                return
+
+            parent_inter = interaction2
+
+            class UseSelect(discord.ui.Select):
+                def __init__(self, options):
+                    super().__init__(placeholder="Select an item to use...", min_values=1, max_values=1, options=options)
+
+                async def callback(self4, sel_inter: discord.Interaction):
+                    if sel_inter.user.id != parent_inter.user.id:
+                        await do_funny(sel_inter)
+                        return
+                    choice = sel_inter.data.get("values", [None])[0]
+                    if not choice:
+                        await sel_inter.response.send_message("Invalid selection.", ephemeral=True)
+                        return
+                    key_local, tier_local = choice.split("|")
+                    # re-load items to avoid races
+                    cur_items = get_user_items(parent_inter.guild.id, parent_inter.user.id)
+                    have = cur_items.get(key_local, {}).get(tier_local, 0)
+                    if have <= 0:
+                        await sel_inter.response.send_message("You don't have that item anymore.", ephemeral=True)
+                        return
+
+                    # If the item targets a specific instance, apply directly to this instance
+                    if key_local in ("ball", "dogtreat", "pancakes"):
+                        cats_now = get_user_cats(self.guild_id, self.owner_id)
+                        inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
+                        if not inst:
+                            await sel_inter.response.send_message("That instance no longer exists.", ephemeral=True)
+                            return
+
+                        # decrement one use
+                        cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
+                        save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
+
+                        bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
+                        if key_local == 'pancakes' and bond_amt >= 100:
+                            inst['bond'] = 100
+                        else:
+                            inst['bond'] = min(100, inst.get('bond', 0) + int(bond_amt))
+                        save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
+
+                        # update embed in place
+                        try:
+                            new_embed = make_play_embed(inst)
+                            await parent_inter.edit_original_response(embed=new_embed, view=self)
+                        except Exception:
+                            pass
+
+                        await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst.get('name')}** — Bond now {inst['bond']}.", ephemeral=True)
+                        return
+
+                    # Default behavior for other item types (rains, luck, xp)
+                    cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
+                    save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
+
+                    try:
+                        if key_local == 'rains':
+                            minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
+                            user_obj = await User.get_or_create(user_id=parent_inter.user.id)
+                            if not user_obj.rain_minutes:
+                                user_obj.rain_minutes = 0
+                            user_obj.rain_minutes += int(minutes)
+                            await user_obj.save()
+                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes to your account.", ephemeral=True)
+                            return
+
+                        if key_local in ('luck', 'xp'):
+                            effect = SHOP_ITEMS[key_local]['tiers'][tier_local].get('effect', 0)
+                            dur_map = {'I': 3600, 'II': 10800, 'III': 21600}
+                            duration = dur_map.get(tier_local, 3600)
+                            now_ts = int(time.time())
+                            k = _get_buffs_key(parent_inter.guild.id, parent_inter.user.id)
+                            ITEM_BUFFS.setdefault(k, {})[key_local] = {"mult": effect, "until": now_ts + duration}
+                            try:
+                                save_item_buffs()
+                            except Exception:
+                                pass
+                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: +{int(effect*100)}% {key_local} for {duration//3600}h. Expires <t:{now_ts + duration}:R>.", ephemeral=True)
+                            return
+
+                        await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}.", ephemeral=True)
+                    except Exception:
+                        await sel_inter.response.send_message("Failed to apply item effect.", ephemeral=True)
+
+            sel_view = View(timeout=120)
+            sel_view.add_item(UseSelect(opts))
+            try:
+                await interaction2.followup.send("Choose an item to use:", view=sel_view, ephemeral=True)
+            except Exception:
+                await interaction2.response.send_message("Could not open item selector.", ephemeral=True)
+
+        @discord.ui.button(label="Close", style=ButtonStyle.secondary)
+        async def close(self, interaction2: discord.Interaction, button: Button):
+            if interaction2.user.id != self.owner_id:
+                await do_funny(interaction2)
+                return
+            # disable all buttons
+            for child in list(self.children):
+                try:
+                    child.disabled = True
+                except Exception:
+                    pass
+            try:
+                await interaction2.edit_original_response(view=self)
+            except Exception:
+                pass
+
+    # Present choices (if multiple matches) or show the play UI for the single match
     if len(matches) == 1:
         idx, inst = matches[0]
-        gain = random.randint(1, 3)
-        inst["bond"] = min(100, inst.get("bond", 0) + gain)
-        save_user_cats(message.guild.id, message.user.id, cats_list)
-        await message.followup.send(f"You played with **{inst.get('name')}**! Bond +{gain} (now {inst['bond']}).")
+        # show embed + buttons
+        embed = make_play_embed(inst)
+        # try to attach image if available
+        file_to_send = None
+        try:
+            img_path = f"images/spawn/{inst.get('type', '').lower()}_cat.png"
+            if os.path.exists(img_path):
+                file_to_send = discord.File(img_path, filename=os.path.basename(img_path))
+        except Exception:
+            file_to_send = None
+
+        view = PlayView(message.guild.id, message.user.id, inst.get('id'))
+        try:
+            if file_to_send:
+                await message.followup.send(embed=embed, view=view, file=file_to_send)
+            else:
+                await message.followup.send(embed=embed, view=view)
+        except Exception:
+            await message.followup.send(embed=embed, view=view, ephemeral=True)
         return
 
-    # multiple matches — present a chooser with buttons for each instance
+    # multiple matches — present a chooser with buttons for each instance that opens the PlayView
     class ChooseView(View):
         def __init__(self, author_id: int, matches_list: list[tuple[int, dict]]):
-            super().__init__(timeout=60)
+            super().__init__(timeout=120)
             self.author_id = author_id
-            # Add up to 25 buttons
             for idx, inst in matches_list[:25]:
-                label = f"#{idx} {inst.get('type', 'Unknown')}"
+                label = f"#{idx} {inst.get('type', 'Unknown')} — {inst.get('name')}"
                 btn = Button(label=label, custom_id=f"choose_{idx}")
 
                 async def cb(interaction2: discord.Interaction, button: Button, idx_local=idx):
@@ -5126,7 +5506,6 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
                         await do_funny(interaction2)
                         return
                     await interaction2.response.defer()
-                    # re-fetch to ensure up-to-date
                     cats_now = get_user_cats(message.guild.id, interaction2.user.id)
                     if idx_local < 1 or idx_local > len(cats_now):
                         await interaction2.followup.send("That instance no longer exists.", ephemeral=True)
@@ -5136,20 +5515,23 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
                         await interaction2.followup.send("The instance name no longer matches. Try the command again.", ephemeral=True)
                         return
 
-                    gain = random.randint(1, 3)
-                    inst2['bond'] = min(100, inst2.get('bond', 0) + gain)
-                    save_user_cats(message.guild.id, interaction2.user.id, cats_now)
-                    await interaction2.followup.send(f"You played with **{inst2.get('name')}**! Bond +{gain} (now {inst2['bond']}).", ephemeral=True)
-                    # disable buttons after selection
-                    for child in list(self.children):
-                        try:
-                            child.disabled = True
-                        except Exception:
-                            pass
+                    embed = make_play_embed(inst2)
+                    file_to_send = None
                     try:
-                        await interaction2.edit_original_response(view=self)
+                        img_path = f"images/spawn/{inst2.get('type', '').lower()}_cat.png"
+                        if os.path.exists(img_path):
+                            file_to_send = discord.File(img_path, filename=os.path.basename(img_path))
                     except Exception:
-                        pass
+                        file_to_send = None
+
+                    view = PlayView(message.guild.id, interaction2.user.id, inst2.get('id'))
+                    try:
+                        if file_to_send:
+                            await interaction2.followup.send(embed=embed, view=view, file=file_to_send, ephemeral=True)
+                        else:
+                            await interaction2.followup.send(embed=embed, view=view, ephemeral=True)
+                    except Exception:
+                        await interaction2.followup.send(embed=embed, ephemeral=True)
 
                 btn.callback = cb
                 self.add_item(btn)
@@ -5502,7 +5884,7 @@ def gen_items_embed(message, person_id) -> discord.Embed:
     """Build an embed showing a user's item inventory (from data/items.json)."""
     items = get_user_items(message.guild.id, person_id.id)
     # emoji map for items
-    emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain"}
+    emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"}
     embed = discord.Embed(title=f"{get_emoji('staring_cat')} {person_id.name}'s Items", color=Colors.brown)
     if not items:
         embed.description = "No items yet. Visit /shop to buy items!"
@@ -5510,6 +5892,8 @@ def gen_items_embed(message, person_id) -> discord.Embed:
 
     lines = []
     # format per-category
+    # extend emoji map for new items
+    emoji_map.update({"ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"})
     for key, data in SHOP_ITEMS.items():
         title = data.get('title')
         emoji_label = get_emoji(emoji_map.get(key, key))
@@ -5834,7 +6218,97 @@ __Highlighted Stat__
                             if have <= 0:
                                 await sel_inter.response.send_message("You don't have that item anymore.", ephemeral=True)
                                 return
-                            # decrement
+
+                            # Special handling for toys/food which must be applied to a specific cat instance
+                            if key_local in ("ball", "dogtreat", "pancakes"):
+                                # Ask the user for the exact cat name via modal
+                                class TargetModal(discord.ui.Modal):
+                                    def __init__(self):
+                                        super().__init__(title="Use item on which cat?")
+                                        self.name_input = discord.ui.TextInput(label="Exact cat name", placeholder="Fluffy", max_length=100)
+                                        self.add_item(self.name_input)
+
+                                    async def on_submit(self2, modal_inter: discord.Interaction):
+                                        if modal_inter.user.id != message.user.id:
+                                            await do_funny(modal_inter)
+                                            return
+                                        await modal_inter.response.defer()
+                                        target_name = self2.name_input.value.strip()
+                                        cats_list = get_user_cats(modal_inter.guild.id, modal_inter.user.id)
+                                        matches_local = [(i + 1, c) for i, c in enumerate(cats_list) if (c.get("name") or "").lower() == target_name.lower()]
+                                        if not matches_local:
+                                            await modal_inter.followup.send(f"Couldn't find a cat named '{target_name}'.", ephemeral=True)
+                                            return
+
+                                        async def apply_to_instance(idx_local: int, inst_local: dict):
+                                            # decrement one use
+                                            cur_items2 = get_user_items(message.guild.id, message.user.id)
+                                            cur_have = cur_items2.get(key_local, {}).get(tier_local, 0)
+                                            if cur_have <= 0:
+                                                await modal_inter.followup.send("You don't have that item anymore.", ephemeral=True)
+                                                return
+                                            cur_items2.setdefault(key_local, {})[tier_local] = max(0, cur_have - 1)
+                                            save_user_items(message.guild.id, message.user.id, cur_items2)
+
+                                            bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
+                                            if key_local == 'pancakes' and bond_amt >= 100:
+                                                inst_local['bond'] = 100
+                                            else:
+                                                inst_local['bond'] = min(100, inst_local.get('bond', 0) + int(bond_amt))
+                                            save_user_cats(modal_inter.guild.id, modal_inter.user.id, cats_list)
+                                            await modal_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst_local.get('name')}** — Bond now {inst_local['bond']}.", ephemeral=True)
+
+                                        # if single match, apply directly
+                                        if len(matches_local) == 1:
+                                            _, inst = matches_local[0]
+                                            await apply_to_instance(matches_local[0][0], inst)
+                                            return
+
+                                        # multiple matches — present chooser
+                                        class ChooseTargetView(View):
+                                            def __init__(self, author_id: int, matches_list: list[tuple[int, dict]]):
+                                                super().__init__(timeout=120)
+                                                self.author_id = author_id
+                                                for idxm, instm in matches_list[:25]:
+                                                    labelm = f"#{idxm} {instm.get('type','Unknown')} — {instm.get('name')}"
+                                                    btnm = Button(label=labelm, custom_id=f"choose_target_{idxm}")
+
+                                                    async def cbm(inter: discord.Interaction, button: Button, idx_localm=idxm):
+                                                        if inter.user.id != self.author_id:
+                                                            await do_funny(inter)
+                                                            return
+                                                        await inter.response.defer()
+                                                        cats_now2 = get_user_cats(inter.guild.id, inter.user.id)
+                                                        if idx_localm < 1 or idx_localm > len(cats_now2):
+                                                            await inter.followup.send("That instance no longer exists.", ephemeral=True)
+                                                            return
+                                                        inst_selected = cats_now2[idx_localm - 1]
+                                                        await apply_to_instance(idx_localm, inst_selected)
+                                                        # disable buttons
+                                                        for child in list(self.children):
+                                                            try:
+                                                                child.disabled = True
+                                                            except Exception:
+                                                                pass
+                                                        try:
+                                                            await inter.edit_original_response(view=self)
+                                                        except Exception:
+                                                            pass
+
+                                                    btnm.callback = cbm
+                                                    self.add_item(btnm)
+
+                                        view_targets = ChooseTargetView(modal_inter.user.id, matches_local)
+                                        await modal_inter.followup.send(f"Multiple cats named '{target_name}' found — choose which one:", view=view_targets, ephemeral=True)
+
+                                try:
+                                    await sel_inter.response.send_modal(TargetModal())
+                                except Exception:
+                                    await sel_inter.response.send_message("Could not open target modal.", ephemeral=True)
+                                return
+
+                            # Default behavior for other item types (existing handling: rains, luck, xp)
+                            # decrement one use
                             cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
                             save_user_items(message.guild.id, message.user.id, cur_items)
 
@@ -6157,9 +6631,10 @@ async def shop(message: discord.Interaction):
             # subtract and save
             profile.kibble = max(0, profile.kibble - price_local)
             await profile.save()
-            # award item
+            # award item — if the tier defines 'uses', buying one increments by that many uses
             items = get_user_items(guild_id, user_id)
-            items.setdefault(key_local, {})[tier_local] = items.get(key_local, {}).get(tier_local, 0) + 1
+            uses = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('uses', 1)
+            items.setdefault(key_local, {})[tier_local] = items.get(key_local, {}).get(tier_local, 0) + int(uses)
             save_user_items(guild_id, user_id, items)
             await interaction.followup.send(f"Purchased {SHOP_ITEMS[key_local]['title']} {tier_local} for {price_local:,} Kibble.", ephemeral=True)
 
@@ -6188,7 +6663,7 @@ async def store(message: discord.Interaction):
 
 if config.DONOR_CHANNEL_ID:
 
-    @bot.tree.command(description="(SUPPORTER) Bless random Cat Bot users with doubled cats!")
+    @bot.tree.command(description="(SUPPORTER) Bless random KITTAYYYYYYY users with doubled cats!")
     async def bless(message: discord.Interaction):
         user = await User.get_or_create(user_id=message.user.id)
         do_edit = False
@@ -6226,7 +6701,7 @@ if config.DONOR_CHANNEL_ID:
             embed = discord.Embed(
                 color=Colors.brown,
                 title="🌠 Cat Blessings",
-                description=f"""When enabled, random Cat Bot users will have their cats blessed by you - and their catches will be doubled!
+                description=f"""When enabled, random KITTAYYYYYYY users will have their cats blessed by you - and their catches will be doubled!
 
 Blessings are currently **{"enabled" if user.blessings_enabled else "disabled"}**.
 Cats blessed: **{user.cats_blessed}**
@@ -6283,7 +6758,7 @@ Blessing message preview:
         user = await User.get_or_create(user_id=message.user.id)
         if not user.premium:
             await message.response.send_message(
-                "👑 This feature is supporter-only!\nBuy anything from Cat Bot Store to unlock profile customization!\n<https://catbot.shop>"
+                "👑 This feature is supporter-only!\nBuy anything from KITTAYYYYYYY Store to unlock profile customization!\n<https://catbot.shop>"
             )
             return
 
@@ -7046,7 +7521,7 @@ async def battlepass(message: discord.Interaction):
             if is_weekend:
                 description += "-# *Double Vote XP During Weekends*\n"
 
-            description += f"{get_emoji('topgg')} [Vote on Top.gg](https://top.gg/bot/966695034340663367/vote)\n"
+            description += f"{get_emoji('topgg')} [Vote on Top.gg](https://top.gg/bot/1387305159264309399/vote)\n"
 
             if is_weekend:
                 description += f"- Reward: ~~{user.vote_reward}~~ **{user.vote_reward * 2}** XP"
@@ -7190,15 +7665,15 @@ async def battlepass(message: discord.Interaction):
     await gen_main(message, True)
 
 
-@bot.tree.command(description="vote for cat bot")
+@bot.tree.command(description="vote for KITTAYYYYYYY")
 async def vote(message: discord.Interaction):
     embed = discord.Embed(
-        title="Vote for Cat Bot",
+        title="Vote for KITTAYYYYYYY",
         color=Colors.brown,
-        description="Vote for Cat Bot on top.gg!",
+        description="Vote for KITTAYYYYYYY on top.gg!",
     )
     view = View(timeout=1)
-    button = Button(label="Vote!", url="https://top.gg/bot/966695034340663367/vote", emoji=get_emoji("topgg"))
+    button = Button(label="Vote!", url="https://top.gg/bot/1387305159264309399/vote", emoji=get_emoji("topgg"))
     view.add_item(button)
     await message.response.send_message(embed=embed, view=view)
 
@@ -7391,7 +7866,7 @@ async def ping(message: discord.Interaction):
 
 
 @bot.tree.command(description="play a relaxing game of tic tac toe")
-@discord.app_commands.describe(person="who do you want to play with? (choose Cat Bot for ai)")
+@discord.app_commands.describe(person="who do you want to play with? (choose KITTAYYYYYYY for ai)")
 async def tictactoe(message: discord.Interaction, person: discord.Member):
     do_edit = False
     board = [None, None, None, None, None, None, None, None, None]
@@ -8773,7 +9248,7 @@ async def casino(message: discord.Interaction):
     total_sum = await Profile.sum("gambles", "gambles > 0")
     embed = discord.Embed(
         title="🎲 The Catsino",
-        description=f"One spin costs 5 {get_emoji('finecat')} Fine cats\nSo far you gambled {profile.gambles} times.\nAll Cat Bot users gambled {total_sum:,} times.",
+        description=f"One spin costs 5 {get_emoji('finecat')} Fine cats\nSo far you gambled {profile.gambles} times.\nAll KITTAYYYYYYY users gambled {total_sum:,} times.",
         color=Colors.maroon,
     )
 
@@ -9300,7 +9775,7 @@ if config.WORDNIK_API_KEY:
 async def cat_fact(message: discord.Interaction):
     facts = [
         "you love cats",
-        f"cat bot is in {len(bot.guilds):,} servers",
+        f"KITTAYYYYYYY is in {len(bot.guilds):,} servers",
         "cat",
         "cats are the best",
     ]
@@ -10323,7 +10798,7 @@ async def reset(message: discord.Interaction, person_id: discord.User):
                 )
             except Exception:
                 await interaction.edit_original_response(
-                    content="ummm? this person isnt even registered in cat bot wtf are you wiping?????",
+                    content="ummm? this person isnt even registered in KITTAYYYYYYY wtf are you wiping?????",
                     view=None,
                 )
         else:
@@ -10336,10 +10811,10 @@ async def reset(message: discord.Interaction, person_id: discord.User):
     await message.response.send_message(f"Are you sure you want to reset {person_id.mention}?", view=view, allowed_mentions=discord.AllowedMentions(users=True))
 
 
-@bot.tree.command(description="(HIGH ADMIN) [VERY DANGEROUS] Reset all Cat Bot data of this server")
+@bot.tree.command(description="(HIGH ADMIN) [VERY DANGEROUS] Reset all KITTAYYYYYYY data of this server")
 @discord.app_commands.default_permissions(administrator=True)
 async def nuke(message: discord.Interaction):
-    warning_text = "⚠️ This will completely reset **all** Cat Bot progress of **everyone** in this server. Spawn channels and their settings *will not be affected*.\nPress the button 5 times to continue."
+    warning_text = "⚠️ This will completely reset **all** KITTAYYYYYYY progress of **everyone** in this server. Spawn channels and their settings *will not be affected*.\nPress the button 5 times to continue."
     counter = 5
 
     async def gen(counter):
@@ -10484,7 +10959,7 @@ async def check_supporter(request):
     return web.Response(text="1" if user.premium else "0", status=200)
 
 
-# cat bot uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
+# KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
 async def on_error(*args, **kwargs):
     raise
 
@@ -10786,3 +11261,32 @@ async def breed(message: discord.Interaction, first: str, second: str):
 
         await message.response.send_message(reply_text)
 # --- END: Cat Breeding feature ---
+import topgg
+
+WEBHOOK_AUTH = "TOPGG_WEBHOOK_AUTH"
+
+# Webhook manager
+webhook = topgg.WebhookManager(
+    WEBHOOK_AUTH,
+    endpoint="/webhook"      # route name, can be anything
+)
+
+@webhook.endpoint()
+async def on_vote(data):
+    user_id = int(data["user"])
+    is_weekend = data.get("isWeekend", False)
+
+    print(f"[TOP.GG] User {user_id} voted! Weekend: {is_weekend}")
+
+    # Reward logic (example)
+    try:
+        user = await bot.fetch_user(user_id)
+        await user.send("🎉 Thanks for voting on Top.gg!")
+    except Exception as e:
+        print("Failed to DM voter:", e)
+
+# Start webhook server when bot starts
+async def setup_hook():
+    bot.topgg_webhook = webhook
+
+bot.setup_hook = setup_hook
