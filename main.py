@@ -127,7 +127,7 @@ threading.Thread(target=start_webhook, daemon=True).start()
 # example: keep main thread alive
 try:
     while True:
-        asyncio.sleep(1)
+        time.sleep(1)
 except KeyboardInterrupt:
     print("Server shutting down", flush=True)
 
