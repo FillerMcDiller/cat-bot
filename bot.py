@@ -45,16 +45,7 @@ bot = commands.AutoShardedBot(
 async def setup_hook():
     await database.connect()
     await bot.load_extension("main")
-
-    # start the FastAPI webhook server in a background thread so voting works
-    try:
-        import main as main_module
-        import webhook_server
-        port = getattr(config, "WEBHOOK_PORT", None) or int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
-        auth = getattr(config, "WEBHOOK_VERIFY", None)
-        webhook_server.start_webhook_thread(bot.loop, main_module.reward_vote, port=port, auth=auth)
-    except Exception:
-        logging.exception("Failed to start webhook server")
+    # webhook process will be started by the launcher before bot.run
 
 
 async def reload(reload_db):
@@ -72,8 +63,31 @@ async def reload(reload_db):
 
 bot.cat_bot_reload_hook = reload  # pyright: ignore
 
+def _start_webhook_process():
+    # Launch webhook_server.py in a new console so you get two terminals when running `python bot.py`.
+    import subprocess, sys, os
+
+    python = sys.executable
+    script = os.path.join(os.path.dirname(__file__), "webhook_server.py")
+    env = os.environ.copy()
+    env["WEBHOOK_PORT"] = str(getattr(config, "WEBHOOK_PORT", 3001) or 3001)
+    if getattr(config, "WEBHOOK_VERIFY", None):
+        env["WEBHOOK_VERIFY"] = str(getattr(config, "WEBHOOK_VERIFY"))
+    env["BOT_INTERNAL_PORT"] = str(getattr(config, "INTERNAL_WEBHOOK_PORT", 3002) or 3002)
+
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NEW_CONSOLE
+
+    try:
+        subprocess.Popen([python, script], env=env, creationflags=creationflags)
+    except Exception:
+        logging.exception("Failed to spawn webhook process")
+
 try:
     config.HARD_RESTART_TIME = time.time()
+    # Spawn webhook console window before running the bot so you have two terminals.
+    _start_webhook_process()
     bot.run(config.TOKEN)
 finally:
     asyncio.run(database.close())

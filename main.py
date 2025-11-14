@@ -910,6 +910,12 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     bot.loop.create_task(background_index_all_cats())
+    # start internal HTTP endpoint to receive forwarded votes from external webhook process
+    try:
+        internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3002)
+        bot.loop.create_task(start_internal_server(internal_port))
+    except Exception:
+        pass
     # Ensure application commands are registered
     try:
         await bot.tree.sync()
@@ -917,6 +923,48 @@ async def setup_hook():
         pass
 
 bot.setup_hook = setup_hook
+
+
+async def start_internal_server(port: int = 3002):
+    """Start a small internal aiohttp server on localhost that accepts POST /_internal_vote
+
+    This endpoint is intended to be called by the external `webhook_server.py` process which
+    forwards Top.gg votes. The handler schedules `reward_vote` on the bot loop and logs.
+    """
+    try:
+        app = web.Application()
+
+        async def _handle(request):
+            try:
+                data = await request.json()
+                user_id = int(data.get("user") or data.get("user_id") or 0)
+            except Exception:
+                return web.json_response({"error": "invalid payload"}, status=400)
+
+            if not user_id:
+                return web.json_response({"error": "missing user"}, status=400)
+
+            try:
+                # schedule reward and log
+                bot.loop.create_task(reward_vote(user_id))
+                try:
+                    print(f"vote received from {user_id}, granting rewards..", flush=True)
+                except Exception:
+                    logging.info("vote received from %s, granting rewards..", user_id)
+            except Exception:
+                logging.exception("Failed to schedule reward_vote for %s", user_id)
+                return web.json_response({"status": "error"}, status=500)
+
+            return web.json_response({"status": "ok"})
+
+        app.router.add_post("/_internal_vote", _handle)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", port)
+        await site.start()
+    except Exception:
+        logging.exception("Failed to start internal vote receiver server")
 
 
 async def background_index_all_cats():

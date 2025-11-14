@@ -4,9 +4,11 @@ import logging
 import uvicorn
 import asyncio
 from fastapi import FastAPI, Request
+import os
+import aiohttp
 
 
-def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, auth: str | None = None):
+def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, auth: str | None = None, internal_port: int | None = None):
     app = FastAPI()
 
     @app.post("/dblwebhook")
@@ -20,7 +22,7 @@ def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, a
         except Exception:
             return {"error": "invalid payload"}, 400
 
-        # If we were given a reward coroutine and loop, schedule it; otherwise just log
+        # If we were given a reward coroutine and loop, schedule it directly.
         if reward_coro and loop:
             try:
                 asyncio.run_coroutine_threadsafe(reward_coro(user_id), loop)
@@ -29,9 +31,21 @@ def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, a
                     logging.exception("Failed to schedule reward coroutine for vote")
                 except Exception:
                     pass
-        else:
-            logging.info("Vote received for user %s (no reward handler attached)", user_id)
+            return {"status": "ok"}
 
+        # Otherwise forward to bot's internal HTTP endpoint if configured
+        target_port = internal_port or int(os.getenv("BOT_INTERNAL_PORT", "3002"))
+        if target_port:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.post(f"http://127.0.0.1:{target_port}/_internal_vote", json={"user": user_id}, timeout=5)
+            except Exception:
+                try:
+                    logging.exception("Failed to forward vote to bot internal endpoint")
+                except Exception:
+                    pass
+
+        logging.info("Vote received for user %s forwarded to bot", user_id)
         return {"status": "ok"}
 
     return app
