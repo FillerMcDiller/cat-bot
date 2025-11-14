@@ -103,8 +103,23 @@ async def handle_vote(req: Request):
     return {"status": "ok"}
 
 def start_webhook():
-    # uvicorn.run blocks, so running in a thread is fine
-    uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT, log_level="info")
+    # Run the webhook server in a resilient loop. If uvicorn.run exits unexpectedly
+    # we'll wait briefly and restart it so the process doesn't keep only FastAPI alive
+    # while the bot has failed.
+    while True:
+        try:
+            uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT, log_level="info")
+            # If uvicorn exits normally, wait a bit and restart
+            time.sleep(5)
+        except Exception:
+            try:
+                logging.exception("FastAPI webhook crashed; restarting in 5s")
+            except Exception:
+                pass
+            try:
+                time.sleep(5)
+            except Exception:
+                pass
 
 # start FastAPI in a background thread
 threading.Thread(target=start_webhook, daemon=True).start()
@@ -725,6 +740,40 @@ bot = commands.AutoShardedBot(
     command_prefix="!",
     intents=discord.Intents.default()
 )
+
+# Set an asyncio loop-level exception handler so unhandled exceptions are logged
+def _loop_exception_handler(loop, context):
+    try:
+        # context may contain 'exception' or 'message'
+        exc = context.get("exception")
+        msg = context.get("message")
+        if exc:
+            logging.exception("Unhandled exception in event loop", exc_info=exc)
+        else:
+            logging.error("Unhandled event loop error: %s", msg)
+    except Exception:
+        try:
+            logging.exception("Failure inside loop exception handler")
+        except Exception:
+            pass
+
+try:
+    _loop = asyncio.get_event_loop()
+    try:
+        _loop.set_exception_handler(_loop_exception_handler)
+    except Exception:
+        pass
+except Exception:
+    pass
+
+# Hook sys.excepthook to log uncaught exceptions from threads/main
+def _excepthook(type_, value, tb):
+    try:
+        logging.exception("Uncaught exception", exc_info=(type_, value, tb))
+    except Exception:
+        pass
+
+sys.excepthook = _excepthook
 
 # --- Discord log forwarder ---
 import sys
@@ -11175,7 +11224,13 @@ async def check_supporter(request):
 
 # KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
 async def on_error(*args, **kwargs):
-    raise
+    # Previously this raised, which could crash the bot process on uncaught errors.
+    # Instead, log the error and continue so the process doesn't exit silently.
+    try:
+        logging.exception("on_error called with args=%s kwargs=%s", args, kwargs)
+    except Exception:
+        pass
+    return
 
 
 async def setup(bot2):
