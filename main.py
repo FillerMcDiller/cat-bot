@@ -10951,6 +10951,12 @@ async def recieve_vote(request):
 
     await user.save()
 
+    # Trigger reward handling across guild profiles for this user
+    try:
+        asyncio.create_task(reward_vote(int(request_json["user"])))
+    except Exception:
+        pass
+
     return web.Response(text="ok", status=200)
 
 
@@ -11279,6 +11285,10 @@ app = FastAPI()
 async def handle_vote(vote: dict):
     user_id = vote["user"]
     print(f"User {user_id} voted!")
+    try:
+        asyncio.create_task(reward_vote(int(user_id)))
+    except Exception:
+        pass
     # Example: give a role, send a DM, etc.
     # user = await bot.fetch_user(user_id)
     # await user.send("Thanks for voting!")
@@ -11300,3 +11310,118 @@ def run_webhook():
     uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT)
 
 threading.Thread(target=run_webhook, daemon=True).start()
+
+
+async def reward_vote(user_id: int):
+    """Apply vote rewards to all guild profiles for the given user_id.
+
+    This completes the 'vote' quest for any Profile in which the vote quest is available
+    (i.e. profile.vote_cooldown == 0). It mirrors the logic from progress(..., quest='vote')
+    but runs without a discord interaction.
+    """
+    try:
+        global_user = await User.get_or_create(user_id=user_id)
+    except Exception:
+        return
+
+    # iterate servers the bot is in and apply to each Profile for this user
+    for guild in list(bot.guilds):
+        try:
+            profile = await Profile.get_or_create(guild_id=guild.id, user_id=user_id)
+            # only apply if a vote quest is currently available
+            if getattr(profile, "vote_cooldown", 0) != 0:
+                continue
+
+            # ensure there's a vote_reward; if not, generate a sensible one
+            try:
+                qdata = battle.get("quests", {}).get("vote", {}).get("vote", {})
+                if not getattr(profile, "vote_reward", 0):
+                    profile.vote_reward = random.randint(qdata.get("xp_min", 250) // 10, qdata.get("xp_max", 350) // 10) * 10
+            except Exception:
+                if not getattr(profile, "vote_reward", 0):
+                    profile.vote_reward = 300
+
+            # set cooldown to user's recorded vote time
+            try:
+                profile.vote_cooldown = int(global_user.vote_time_topgg or int(time.time()))
+            except Exception:
+                profile.vote_cooldown = int(time.time())
+
+            # double on Fri/Sat/Sun per progress()
+            try:
+                voted_at = datetime.datetime.utcfromtimestamp(int(global_user.vote_time_topgg or time.time()))
+                if voted_at.weekday() >= 4:
+                    profile.vote_reward = int(profile.vote_reward) * 2
+            except Exception:
+                pass
+
+            # give streak pack if applicable
+            try:
+                streak_data = get_streak_reward(global_user.vote_streak)
+                if streak_data.get("reward"):
+                    profile[f"pack_{streak_data['reward']}"] += 1
+            except Exception:
+                pass
+
+            # compute xp and apply to battlepass progression (mirror of progress())
+            try:
+                current_xp = (profile.progress or 0) + int(profile.vote_reward or 0)
+            except Exception:
+                current_xp = int(getattr(profile, "vote_reward", 0) or 0)
+
+            profile.quests_completed = (profile.quests_completed or 0) + 1
+
+            # determine level data loop
+            try:
+                if profile.battlepass >= len(battle.get("seasons", {}).get(str(profile.season), [])):
+                    level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+                else:
+                    level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+            except Exception:
+                level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+
+            # apply level ups
+            try:
+                if current_xp >= level_data["xp"]:
+                    xp_progress = current_xp
+                    active_level_data = level_data
+                    while xp_progress >= active_level_data["xp"]:
+                        profile.battlepass += 1
+                        xp_progress -= active_level_data["xp"]
+                        profile.progress = xp_progress
+                        # award rewards
+                        try:
+                            if active_level_data["reward"] == "Rain":
+                                profile.rain_minutes = (profile.rain_minutes or 0) + active_level_data["amount"]
+                            elif active_level_data["reward"] in [p["name"] for p in pack_data]:
+                                profile[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
+                            elif active_level_data["reward"] in cattypes:
+                                profile[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
+                        except Exception:
+                            pass
+                        try:
+                            await profile.save()
+                        except Exception:
+                            pass
+                        # advance to next level_data
+                        if profile.battlepass >= len(battle.get("seasons", {}).get(str(profile.season), [])):
+                            active_level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+                        else:
+                            active_level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+                else:
+                    profile.progress = current_xp
+                try:
+                    await profile.save()
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    profile.progress = current_xp
+                    await profile.save()
+                except Exception:
+                    pass
+
+        except Exception:
+            # per-guild failure shouldn't stop others
+            continue
+
