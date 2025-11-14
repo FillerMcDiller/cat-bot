@@ -685,6 +685,88 @@ bot = commands.AutoShardedBot(
     intents=discord.Intents.default()
 )
 
+# --- Discord log forwarder ---
+import sys
+import logging
+
+# buffer for logs emitted before the bot is ready
+_pending_discord_logs: list[str] = []
+
+async def _post_log_to_discord(text: str):
+    try:
+        chan_id = int(getattr(config, "RAIN_CHANNEL_ID", 0) or 0)
+        if not chan_id:
+            return
+        ch = bot.get_channel(chan_id)
+        if ch is None:
+            try:
+                ch = await bot.fetch_channel(chan_id)
+            except Exception:
+                ch = None
+        if ch is None:
+            return
+        # split long messages into chunks to avoid message length limits
+        maxlen = 1900
+        if len(text) <= maxlen:
+            await ch.send(f"```\n{text}\n```")
+        else:
+            for i in range(0, len(text), maxlen):
+                await ch.send(f"```\n{text[i:i+maxlen]}\n```")
+    except Exception:
+        pass
+
+
+class DiscordLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            # if bot is not ready yet, store message
+            try:
+                if not bot or not getattr(bot, "is_ready", lambda: False)():
+                    _pending_discord_logs.append(msg)
+                    return
+            except Exception:
+                _pending_discord_logs.append(msg)
+                return
+            # schedule send
+            try:
+                asyncio.create_task(_post_log_to_discord(msg))
+            except Exception:
+                _pending_discord_logs.append(msg)
+        except Exception:
+            pass
+
+
+# redirect stdout/stderr to logger so print()s are captured
+class _StreamToLogger:
+    def __init__(self, logger: logging.Logger, level: int = logging.INFO):
+        self.logger = logger
+        self.level = level
+
+    def write(self, message: str):
+        message = message.rstrip("\n")
+        if not message:
+            return
+        try:
+            self.logger.log(self.level, message)
+        except Exception:
+            pass
+
+    def flush(self):
+        pass
+
+
+# attach handler to root logger
+_discord_handler = DiscordLogHandler()
+_discord_handler.setLevel(logging.INFO)
+formatter = logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s")
+_discord_handler.setFormatter(formatter)
+logging.getLogger().addHandler(_discord_handler)
+logging.getLogger().setLevel(logging.INFO)
+
+sys.stdout = _StreamToLogger(logging.getLogger("stdout"), logging.INFO)
+sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
+
 @bot.event
 async def on_ready():
     print(f"Bot ready! Logged in as {bot.user} | WS latency: {round(bot.latency*1000)}ms")
@@ -2297,6 +2379,16 @@ async def on_ready():
         return
     on_ready_debounce = True
     print("cat is now online")
+    # flush any pending logs that were recorded before bot was ready
+    try:
+        for msg in list(_pending_discord_logs):
+            try:
+                asyncio.create_task(_post_log_to_discord(msg))
+            except Exception:
+                pass
+        _pending_discord_logs.clear()
+    except Exception:
+        pass
     
     # Start the daily random rain task
     bot.loop.create_task(schedule_daily_rain())
