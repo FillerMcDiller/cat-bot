@@ -45,25 +45,22 @@ from discord.ui import Button, View
 from PIL import Image
 
 import topgg
+from topgg import WebhookManager
 
 import config
 import msg2img
 from catpg import RawSQL
 from database import Channel, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
+
 import time
 
 load_dotenv()
 
-WEBHOOK_AUTH = "TOPGG_WEBHOOK_AUTH"
-
 logging.basicConfig(level=logging.INFO)
-
 with open("config/aches.json", "r", encoding="utf-8-sig") as f:
-    ach_list = json.load(f)
-
-with open("config/battlepass.json", "r", encoding="utf-8-sig") as f:
-    battle = json.load(f)
+    ACHIEVEMENTS = json.load(f)
+    
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
 
@@ -11263,28 +11260,38 @@ async def breed(message: discord.Interaction, first: str, second: str):
 
         await message.response.send_message(reply_text)
 # --- END: Cat Breeding feature ---
-# Webhook manager
-webhook = topgg.WebhookManager(
-    WEBHOOK_AUTH,
-    endpoint="/webhook"      # route name, can be anything
-)
+import asyncio
+from fastapi import FastAPI, Request
+import threading
+import uvicorn
 
-@webhook.endpoint()
-async def on_vote(data):
-    user_id = int(data["user"])
-    is_weekend = data.get("isWeekend", False)
+WEBHOOK_AUTH = os.getenv('TOPGG_WEBHOOK_AUTH', None)
+WEBHOOK_PORT = 3000
 
-    print(f"[TOP.GG] User {user_id} voted! Weekend: {is_weekend}")
+app = FastAPI()
 
-    # Reward logic (example)
-    try:
-        user = await bot.fetch_user(user_id)
-        await user.send("🎉 Thanks for voting on Top.gg!")
-    except Exception as e:
-        print("Failed to DM voter:", e)
+# Async function to trigger bot actions on vote
+async def handle_vote(vote: dict):
+    user_id = vote["user"]
+    print(f"User {user_id} voted!")
+    # Example: give a role, send a DM, etc.
+    # user = await bot.fetch_user(user_id)
+    # await user.send("Thanks for voting!")
 
-# Start webhook server when bot starts
-async def setup_hook():
-    bot.topgg_webhook = webhook
+# FastAPI route for webhook
+@app.post("/webhook")
+async def webhook_endpoint(req: Request):
+    # Verify Top.gg password
+    if req.headers.get("Authorization") != WEBHOOK_AUTH:
+        return {"error": "Unauthorized"}
 
-bot.setup_hook = setup_hook
+    data = await req.json()
+    # Fire async bot event
+    asyncio.create_task(handle_vote(data))
+    return {"status": "ok"}
+
+# Run FastAPI in a separate thread so bot keeps running
+def run_webhook():
+    uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT)
+
+threading.Thread(target=run_webhook, daemon=True).start()
