@@ -752,8 +752,21 @@ async def _schedule_flush(delay: float = _DISCORD_FLUSH_INTERVAL):
 class DiscordLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            # Filter noisy discord.py HTTP rate-limit messages — don't forward them
+            try:
+                message_text = record.getMessage() or ""
+            except Exception:
+                message_text = ""
+            lower_msg = message_text.lower()
+            # common rate-limit indicators
+            if record.name.startswith("discord.http") and ("we are being rate limited" in lower_msg or "429" in lower_msg or "rate limited" in lower_msg):
+                return
+            if "we are being rate limited" in lower_msg or "retrying in" in lower_msg or "rate limited" in lower_msg:
+                return
+
             # Keep log messages concise — single-line summaries
             msg = self.format(record).splitlines()[0]
+
             # if bot is not ready yet, store message
             try:
                 if not bot or not getattr(bot, "is_ready", lambda: False)():
