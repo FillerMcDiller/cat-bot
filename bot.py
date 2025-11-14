@@ -17,6 +17,7 @@
 import asyncio
 import importlib
 import time
+import logging
 
 import discord
 import winuvloop
@@ -44,6 +45,14 @@ bot = commands.AutoShardedBot(
 async def setup_hook():
     await database.connect()
     await bot.load_extension("main")
+
+    # start the FastAPI webhook server in a background thread so voting works
+    try:
+        import main as main_module
+        import webhook_server
+        webhook_server.start_webhook_thread(bot.loop, main_module.reward_vote, port=3001, auth=getattr(config, "WEBHOOK_VERIFY", None))
+    except Exception:
+        logging.exception("Failed to start webhook server")
 
 
 async def reload(reload_db):

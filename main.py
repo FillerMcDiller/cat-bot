@@ -75,62 +75,11 @@ with open(BATTLEPASS_FILE, "r", encoding="utf-8-sig") as f:
 print("Aches loaded:", len(aches_data))
 print("Battlepass loaded:", len(battlepass_data))
 
-import threading
-import uvicorn
-from fastapi import FastAPI, Request
-import asyncio
-import sys
-
-WEBHOOK_PORT = 3001
-WEBHOOK_AUTH = "passtest"
-
-app = FastAPI()
-
+# Webhook server is handled by `webhook_server.py`.
+# The reward logic for votes lives here below and will be scheduled by the webhook server.
 async def reward_vote(user_id: int):
     # your reward logic here
     print(f"Rewarding vote for user {user_id}", flush=True)
-
-@app.post("/dblwebhook")
-async def handle_vote(req: Request):
-    if req.headers.get("Authorization") != WEBHOOK_AUTH:
-        return {"error": "unauthorized"}, 401
-
-    data = await req.json()
-    user_id = int(data.get("user"))
-    print(f"Vote received from user {user_id}!", flush=True)
-
-    asyncio.create_task(reward_vote(user_id))
-    return {"status": "ok"}
-
-def start_webhook():
-    # Run the webhook server in a resilient loop. If uvicorn.run exits unexpectedly
-    # we'll wait briefly and restart it so the process doesn't keep only FastAPI alive
-    # while the bot has failed.
-    while True:
-        try:
-            uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT, log_level="info")
-            # If uvicorn exits normally, wait a bit and restart
-            time.sleep(5)
-        except Exception:
-            try:
-                logging.exception("FastAPI webhook crashed; restarting in 5s")
-            except Exception:
-                pass
-            try:
-                time.sleep(5)
-            except Exception:
-                pass
-
-if __name__ == "__main__":
-    # When run directly, start the FastAPI webhook in a background thread
-    threading.Thread(target=start_webhook, daemon=True).start()
-
-    # keep main thread alive when running standalone
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Server shutting down", flush=True)
 
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
