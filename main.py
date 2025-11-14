@@ -121,15 +121,16 @@ def start_webhook():
             except Exception:
                 pass
 
-# start FastAPI in a background thread
-threading.Thread(target=start_webhook, daemon=True).start()
+if __name__ == "__main__":
+    # When run directly, start the FastAPI webhook in a background thread
+    threading.Thread(target=start_webhook, daemon=True).start()
 
-# example: keep main thread alive
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Server shutting down", flush=True)
+    # keep main thread alive when running standalone
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Server shutting down", flush=True)
 
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
