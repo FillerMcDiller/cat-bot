@@ -45,7 +45,6 @@ from discord.ui import Button, View
 from PIL import Image
 
 import topgg
-from topgg import WebhookManager
 
 import config
 import msg2img
@@ -59,12 +58,22 @@ load_dotenv()
 
 import os
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "aches.json", "battlepass.json")
+BASE_PATH = os.path.dirname(__file__)
+CONFIG_PATH = os.path.join(BASE_PATH, "config")
 
-with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-    ACHIEVEMENTS = load.json(f)
-    BATTLEPASS = load.json(f)
+# Load aches.json
+ACHES_FILE = os.path.join(CONFIG_PATH, "aches.json")
+with open(ACHES_FILE, "r", encoding="utf-8-sig") as f:
+    aches_data = json.load(f)
 
+# Load battlepass.json
+BATTLEPASS_FILE = os.path.join(CONFIG_PATH, "battlepass.json")
+with open(BATTLEPASS_FILE, "r", encoding="utf-8-sig") as f:
+    battlepass_data = json.load(f)
+
+# Now you can use aches_data and battlepass_data anywhere in your bot
+print("Aches loaded:", len(aches_data))
+print("Battlepass loaded:", len(battlepass_data))
     
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
