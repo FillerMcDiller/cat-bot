@@ -692,7 +692,13 @@ import logging
 # buffer for logs emitted before the bot is ready
 _pending_discord_logs: list[str] = []
 
-async def _post_log_to_discord(text: str):
+# in-memory buffer and scheduling state to avoid spamming the Discord channel
+_discord_log_buffer: list[str] = []
+_discord_flush_scheduled = False
+_DISCORD_FLUSH_INTERVAL = 5.0  # seconds to wait before flushing accumulated logs
+_DISCORD_MAX_LINES = 200
+
+async def _post_log_batch_to_discord(lines: list[str]):
     try:
         chan_id = int(getattr(config, "RAIN_CHANNEL_ID", 0) or 0)
         if not chan_id:
@@ -705,21 +711,49 @@ async def _post_log_to_discord(text: str):
                 ch = None
         if ch is None:
             return
-        # split long messages into chunks to avoid message length limits
+
+        if not lines:
+            return
+
+        # Limit the number of lines sent to avoid flooding; indicate truncation
+        send_lines = lines[:_DISCORD_MAX_LINES]
+        dropped = len(lines) - len(send_lines)
+        payload = "\n".join(send_lines)
+        if dropped > 0:
+            payload += f"\n...+{dropped} more lines suppressed..."
+
+        # break into chunks respecting Discord message length
         maxlen = 1900
-        if len(text) <= maxlen:
-            await ch.send(f"```\n{text}\n```")
+        if len(payload) <= maxlen:
+            await ch.send(f"```\n{payload}\n```")
         else:
-            for i in range(0, len(text), maxlen):
-                await ch.send(f"```\n{text[i:i+maxlen]}\n```")
+            for i in range(0, len(payload), maxlen):
+                await ch.send(f"```\n{payload[i:i+maxlen]}\n```")
     except Exception:
         pass
+
+
+async def _schedule_flush(delay: float = _DISCORD_FLUSH_INTERVAL):
+    global _discord_flush_scheduled
+    try:
+        await asyncio.sleep(delay)
+        # swap buffer
+        if not _discord_log_buffer:
+            _discord_flush_scheduled = False
+            return
+        lines = _discord_log_buffer.copy()
+        _discord_log_buffer.clear()
+        _discord_flush_scheduled = False
+        await _post_log_batch_to_discord(lines)
+    except Exception:
+        _discord_flush_scheduled = False
 
 
 class DiscordLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            msg = self.format(record)
+            # Keep log messages concise — single-line summaries
+            msg = self.format(record).splitlines()[0]
             # if bot is not ready yet, store message
             try:
                 if not bot or not getattr(bot, "is_ready", lambda: False)():
@@ -728,16 +762,21 @@ class DiscordLogHandler(logging.Handler):
             except Exception:
                 _pending_discord_logs.append(msg)
                 return
-            # schedule send
-            try:
-                asyncio.create_task(_post_log_to_discord(msg))
-            except Exception:
-                _pending_discord_logs.append(msg)
+
+            # append to in-memory buffer and schedule a flush (best-effort)
+            _discord_log_buffer.append(msg)
+            global _discord_flush_scheduled
+            if not _discord_flush_scheduled:
+                _discord_flush_scheduled = True
+                try:
+                    asyncio.create_task(_schedule_flush())
+                except Exception:
+                    _discord_flush_scheduled = False
         except Exception:
             pass
 
 
-# redirect stdout/stderr to logger so print()s are captured
+# redirect stdout/stderr to logger so print()s are captured but not spammy
 class _StreamToLogger:
     def __init__(self, logger: logging.Logger, level: int = logging.INFO):
         self.logger = logger
@@ -747,6 +786,9 @@ class _StreamToLogger:
         message = message.rstrip("\n")
         if not message:
             return
+        # only log short, non-empty lines to prevent spam
+        if len(message) > 1000:
+            message = message[:1000] + "..."
         try:
             self.logger.log(self.level, message)
         except Exception:
@@ -758,12 +800,13 @@ class _StreamToLogger:
 
 # attach handler to root logger
 _discord_handler = DiscordLogHandler()
-_discord_handler.setLevel(logging.INFO)
+_discord_handler.setLevel(logging.WARNING)  # only forward warnings and above by default
 formatter = logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s")
 _discord_handler.setFormatter(formatter)
 logging.getLogger().addHandler(_discord_handler)
 logging.getLogger().setLevel(logging.INFO)
 
+# Redirect stdout/stderr into logging (will be INFO/ERROR level; handler filters by WARNING)
 sys.stdout = _StreamToLogger(logging.getLogger("stdout"), logging.INFO)
 sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
 
