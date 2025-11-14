@@ -55,6 +55,8 @@ import time
 
 load_dotenv()
 
+WEBHOOK_AUTH = "TOPGG_WEBHOOK_AUTH"
+
 logging.basicConfig(level=logging.INFO)
 
 with open("config/aches.json", "r", encoding="utf-8-sig") as f:
