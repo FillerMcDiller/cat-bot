@@ -36,16 +36,34 @@ def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, a
         # Otherwise forward to bot's internal HTTP endpoint if configured
         target_port = internal_port or int(os.getenv("BOT_INTERNAL_PORT", "3002"))
         if target_port:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    await session.post(f"http://127.0.0.1:{target_port}/_internal_vote", json={"user": user_id}, timeout=5)
-            except Exception:
+            # Try a few times to forward to the bot's internal endpoint in case the bot is still starting.
+            forwarded = False
+            last_exc = None
+            for attempt in range(5):
                 try:
-                    logging.exception("Failed to forward vote to bot internal endpoint")
+                    async with aiohttp.ClientSession() as session:
+                        await session.post(f"http://127.0.0.1:{target_port}/_internal_vote", json={"user": user_id}, timeout=5)
+                    forwarded = True
+                    break
+                except Exception as e:
+                    last_exc = e
+                    try:
+                        logging.warning("Forward attempt %s to internal port %s failed: %s", attempt + 1, target_port, e)
+                    except Exception:
+                        pass
+                    # small backoff
+                    try:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                    except Exception:
+                        pass
+
+            if not forwarded:
+                try:
+                    logging.exception("Failed to forward vote to bot internal endpoint after retries", exc_info=last_exc)
                 except Exception:
                     pass
-
-        logging.info("Vote received for user %s forwarded to bot", user_id)
+            else:
+                logging.info("Vote received for user %s forwarded to bot internal port %s", user_id, target_port)
         return {"status": "ok"}
 
     return app

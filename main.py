@@ -963,6 +963,10 @@ async def start_internal_server(port: int = 3002):
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", port)
         await site.start()
+        try:
+            print(f"Internal vote receiver listening on 127.0.0.1:{port}", flush=True)
+        except Exception:
+            logging.info("Internal vote receiver listening on 127.0.0.1:%s", port)
     except Exception:
         logging.exception("Failed to start internal vote receiver server")
 
