@@ -57,9 +57,13 @@ import time
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
-with open("config/aches.json", "r", encoding="utf-8-sig") as f:
-    ACHIEVEMENTS = json.load(f)
+import os
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "aches.json", "battlepass.json")
+
+with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+    # your code here
+
     
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
