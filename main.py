@@ -11439,45 +11439,30 @@ from fastapi import FastAPI, Request
 import threading
 import uvicorn
 
+WEBHOOK_PORT = 3001
 WEBHOOK_AUTH = os.getenv('TOPGG_WEBHOOK_AUTH', None)
-WEBHOOK_PORT = 3000
 
 app = FastAPI()
 
-# Async function to trigger bot actions on vote
-async def handle_vote(vote: dict):
-    user_id = vote["user"]
-    print(f"User {user_id} voted!")
-    try:
-        asyncio.create_task(reward_vote(int(user_id)))
-    except Exception:
-        pass
-    # also log to the central cat log channel so staff can see votes
-    try:
-        asyncio.create_task(log_vote_to_channel(int(user_id), source="fastapi"))
-    except Exception:
-        pass
-    # Example: give a role, send a DM, etc.
-    # user = await bot.fetch_user(user_id)
-    # await user.send("Thanks for voting!")
-
-# FastAPI route for webhook
-@app.post("/webhook")
-async def webhook_endpoint(req: Request):
-    # Verify Top.gg password
-    if req.headers.get("Authorization") != WEBHOOK_AUTH:
-        return {"error": "Unauthorized"}
+@app.post("/dblwebhook")
+async def handle_vote(req: Request):
+    if req.headers.get("authorization") != WEBHOOK_AUTH:
+        return {"error": "unauthorized"}, 401
 
     data = await req.json()
-    # Fire async bot event
-    asyncio.create_task(handle_vote(data))
+    user_id = int(data.get("user"))
+    print(f"Vote received from user {user_id}!")
+
+    # call your existing reward_vote function
+    asyncio.create_task(reward_vote(user_id))
+
     return {"status": "ok"}
 
-# Run FastAPI in a separate thread so bot keeps running
-def run_webhook():
+# Run FastAPI inside a separate thread so the bot can continue running
+def start_webhook():
     uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT)
 
-threading.Thread(target=run_webhook, daemon=True).start()
+threading.Thread(target=start_webhook, daemon=True).start()
 
 
 async def reward_vote(user_id: int):
