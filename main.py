@@ -11263,9 +11263,6 @@ async def breed(message: discord.Interaction, first: str, second: str):
 
         await message.response.send_message(reply_text)
 # --- END: Cat Breeding feature ---
-
-WEBHOOK_AUTH = "TOPGG_WEBHOOK_AUTH"
-
 # Webhook manager
 webhook = topgg.WebhookManager(
     WEBHOOK_AUTH,
