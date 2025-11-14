@@ -74,7 +74,48 @@ with open(BATTLEPASS_FILE, "r", encoding="utf-8-sig") as f:
 # Now you can use aches_data and battlepass_data anywhere in your bot
 print("Aches loaded:", len(aches_data))
 print("Battlepass loaded:", len(battlepass_data))
-    
+
+import threading
+import uvicorn
+from fastapi import FastAPI, Request
+import asyncio
+import sys
+
+WEBHOOK_PORT = 3001
+WEBHOOK_AUTH = "passtest"
+
+app = FastAPI()
+
+async def reward_vote(user_id: int):
+    # your reward logic here
+    print(f"Rewarding vote for user {user_id}", flush=True)
+
+@app.post("/dblwebhook")
+async def handle_vote(req: Request):
+    if req.headers.get("Authorization") != WEBHOOK_AUTH:
+        return {"error": "unauthorized"}, 401
+
+    data = await req.json()
+    user_id = int(data.get("user"))
+    print(f"Vote received from user {user_id}!", flush=True)
+
+    asyncio.create_task(reward_vote(user_id))
+    return {"status": "ok"}
+
+def start_webhook():
+    # uvicorn.run blocks, so running in a thread is fine
+    uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT, log_level="info")
+
+# start FastAPI in a background thread
+threading.Thread(target=start_webhook, daemon=True).start()
+
+# example: keep main thread alive
+try:
+    while True:
+        asyncio.sleep(1)
+except KeyboardInterrupt:
+    print("Server shutting down", flush=True)
+
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
 
@@ -11434,36 +11475,6 @@ async def breed(message: discord.Interaction, first: str, second: str):
 
         await message.response.send_message(reply_text)
 # --- END: Cat Breeding feature ---
-import asyncio
-from fastapi import FastAPI, Request
-import threading
-import uvicorn
-
-WEBHOOK_PORT = 3001
-WEBHOOK_AUTH = os.getenv('TOPGG_WEBHOOK_AUTH', None)
-
-app = FastAPI()
-
-@app.post("/dblwebhook")
-async def handle_vote(req: Request):
-    if req.headers.get("authorization") != WEBHOOK_AUTH:
-        return {"error": "unauthorized"}, 401
-
-    data = await req.json()
-    user_id = int(data.get("user"))
-    print(f"Vote received from user {user_id}!")
-
-    # call your existing reward_vote function
-    asyncio.create_task(reward_vote(user_id))
-
-    return {"status": "ok"}
-
-# Run FastAPI inside a separate thread so the bot can continue running
-def start_webhook():
-    uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT)
-
-threading.Thread(target=start_webhook, daemon=True).start()
-
 
 async def reward_vote(user_id: int):
     """Apply vote rewards to all guild profiles for the given user_id.
@@ -11613,4 +11624,3 @@ async def log_vote_to_channel(user_id: int, source: str = "unknown"):
                 pass
     except Exception:
         pass
-
