@@ -35,6 +35,14 @@ def _make_app(reward_coro=None, loop: asyncio.AbstractEventLoop | None = None, a
 
         # Otherwise forward to bot's internal HTTP endpoint if configured
         target_port = internal_port or int(os.getenv("BOT_INTERNAL_PORT", "3002"))
+        # detect misconfiguration where bot internal port equals webhook's public port
+        try:
+            own_port = int(os.getenv("WEBHOOK_PORT", "3001"))
+        except Exception:
+            own_port = None
+        if own_port and target_port == own_port:
+            logging.error("Misconfiguration: webhook's internal target port %s equals its public port %s. Set BOT_INTERNAL_PORT / INTERNAL_WEBHOOK_PORT to a different port.", target_port, own_port)
+            return {"error": "misconfigured internal port"}, 500
         if target_port:
             # Try a few times to forward to the bot's internal endpoint in case the bot is still starting.
             forwarded = False

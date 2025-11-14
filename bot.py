@@ -73,7 +73,19 @@ def _start_webhook_process():
     env["WEBHOOK_PORT"] = str(getattr(config, "WEBHOOK_PORT", 3001) or 3001)
     if getattr(config, "WEBHOOK_VERIFY", None):
         env["WEBHOOK_VERIFY"] = str(getattr(config, "WEBHOOK_VERIFY"))
-    env["BOT_INTERNAL_PORT"] = str(getattr(config, "INTERNAL_WEBHOOK_PORT", 3002) or 3002)
+    # choose internal port (bot listens here); avoid collision with webhook port
+    configured_internal = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 0)
+    webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
+    if configured_internal and configured_internal != 0:
+        internal_port = configured_internal
+    else:
+        internal_port = 3002
+    # if internal port collides with webhook port, bump it
+    if internal_port == webhook_port:
+        internal_port = webhook_port + 1
+        logging.warning("INTERNAL_WEBHOOK_PORT conflicted with WEBHOOK_PORT; using %s instead", internal_port)
+
+    env["BOT_INTERNAL_PORT"] = str(internal_port)
 
     creationflags = 0
     if os.name == "nt":
