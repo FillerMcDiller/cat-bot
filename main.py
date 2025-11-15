@@ -931,6 +931,12 @@ async def setup_hook():
             logging.exception("Failed to start internal vote receiver")
     except Exception:
         pass
+    # Try to load Battles cog if available
+    try:
+        bot.load_extension("battles")
+    except Exception:
+        logging.exception("Failed to load 'battles' extension")
+
     # Ensure application commands are registered
     try:
         await bot.tree.sync()
@@ -938,6 +944,23 @@ async def setup_hook():
         pass
 
 bot.setup_hook = setup_hook
+
+
+# Backwards-compatible slash command wrapper for the Battles cog
+@bot.tree.command(name="fight", description="Battle another trainer (1v1).")
+@discord.app_commands.describe(opponent="Who to fight")
+async def fight(interaction: discord.Interaction, opponent: discord.Member):
+    await interaction.response.defer()
+    cog = bot.get_cog("BattlesCog")
+    if not cog:
+        await interaction.followup.send("Battles feature not available.", ephemeral=True)
+        return
+    try:
+        # `start_fight` expects (channel, user1, user2)
+        await cog.start_fight(interaction.channel, interaction.user, opponent)
+    except Exception as e:
+        logging.exception("Error starting fight: %s", e)
+        await interaction.followup.send("Failed to start fight.", ephemeral=True)
 
 
 async def start_internal_server(port: int = 3002):
