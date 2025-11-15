@@ -911,14 +911,24 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     bot.loop.create_task(background_index_all_cats())
-    # start an in-process aiohttp webhook to receive Top.gg forwards on WEBHOOK_PORT
+    # start the internal HTTP receiver on localhost for external webhook forwards
     try:
-        webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
-        webhook_auth = getattr(config, "WEBHOOK_VERIFY", None)
+        env_port = os.getenv("BOT_INTERNAL_PORT")
+        if env_port:
+            internal_port = int(env_port)
+        else:
+            internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3002)
+
+        # avoid accidental collision with public webhook port
+        public_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
+        if internal_port == public_port:
+            internal_port = public_port + 1
+            print(f"Adjusted internal webhook port to {internal_port} to avoid conflict with public webhook", flush=True)
+
         try:
-            bot.loop.create_task(start_public_webhook(webhook_port, webhook_auth))
+            bot.loop.create_task(start_internal_server(internal_port))
         except Exception:
-            logging.exception("Failed to start in-process public webhook")
+            logging.exception("Failed to start internal vote receiver")
     except Exception:
         pass
     # Ensure application commands are registered

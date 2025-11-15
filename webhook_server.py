@@ -37,6 +37,7 @@ async def handle_vote(req: Request):
             async with aiohttp.ClientSession() as session:
                 async with session.post(target, json={"user": user_id}, timeout=5) as resp:
                     if resp.status == 200:
+                        logging.info("Successfully forwarded vote for %s to internal endpoint", user_id)
                         return {"status": "ok"}
                     else:
                         text = await resp.text()
