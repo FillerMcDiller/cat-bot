@@ -12328,6 +12328,10 @@ async def atm(message: discord.Interaction):
             if interaction.user.id != self.author_id:
                 await do_funny(interaction)
                 return
+            
+            # Defer the interaction immediately to prevent timeout
+            await interaction.response.defer()
+            
             # Build a dropdown (Select) of cat types the user can convert (per-instance availability checked)
             profile = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
             options = []
@@ -12346,7 +12350,7 @@ async def atm(message: discord.Interaction):
 
             if not options:
                 # Nothing to list — complete next bit: inform user and return
-                await interaction.response.send_message("You have no convertible cats (all either favourite or on adventure).", ephemeral=True)
+                await interaction.followup.send("You have no convertible cats (all either favourite or on adventure).", ephemeral=True)
                 return
 
             class CatTypeSelect(discord.ui.Select):
@@ -12590,7 +12594,7 @@ async def atm(message: discord.Interaction):
             ct_view = View(timeout=120)
             ct_view.add_item(CatTypeSelect(options))
             try:
-                await interaction.response.edit_message(content="Choose a cat type to convert:", embed=None, view=ct_view)
+                await interaction.edit_original_response(content="Choose a cat type to convert:", embed=None, view=ct_view)
             except Exception:
                 try:
                     await interaction.followup.send("Choose a cat type to convert:", view=ct_view, ephemeral=True)
