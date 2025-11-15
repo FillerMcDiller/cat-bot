@@ -18,7 +18,6 @@ import asyncio
 import importlib
 import time
 import logging
-import os
 
 import discord
 import winuvloop
@@ -28,8 +27,6 @@ import config
 from config import TOKEN
 import database
 import catpg
-
-from webhook import start_webhook_thread  # <- your webhook integration
 
 winuvloop.install()
 
@@ -48,6 +45,14 @@ bot = commands.AutoShardedBot(
 async def setup_hook():
     await database.connect()
     await bot.load_extension("main")
+    # start the in-process FastAPI webhook so Top.gg can POST to it
+    try:
+        import main as main_module
+        import fastapi_webhook
+        fastapi_webhook.start_inproc_webhook(bot.loop, main_module.reward_vote, port=int(getattr(config, "WEBHOOK_PORT", 3001) or 3001), auth=getattr(config, "WEBHOOK_VERIFY", None))
+    except Exception:
+        logging.exception("Failed to start in-process webhook server")
+
 
 async def reload(reload_db):
     try:
@@ -61,33 +66,15 @@ async def reload(reload_db):
         await database.connect()
     await bot.load_extension("main")
 
+
 bot.cat_bot_reload_hook = reload  # pyright: ignore
 
+def _start_webhook_process():
+    # legacy: no-op; we now start the webhook in-process via setup_hook
+    return None
 
-async def main():
-    loop = asyncio.get_event_loop()
-
-    # Start the webhook on port 3001
-    webhook_auth = getattr(config, "WEBHOOK_VERIFY", "passtest")
-    start_webhook_thread(loop, reward_coro=reward_vote, port=3001, auth=webhook_auth)
-
-    # Run the Discord bot
-    await bot.start(TOKEN)
-
-async def reward_vote(user_id: int):
-    """
-    This coroutine is called whenever a vote is received.
-    """
-    try:
-        logging.info("Vote received from user %s!", user_id)
-        # Put your vote reward logic here
-        await asyncio.sleep(0.1)  # placeholder for async DB or other operations
-    except Exception:
-        logging.exception("Error rewarding vote for user %s", user_id)
-
-if __name__ == "__main__":
+try:
     config.HARD_RESTART_TIME = time.time()
-    try:
-        asyncio.run(main())
-    finally:
-        asyncio.run(database.close())
+    bot.run(config.TOKEN)
+finally:
+    asyncio.run(database.close())
