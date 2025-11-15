@@ -930,6 +930,51 @@ async def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
     return updated
 
 
+async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
+    """Automatically sync cat instances with database counts.
+    
+    If a specific cat_type is provided, only sync that type.
+    Otherwise, sync all types where DB count > instance count.
+    
+    This ensures instances are always created when cats are added,
+    even if they were added through old code paths that only increment counters.
+    """
+    try:
+        guild_id = profile.guild_id
+        user_id = profile.user_id
+    except Exception:
+        return
+    
+    # Get current instances
+    cats = await get_user_cats(guild_id, user_id)
+    
+    # Count instances by type
+    from collections import Counter
+    instance_counts = Counter(c.get("type") for c in cats if c.get("type"))
+    
+    # Determine which types to check
+    types_to_check = [cat_type] if cat_type else cattypes
+    
+    # Check each type and create missing instances
+    created_any = False
+    for ct in types_to_check:
+        try:
+            db_count = int(profile.get(f"cat_{ct}") or 0)
+        except Exception:
+            db_count = 0
+        
+        inst_count = instance_counts.get(ct, 0)
+        
+        if db_count > inst_count:
+            missing = db_count - inst_count
+            if missing > 0:
+                # Create missing instances
+                await _create_instances_only(guild_id, user_id, ct, missing)
+                created_any = True
+    
+    return created_any
+
+
 # Global tracking variables
 RAIN_CHANNELS = {}  # Tracks active rain events
 active_adventures = {}  # Tracks active adventures
@@ -4042,91 +4087,48 @@ async def start_public_webhook(port: int = 3001, auth: str | None = None):
 
 
 async def background_index_all_cats():
-    """Background task: ensure per-instance JSON and DB aggregated counters are in sync.
+    """Background task: ensure cat instances are in sync with DB aggregated counters.
 
-    - For each guild/user entry in data/cats.json, counts instances per cat type.
-    - If DB aggregated counter < instance count, bump DB counter to match.
-    - If DB aggregated counter > instance count, create missing instances to match the DB (so instances exist for selection flows).
-    Runs once on startup and then every 30 minutes.
+    - For all users in the database, checks if DB cat counts match instance counts.
+    - If DB counter > instance count, creates missing instances automatically.
+    Runs once on startup (after 10 second delay) and then every 30 minutes.
     """
     await bot.wait_until_ready()
-    await asyncio.sleep(5)  # small delay for DB readiness
-    import collections
+    await asyncio.sleep(10)  # delay for DB readiness
+    
+    run_count = 0
 
     while not bot.is_closed():
         try:
-            db = _ensure_cat_db()
-            # iterate guilds
-            for guild_str, users in list(db.items()):
-                try:
-                    guild_id = int(guild_str)
-                except Exception:
-                    continue
-                # iterate users for this guild
-                for user_str, cats in list(users.items()):
+            run_count += 1
+            print(f"[AUTO-SYNC] Starting background cat instance sync (run #{run_count})...")
+            
+            synced_users = 0
+            synced_cats = 0
+            
+            # Get all profiles from database
+            try:
+                # Query all profiles that have at least one cat
+                profiles = await Profile.fetch_all()
+                
+                for profile in profiles:
                     try:
-                        user_id = int(user_str)
-                    except Exception:
-                        continue
-                    try:
-                        # count instances per type (exclude None)
-                        counter = collections.Counter()
-                        for c in cats:
-                            try:
-                                t = c.get("type")
-                                if t:
-                                    counter[t] += 1
-                            except Exception:
-                                continue
-
-                        # fetch profile
-                        try:
-                            profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
-                            await profile.refresh_from_db()
-                        except Exception:
-                            profile = None
-
-                        # for each cat type seen in either counter or DB, reconcile
-                        types_to_check = set(list(counter.keys()))
-                        if profile:
-                            for ct in cattypes:
-                                try:
-                                    dbcount = int(profile.get(f"cat_{ct}") or 0)
-                                except Exception:
-                                    dbcount = 0
-                                if dbcount > 0:
-                                    types_to_check.add(ct)
-
-                        for cat_type in types_to_check:
-                            inst_count = int(counter.get(cat_type, 0))
-                            db_count = 0
-                            if profile:
-                                try:
-                                    db_count = int(profile.get(f"cat_{cat_type}") or 0)
-                                except Exception:
-                                    db_count = 0
-
-                            # If DB counter is less than instance count, increase DB counter to match
-                            if profile and db_count < inst_count:
-                                try:
-                                    profile[f"cat_{cat_type}"] = inst_count
-                                    await profile.save()
-                                except Exception:
-                                    pass
-
-                            # If DB counter is greater than instance count, create missing instances in JSON
-                            if db_count > inst_count:
-                                missing = db_count - inst_count
-                                if missing > 0:
-                                    try:
-                                        _create_instances_only(guild_id, user_id, cat_type, missing)
-                                    except Exception:
-                                        pass
-                    except Exception:
+                        # Auto-sync this user's instances
+                        created = await auto_sync_cat_instances(profile)
+                        if created:
+                            synced_users += 1
+                            # Count how many cats were synced
+                            cats = await get_user_cats(profile.guild_id, profile.user_id)
+                            synced_cats += len(cats)
+                    except Exception as e:
                         # per-user failure shouldn't stop whole pass
                         continue
-        except Exception:
-            pass
+                
+                print(f"[AUTO-SYNC] Complete: {synced_users} users synced, ~{synced_cats} total instances")
+            except Exception as e:
+                print(f"[AUTO-SYNC] Error during sync: {e}")
+        except Exception as e:
+            print(f"[AUTO-SYNC] Fatal error: {e}")
 
         # run again in 30 minutes
         await asyncio.sleep(30 * 60)
@@ -5188,6 +5190,8 @@ async def maintaince_loop():
                             try:
                                 profile[f"cat_{rare_cat}"] += 1
                                 await profile.save()
+                                # Auto-sync instances if counter was incremented
+                                await auto_sync_cat_instances(profile, rare_cat)
                             except Exception:
                                 pass
                         # restore the adventuring instance if present
@@ -5201,6 +5205,8 @@ async def maintaince_loop():
                             try:
                                 profile[f"cat_{cat_sent}"] += 1
                                 await profile.save()
+                                # Auto-sync instances if counter was incremented
+                                await auto_sync_cat_instances(profile, cat_sent)
                             except Exception:
                                 pass
                     # award extra rain scaled by luck
@@ -5323,6 +5329,8 @@ async def maintaince_loop():
                             try:
                                 profile[f"cat_{cat_type}"] += amount
                                 await profile.save()
+                                # Auto-sync instances if counter was incremented
+                                await auto_sync_cat_instances(profile, cat_type)
                             except Exception:
                                 pass
                         # restore the adventuring instance if present
@@ -5336,6 +5344,8 @@ async def maintaince_loop():
                             try:
                                 profile[f"cat_{cat_sent}"] += 1
                                 await profile.save()
+                                # Auto-sync instances if counter was incremented
+                                await auto_sync_cat_instances(profile, cat_sent)
                             except Exception:
                                 pass
                     reward_text = f"🎁 Your {cat_sent} returned with **{amount}x {cat_type}** cat(s)!"
@@ -5365,6 +5375,8 @@ async def maintaince_loop():
                             try:
                                 profile[f"cat_{cat_sent}"] += 1
                                 await profile.save()
+                                # Auto-sync instances if counter was incremented
+                                await auto_sync_cat_instances(profile, cat_sent)
                             except Exception:
                                 pass
                     reward_text = f"🥣 Your {cat_sent} returned with **{kibble_amt}** Kibble!"
@@ -5399,6 +5411,8 @@ async def maintaince_loop():
                         try:
                             profile[f"cat_{cat_sent}"] += 1
                             await profile.save()
+                            # Auto-sync instances if counter was incremented
+                            await auto_sync_cat_instances(profile, cat_sent)
                         except Exception:
                             pass
                     reward_text = f"☔ Your {cat_sent} attracted **{minutes}** minutes of Cat Rain!"
@@ -12499,6 +12513,9 @@ async def casino(message: discord.Interaction):
         profile.cat_Fine += amount - 5
         profile.gambles += 1
         await profile.save()
+        
+        # Auto-sync instances for Fine cats
+        await auto_sync_cat_instances(profile, "Fine")
 
         if profile.gambles >= 10:
             await achemb(message, "gambling_one", "send")
@@ -14519,6 +14536,9 @@ async def breed(message: discord.Interaction, first: str, second: str):
         # award offspring
         profile[f"cat_{offspring}"] += 1
         await profile.save()
+        
+        # Auto-sync instance for offspring
+        await auto_sync_cat_instances(profile, offspring)
 
         # award "Freak 😼" for performing a successful breed
         try:
@@ -14660,6 +14680,8 @@ async def reward_vote(user_id: int):
                                 profile[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
                             elif active_level_data["reward"] in cattypes:
                                 profile[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
+                                # Auto-sync instance for cat rewards
+                                await auto_sync_cat_instances(profile, active_level_data['reward'])
                         except Exception:
                             pass
                         try:
@@ -14733,6 +14755,8 @@ async def _apply_xp_to_profile(profile, xp: int):
                         profile[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
                     elif active_level_data["reward"] in cattypes:
                         profile[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
+                        # Auto-sync instance for cat rewards
+                        await auto_sync_cat_instances(profile, active_level_data['reward'])
                 except Exception:
                     pass
                 try:
