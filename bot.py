@@ -45,13 +45,6 @@ bot = commands.AutoShardedBot(
 async def setup_hook():
     await database.connect()
     await bot.load_extension("main")
-    # start the in-process FastAPI webhook so Top.gg can POST to it
-    try:
-        import main as main_module
-        import fastapi_webhook
-        fastapi_webhook.start_inproc_webhook(bot.loop, main_module.reward_vote, port=int(getattr(config, "WEBHOOK_PORT", 3001) or 3001), auth=getattr(config, "WEBHOOK_VERIFY", None))
-    except Exception:
-        logging.exception("Failed to start in-process webhook server")
 
 
 async def reload(reload_db):

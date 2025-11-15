@@ -43,6 +43,9 @@ from discord import ButtonStyle
 from discord.ext import commands
 from discord.ui import Button, View
 from PIL import Image
+from fastapi import FastAPI, Request
+import uvicorn
+import threading
 
 import topgg
 
@@ -910,22 +913,15 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     bot.loop.create_task(background_index_all_cats())
-    # start internal HTTP endpoint to receive forwarded votes from external webhook process
+    # start an in-process FastAPI webhook to receive Top.gg forwards on WEBHOOK_PORT
     try:
-        # Prefer environment override from launcher (BOT_INTERNAL_PORT), fallback to config or default 3001
-        env_port = os.getenv("BOT_INTERNAL_PORT")
-        if env_port:
-            internal_port = int(env_port)
-        else:
-            internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3001)
-
-        # avoid accidentally starting internal server on the same port as the public webhook
         webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
-        if internal_port == webhook_port:
-            internal_port = webhook_port + 1
-            print(f"Adjusted internal webhook port to {internal_port} to avoid conflict with public webhook", flush=True)
-
-        bot.loop.create_task(start_internal_server(internal_port))
+        webhook_auth = getattr(config, "WEBHOOK_VERIFY", None)
+        # start webhook in background thread so uvicorn doesn't block the bot event loop
+        try:
+            start_fastapi_webhook(bot.loop, port=webhook_port, auth=webhook_auth)
+        except Exception:
+            logging.exception("Failed to start in-process FastAPI webhook")
     except Exception:
         pass
     # Ensure application commands are registered
@@ -981,6 +977,61 @@ async def start_internal_server(port: int = 3001):
             logging.info("Internal vote receiver listening on 127.0.0.1:%s", port)
     except Exception:
         logging.exception("Failed to start internal vote receiver server")
+
+
+def start_fastapi_webhook(loop: asyncio.AbstractEventLoop, port: int = 3001, auth: str | None = None):
+    """Start a FastAPI uvicorn server in a background thread that schedules reward_vote on the bot loop.
+
+    - `loop`: the bot's asyncio event loop
+    - `port`: port to bind (default 3001)
+    - `auth`: optional header value to validate Authorization
+    """
+    app = FastAPI()
+
+    @app.post("/dblwebhook")
+    async def handle_vote(req: Request):
+        if auth and req.headers.get("Authorization") != auth:
+            return {"error": "unauthorized"}, 401
+        try:
+            data = await req.json()
+            user_id = int(data.get("user") or data.get("user_id"))
+        except Exception:
+            return {"error": "invalid payload"}, 400
+
+        try:
+            try:
+                print(f"vote received from {user_id}, granting rewards..", flush=True)
+            except Exception:
+                logging.info("vote received from %s, granting rewards..", user_id)
+
+            # schedule the reward coroutine on the bot loop
+            asyncio.run_coroutine_threadsafe(reward_vote(user_id), loop)
+        except Exception:
+            logging.exception("Failed to schedule reward_vote for %s", user_id)
+            return {"status": "error"}, 500
+
+        return {"status": "ok"}
+
+    def _run():
+        try:
+            try:
+                print(f"[webhook] starting uvicorn on 0.0.0.0:{port}", flush=True)
+            except Exception:
+                logging.info("[webhook] starting uvicorn on %s:%s", "0.0.0.0", port)
+
+            config_uv = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="info", loop="asyncio")
+            server = uvicorn.Server(config=config_uv)
+            server.run()
+            try:
+                print("[webhook] uvicorn exited", flush=True)
+            except Exception:
+                logging.info("[webhook] uvicorn exited")
+        except Exception:
+            logging.exception("Webhook uvicorn exited unexpectedly")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return t
 
 
 async def background_index_all_cats():
