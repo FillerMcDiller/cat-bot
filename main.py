@@ -10724,15 +10724,6 @@ async def battlepass(message: discord.Interaction):
 
         description = f"Season ends <t:{timestamp}:R>\n\n"
 
-        # Third quest (replaces the previous Top.gg vote quest). We keep the
-        # underlying DB fields for compatibility but present the new quest info
-        # here.
-        third_quest = battle.get("quests", {}).get("third", {}).get("third", {"title": "Third Quest", "emoji": "✨"})
-        if user.vote_cooldown != 0:
-            description += f"✅ ~~{third_quest['title']}~~\n- Refreshes <t:{int(user.vote_cooldown + 12 * 3600)}:R>\n"
-        else:
-            description += f"{get_emoji(third_quest.get('emoji','✨'))} {third_quest.get('title')}\n- Reward: {user.vote_reward} XP\n\n"
-
         # catch
         catch_quest = battle["quests"]["catch"][user.catch_quest]
         if user.catch_cooldown != 0:
