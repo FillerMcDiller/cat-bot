@@ -43,9 +43,7 @@ from discord import ButtonStyle
 from discord.ext import commands
 from discord.ui import Button, View
 from PIL import Image
-from fastapi import FastAPI, Request
-import uvicorn
-import threading
+# use aiohttp's web server for in-process webhook to avoid uvicorn thread/signal issues
 
 import topgg
 
@@ -913,15 +911,14 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     bot.loop.create_task(background_index_all_cats())
-    # start an in-process FastAPI webhook to receive Top.gg forwards on WEBHOOK_PORT
+    # start an in-process aiohttp webhook to receive Top.gg forwards on WEBHOOK_PORT
     try:
         webhook_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
         webhook_auth = getattr(config, "WEBHOOK_VERIFY", None)
-        # start webhook in background thread so uvicorn doesn't block the bot event loop
         try:
-            start_fastapi_webhook(bot.loop, port=webhook_port, auth=webhook_auth)
+            bot.loop.create_task(start_public_webhook(webhook_port, webhook_auth))
         except Exception:
-            logging.exception("Failed to start in-process FastAPI webhook")
+            logging.exception("Failed to start in-process public webhook")
     except Exception:
         pass
     # Ensure application commands are registered
@@ -979,59 +976,59 @@ async def start_internal_server(port: int = 3001):
         logging.exception("Failed to start internal vote receiver server")
 
 
-def start_fastapi_webhook(loop: asyncio.AbstractEventLoop, port: int = 3001, auth: str | None = None):
-    """Start a FastAPI uvicorn server in a background thread that schedules reward_vote on the bot loop.
+async def start_public_webhook(port: int = 3001, auth: str | None = None):
+    """Start a public aiohttp server on 0.0.0.0:port exposing POST /dblwebhook.
 
-    - `loop`: the bot's asyncio event loop
-    - `port`: port to bind (default 3001)
-    - `auth`: optional header value to validate Authorization
+    Runs inside the bot event loop so no extra threads or uvicorn are required.
     """
-    app = FastAPI()
+    try:
+        app = web.Application()
 
-    @app.post("/dblwebhook")
-    async def handle_vote(req: Request):
-        if auth and req.headers.get("Authorization") != auth:
-            return {"error": "unauthorized"}, 401
-        try:
-            data = await req.json()
-            user_id = int(data.get("user") or data.get("user_id"))
-        except Exception:
-            return {"error": "invalid payload"}, 400
+        async def _handle(request):
+            # Basic auth header check
+            if auth:
+                try:
+                    header = request.headers.get("Authorization")
+                    if header != auth:
+                        return web.json_response({"error": "unauthorized"}, status=401)
+                except Exception:
+                    return web.json_response({"error": "unauthorized"}, status=401)
 
-        try:
             try:
-                print(f"vote received from {user_id}, granting rewards..", flush=True)
+                data = await request.json()
+                user_id = int(data.get("user") or data.get("user_id") or 0)
             except Exception:
-                logging.info("vote received from %s, granting rewards..", user_id)
+                return web.json_response({"error": "invalid payload"}, status=400)
 
-            # schedule the reward coroutine on the bot loop
-            asyncio.run_coroutine_threadsafe(reward_vote(user_id), loop)
-        except Exception:
-            logging.exception("Failed to schedule reward_vote for %s", user_id)
-            return {"status": "error"}, 500
+            if not user_id:
+                return web.json_response({"error": "missing user"}, status=400)
 
-        return {"status": "ok"}
+            try:
+                try:
+                    print(f"vote received from {user_id}, granting rewards..", flush=True)
+                except Exception:
+                    logging.info("vote received from %s, granting rewards..", user_id)
 
-    def _run():
+                # schedule reward_vote on the bot loop
+                asyncio.create_task(reward_vote(user_id))
+            except Exception:
+                logging.exception("Failed to schedule reward_vote for %s", user_id)
+                return web.json_response({"status": "error"}, status=500)
+
+            return web.json_response({"status": "ok"})
+
+        app.router.add_post("/dblwebhook", _handle)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
         try:
-            try:
-                print(f"[webhook] starting uvicorn on 0.0.0.0:{port}", flush=True)
-            except Exception:
-                logging.info("[webhook] starting uvicorn on %s:%s", "0.0.0.0", port)
-
-            config_uv = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="info", loop="asyncio")
-            server = uvicorn.Server(config=config_uv)
-            server.run()
-            try:
-                print("[webhook] uvicorn exited", flush=True)
-            except Exception:
-                logging.info("[webhook] uvicorn exited")
+            print(f"Public webhook listening on 0.0.0.0:{port}", flush=True)
         except Exception:
-            logging.exception("Webhook uvicorn exited unexpectedly")
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return t
+            logging.info("Public webhook listening on %s:%s", "0.0.0.0", port)
+    except Exception:
+        logging.exception("Failed to start public webhook server")
 
 
 async def background_index_all_cats():
