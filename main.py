@@ -12586,9 +12586,12 @@ async def atm(message: discord.Interaction):
             ct_view = View(timeout=120)
             ct_view.add_item(CatTypeSelect(options))
             try:
-                await interaction.response.send_message("Choose a cat type to convert:", view=ct_view, ephemeral=True)
+                await interaction.response.edit_message(content="Choose a cat type to convert:", embed=None, view=ct_view)
             except Exception:
-                await interaction.response.send_message("Could not open selection UI.", ephemeral=True)
+                try:
+                    await interaction.followup.send("Choose a cat type to convert:", view=ct_view, ephemeral=True)
+                except Exception:
+                    await interaction.followup.send("Could not open selection UI.", ephemeral=True)
 
     view = OpenATMView(owner_id)
     await message.followup.send(embed=embed, view=view)
