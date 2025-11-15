@@ -35,7 +35,21 @@ def start_inproc_webhook(loop: asyncio.AbstractEventLoop, reward_coro, port: int
 
     def _run():
         try:
-            uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+            try:
+                print(f"[webhook] starting uvicorn on 0.0.0.0:{port}", flush=True)
+            except Exception:
+                logging.info("[webhook] starting uvicorn on %s:%s", "0.0.0.0", port)
+
+            config = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="info")
+            server = uvicorn.Server(config=config)
+
+            # server.run() will block this thread until shutdown
+            server.run()
+
+            try:
+                print("[webhook] uvicorn exited", flush=True)
+            except Exception:
+                logging.info("[webhook] uvicorn exited")
         except Exception:
             logging.exception("Webhook uvicorn exited unexpectedly")
 
