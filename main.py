@@ -6877,6 +6877,12 @@ async def on_message(message: discord.Message):
                         # last resort: leave new_count as computed value
                         pass
                     new_count = new_val
+                
+                # Auto-sync cat instances immediately after catch
+                try:
+                    await auto_sync_cat_instances(user, le_emoji)
+                except Exception as e:
+                    print(f"[AUTO-SYNC] Failed to sync after catch: {e}", flush=True)
 
                 async def delete_cat():
                     try:
