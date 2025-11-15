@@ -934,7 +934,7 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
     """Automatically sync cat instances with database counts.
     
     If a specific cat_type is provided, only sync that type.
-    Otherwise, sync all types where DB count > instance count.
+    Otherwise, sync all types where DB count > 0.
     
     This ensures instances are always created when cats are added,
     even if they were added through old code paths that only increment counters.
@@ -943,7 +943,7 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
         guild_id = profile.guild_id
         user_id = profile.user_id
     except Exception:
-        return
+        return False
     
     # Get current instances
     cats = await get_user_cats(guild_id, user_id)
@@ -953,7 +953,19 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
     instance_counts = Counter(c.get("type") for c in cats if c.get("type"))
     
     # Determine which types to check
-    types_to_check = [cat_type] if cat_type else cattypes
+    if cat_type:
+        # Only check specific type
+        types_to_check = [cat_type]
+    else:
+        # Check all types that have a count in the database
+        types_to_check = []
+        for ct in cattypes:
+            try:
+                db_count = int(profile.get(f"cat_{ct}") or 0)
+                if db_count > 0:
+                    types_to_check.append(ct)
+            except Exception:
+                continue
     
     # Check each type and create missing instances
     created_any = False
@@ -4138,7 +4150,9 @@ async def background_index_all_cats():
     - If DB counter > instance count, creates missing instances automatically.
     Runs once on startup (after 10 second delay) and then every 30 minutes.
     """
+    print("[AUTO-SYNC] Background task started, waiting for bot to be ready...")
     await bot.wait_until_ready()
+    print("[AUTO-SYNC] Bot ready, starting in 10 seconds...")
     await asyncio.sleep(10)  # delay for DB readiness
     
     run_count = 0
@@ -4187,6 +4201,10 @@ async def background_index_all_cats():
                         migrated_from_json = True
                     except Exception as e:
                         print(f"[AUTO-SYNC] Error during JSON migration: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"[AUTO-SYNC] No cats.json found at {cats_json_path}, skipping migration")
             
             print(f"[AUTO-SYNC] Starting background cat instance sync (run #{run_count})...")
             
