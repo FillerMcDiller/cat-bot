@@ -983,6 +983,7 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
                 # Create missing instances
                 await _create_instances_only(guild_id, user_id, ct, missing)
                 created_any = True
+                print(f"[AUTO-SYNC] Created {missing}x {ct} instances for user {user_id} (guild {guild_id})", flush=True)
     
     return created_any
 
@@ -1948,7 +1949,7 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                     try:
                         await _create_instances_only(guild.id, self.challenger.id, "Fine", 3)
                         challenger_cats = await get_user_cats(guild.id, self.challenger.id) or []
-                        await interaction.channel.send(f"No cats found for {self.challenger.mention}; created 3 starter Fine cats.")
+                        await interaction.channel.send(f"No cats found for {self.challenger.mention}. Try running `/syncats` to sync your cat instances, or catch some cats first. Created 3 starter Fine cats.")
                     except Exception:
                         await interaction.channel.send(f"{self.challenger.mention} has no cats to fight with and could not be given starters.")
                         self.stop()
@@ -1958,37 +1959,41 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                     try:
                         await _create_instances_only(guild.id, self.opponent.id, "Fine", 3)
                         opponent_cats = await get_user_cats(guild.id, self.opponent.id) or []
-                        await interaction.channel.send(f"No cats found for {self.opponent.mention}; created 3 starter Fine cats.")
+                        await interaction.channel.send(f"No cats found for {self.opponent.mention}. Try running `/syncats` to sync your cat instances, or catch some cats first. Created 3 starter Fine cats.")
                     except Exception:
                         await interaction.channel.send(f"{self.opponent.mention} has no cats to fight with and could not be given starters.")
                         self.stop()
                         return
 
 
-                # Select top 3 cats from each inventory by a simple score (dmg*2 + hp)
+                # Select top 3 cats from ENTIRE inventory by score (dmg*2 + hp)
                 def _score_cat(c):
                     try:
                         return int(c.get("dmg", 0)) * 2 + int(c.get("hp", 0))
                     except Exception:
                         return 0
 
-                # Use custom deck if available, otherwise auto-select
+                # Use custom deck if available, otherwise auto-select from entire inventory
                 challenger_deck_ids = get_user_deck(guild.id, self.challenger.id)
                 if challenger_deck_ids:
                     challenger_team = [dict(c) for c in challenger_cats if c.get('id') in challenger_deck_ids][:3]
                     if len(challenger_team) < 3:
+                        # Fill remaining slots from entire inventory
                         remaining = [dict(c) for c in sorted(challenger_cats, key=_score_cat, reverse=True) if c.get('id') not in challenger_deck_ids]
                         challenger_team.extend(remaining[:3-len(challenger_team)])
                 else:
+                    # Auto-select best 3 from ENTIRE inventory
                     challenger_team = [dict(x) for x in sorted(challenger_cats, key=_score_cat, reverse=True)[:3]]
 
                 opponent_deck_ids = get_user_deck(guild.id, self.opponent.id)
                 if opponent_deck_ids:
                     opponent_team = [dict(c) for c in opponent_cats if c.get('id') in opponent_deck_ids][:3]
                     if len(opponent_team) < 3:
+                        # Fill remaining slots from entire inventory
                         remaining = [dict(c) for c in sorted(opponent_cats, key=_score_cat, reverse=True) if c.get('id') not in opponent_deck_ids]
                         opponent_team.extend(remaining[:3-len(opponent_team)])
                 else:
+                    # Auto-select best 3 from ENTIRE inventory
                     opponent_team = [dict(x) for x in sorted(opponent_cats, key=_score_cat, reverse=True)[:3]]
 
                 # Build a very small in-memory session object supporting teams of 3
@@ -2005,6 +2010,10 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                         self.round = 1
                         # power stored per cat id (allows per-cat power)
                         self.power_by_cat = {}
+                        # Track who has moved this round for auto-advance
+                        self.moved_this_round = set()
+                        # Store last action for display
+                        self.last_action = None
                         # message will hold the embed message
                         self.message = None
 
@@ -2017,22 +2026,43 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                 # helper to render the embed for the match
                 def render_fight_embed(s: SimpleFightSession) -> discord.Embed:
                     title = f"{s.challenger.display_name} vs {s.opponent.display_name}"
-                    desc = f"Round: {s.round} — Turn: {s.challenger.display_name if s.turn == s.challenger.id else s.opponent.display_name}"
+                    desc_lines = [f"**Round {s.round}** — Turn: **{s.challenger.display_name if s.turn == s.challenger.id else s.opponent.display_name}**"]
+                    
+                    # Add last action if any
+                    if hasattr(s, 'last_action') and s.last_action:
+                        desc_lines.append(f"\n💥 {s.last_action}")
+                    
+                    desc = "\n".join(desc_lines)
                     embed = discord.Embed(title=title, description=desc, color=0x6E593C)
+                    
                     try:
                         # challenger active cat
                         cidx = s.active_idx[s.challenger.id]
                         a = s.challenger_team[cidx]
                         aid = a.get('id')
+                        atype = a.get('type')
                         apower = s.power_by_cat.get(aid, 0)
-                        embed.add_field(name=f"{s.challenger.display_name} — {a.get('name')}", value=f"HP: {a.get('hp')}\nPower: {apower}", inline=True)
+                        
+                        # Get weakness info
+                        astats = CAT_BATTLE_STATS.get(atype, {})
+                        aweak = astats.get('weakness', 'None')
+                        
+                        cat_info = f"**{atype} Cat**\nHP: {a.get('hp')}\nDMG: {a.get('dmg')}\nPower: {apower}\n⚠️ Weak to: {aweak}"
+                        embed.add_field(name=f"{s.challenger.display_name} — {a.get('name')}", value=cat_info, inline=True)
 
                         # opponent active cat
                         oidx = s.active_idx[s.opponent.id]
                         b = s.opponent_team[oidx]
                         bid = b.get('id')
+                        btype = b.get('type')
                         bpower = s.power_by_cat.get(bid, 0)
-                        embed.add_field(name=f"{s.opponent.display_name} — {b.get('name')}", value=f"HP: {b.get('hp')}\nPower: {bpower}", inline=True)
+                        
+                        # Get weakness info
+                        bstats = CAT_BATTLE_STATS.get(btype, {})
+                        bweak = bstats.get('weakness', 'None')
+                        
+                        cat_info2 = f"**{btype} Cat**\nHP: {b.get('hp')}\nDMG: {b.get('dmg')}\nPower: {bpower}\n⚠️ Weak to: {bweak}"
+                        embed.add_field(name=f"{s.opponent.display_name} — {b.get('name')}", value=cat_info2, inline=True)
                     except Exception:
                         pass
                     return embed
@@ -2270,7 +2300,34 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                                         except Exception:
                                             pass
                                         return
-                                    return                                # end turn: switch to defender
+                                    return
+                                
+                                # Mark that this player has moved
+                                s2.moved_this_round.add(attacker_id)
+                                
+                                # Check if both players have moved this round
+                                if len(s2.moved_this_round) >= 2:
+                                    # Auto-advance to next round
+                                    s2.round += 1
+                                    s2.moved_this_round.clear()
+                                    
+                                    # Charge power +1 for both active cats
+                                    try:
+                                        cidx = s2.active_idx[s2.challenger.id]
+                                        caid = s2.challenger_team[cidx].get('id')
+                                        s2.power_by_cat[caid] = s2.power_by_cat.get(caid, 0) + 1
+                                    except Exception:
+                                        pass
+                                    try:
+                                        oidx = s2.active_idx[s2.opponent.id]
+                                        obid = s2.opponent_team[oidx].get('id')
+                                        s2.power_by_cat[obid] = s2.power_by_cat.get(obid, 0) + 1
+                                    except Exception:
+                                        pass
+                                    
+                                    s2.last_action = f"🔄 Round {s2.round} — Both players charged +1 power!"
+                                
+                                # end turn: switch to defender
                                 s2.turn = defender_id
                                 # update buttons for new turn
                                 if hasattr(self.parent_view, 'update_buttons'):
@@ -2369,115 +2426,61 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                             except Exception:
                                 pass
 
-                    @discord.ui.button(label="Next Round", style=discord.ButtonStyle.primary)
-                    async def next_round(self, it: discord.Interaction, btn: discord.ui.Button):
+                    @discord.ui.button(label="Switch Cat", style=discord.ButtonStyle.secondary)
+                    async def switch_cat(self, it: discord.Interaction, btn: discord.ui.Button):
                         s = self.session
-                        # only the current turn player may use next round
                         if it.user.id != s.turn:
                             await it.response.send_message("It's not your turn.", ephemeral=True)
                             return
-                        # increment round and charge power for both active cats
-                        s.round += 1
-                        # charge amount per round (simple +1) for active cats only
-                        try:
-                            cidx = s.active_idx[s.challenger.id]
-                            aid = s.challenger_team[cidx].get('id')
-                            s.power_by_cat[aid] = s.power_by_cat.get(aid, 0) + 1
-                        except Exception:
-                            pass
-                        try:
-                            oidx = s.active_idx[s.opponent.id]
-                            bid = s.opponent_team[oidx].get('id')
-                            s.power_by_cat[bid] = s.power_by_cat.get(bid, 0) + 1
-                        except Exception:
-                            pass
-                        # Update button states
-                        self.update_buttons()
-                        # update embed
-                        new_emb = render_fight_embed(s)
-                        try:
-                            await s.message.edit(embed=new_emb, view=self)
-                            await it.response.defer()
-                        except Exception:
-                            try:
-                                await it.response.send_message("Failed to update fight state.", ephemeral=True)
-                            except Exception:
-                                pass
-                        # If it's the bot's turn after charging, trigger bot action
-                        if s.turn == bot.user.id:
-                            async def bot_next_round_task():
-                                await asyncio.sleep(1.5)
+                        
+                        team = s.challenger_team if it.user.id == s.challenger.id else s.opponent_team
+                        current_idx = s.active_idx[it.user.id]
+                        available = [(idx, cat) for idx, cat in enumerate(team) if idx != current_idx and cat.get('hp', 0) > 0]
+                        
+                        if not available:
+                            await it.response.send_message("No other cats available!", ephemeral=True)
+                            return
+                        
+                        options = [discord.SelectOption(label=f"{c.get('name')} ({c.get('type')})", value=str(i), description=f"HP: {c.get('hp')}, DMG: {c.get('dmg')}") for i, c in available]
+                        
+                        class SwitchSelect(discord.ui.Select):
+                            def __init__(self, opts, sess, pid, pview):
+                                super().__init__(placeholder="Choose cat", options=opts)
+                                self.sess, self.pid, self.pview = sess, pid, pview
+                            
+                            async def callback(self, inter):
+                                self.sess.active_idx[self.pid] = int(self.values[0])
+                                new_cat = (self.sess.challenger_team if self.pid == self.sess.challenger.id else self.sess.opponent_team)[int(self.values[0])]
+                                self.sess.last_action = f"{inter.user.display_name} switched to {new_cat.get('name')}!"
+                                self.sess.moved_this_round.add(self.pid)
+                                
+                                if len(self.sess.moved_this_round) >= 2:
+                                    self.sess.round += 1
+                                    self.sess.moved_this_round.clear()
+                                    for uid in [self.sess.challenger.id, self.sess.opponent.id]:
+                                        idx = self.sess.active_idx[uid]
+                                        cid = (self.sess.challenger_team if uid == self.sess.challenger.id else self.sess.opponent_team)[idx].get('id')
+                                        self.sess.power_by_cat[cid] = self.sess.power_by_cat.get(cid, 0) + 1
+                                    self.sess.last_action += f"\n🔄 Round {self.sess.round} — Both charged +1 power!"
+                                
+                                self.sess.turn = self.sess.opponent.id if self.pid == self.sess.challenger.id else self.sess.challenger.id
+                                if hasattr(self.pview, 'update_buttons'):
+                                    self.pview.update_buttons()
                                 try:
-                                    # Get bot's active cat
-                                    bot_idx = s.active_idx[bot.user.id]
-                                    if bot.user.id == s.challenger.id:
-                                        bot_cat = s.challenger_team[bot_idx]
-                                        enemy_cat = s.opponent_team[s.active_idx[s.opponent.id]]
-                                        enemy_id = s.opponent.id
-                                    else:
-                                        bot_cat = s.opponent_team[bot_idx]
-                                        enemy_cat = s.challenger_team[s.active_idx[s.challenger.id]]
-                                        enemy_id = s.challenger.id
-                                    
-                                    bid = bot_cat.get('id')
-                                    bot_type = bot_cat.get('type')
-                                    enemy_type = enemy_cat.get('type')
-                                    bpower = s.power_by_cat.get(bid, 0)
-                                    target_hp = enemy_cat.get('hp', 0)
-                                    bot_dmg = bot_cat.get('dmg', 1)
-                                    
-                                    # Get abilities
-                                    bot_stats = CAT_BATTLE_STATS.get(bot_type, {})
-                                    abilities = bot_stats.get("abilities", [])
-                                    
-                                    if not abilities:
-                                        return
-                                    
-                                    # Check weakness
-                                    enemy_stats = CAT_BATTLE_STATS.get(enemy_type, {})
-                                    enemy_weakness = enemy_stats.get("weakness")
-                                    has_advantage = (enemy_weakness == bot_type)
-                                    weakness_mult = 1.25 if has_advantage else 1.0
-                                    
-                                    # Find best ability
-                                    affordable = []
-                                    for idx, ability in enumerate(abilities):
-                                        cost = ability["power_cost"]
-                                        if cost <= bpower and not ability.get("requires_flip", False):
-                                            dmg_est = int(bot_dmg * ability["damage_mult"] * weakness_mult)
-                                            affordable.append({
-                                                "idx": idx,
-                                                "cost": cost,
-                                                "name": ability["name"],
-                                                "dmg": dmg_est,
-                                                "can_ko": dmg_est >= target_hp
-                                            })
-                                    
-                                    if not affordable:
-                                        affordable = [{
-                                            "idx": 0,
-                                            "cost": abilities[0]["power_cost"],
-                                            "name": abilities[0]["name"],
-                                            "dmg": int(bot_dmg * abilities[0]["damage_mult"] * weakness_mult),
-                                            "can_ko": False
-                                        }]
-                                    
-                                    # Choose
-                                    ko_opts = [ab for ab in affordable if ab["can_ko"]]
-                                    if ko_opts:
-                                        chosen = min(ko_opts, key=lambda x: x["cost"])
-                                    else:
-                                        chosen = max(affordable, key=lambda x: x["dmg"])
-                                    
-                                    finished = await bot_perform_attack(s, bot.user.id, bot_cat, enemy_id, enemy_cat, chosen["idx"], chosen["name"], bot.user.display_name)
-                                    if not finished:
-                                        s.turn = enemy_id
-                                        self.update_buttons()
-                                        new_emb2 = render_fight_embed(s)
-                                        await s.message.edit(embed=new_emb2, view=self)
-                                except Exception:
+                                    await inter.response.edit_message(content="Switched!", view=None)
+                                except:
                                     pass
-                            asyncio.create_task(bot_next_round_task())
+                                try:
+                                    await self.sess.message.edit(embed=render_fight_embed(self.sess), view=self.pview)
+                                except:
+                                    pass
+                        
+                        v = discord.ui.View()
+                        v.add_item(SwitchSelect(options, s, it.user.id, self))
+                        try:
+                            await it.response.send_message("Choose cat:", view=v, ephemeral=True)
+                        except:
+                            pass
 
                     @discord.ui.button(label="Surrender", style=discord.ButtonStyle.danger)
                     async def surrender(self, it: discord.Interaction, btn: discord.ui.Button):
@@ -3200,7 +3203,7 @@ async def battles_command(interaction: discord.Interaction):
             print(f"[DECK DEBUG] User {user_id} - Cats after ensure: {len(all_cats)}")
             
             if not all_cats:
-                await it.followup.send("You don't have any cats yet! Catch some cats first.\n\n**Debug info:** If you should have cats, they may not have been synced. Try catching a new cat first.", ephemeral=True)
+                await it.followup.send("You don't have any cats yet! Catch some cats first.\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=True)
                 return
             
             # Get current deck
@@ -3616,7 +3619,7 @@ async def battles_command(interaction: discord.Interaction):
             total_cats = len(all_cats)
             
             if total_cats == 0:
-                await it.followup.send("You don't have any cats yet!", ephemeral=True)
+                await it.followup.send("You don't have any cats yet! If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=True)
                 return
             
             def _score_cat(c):
@@ -3705,7 +3708,7 @@ async def update_cat_stats_command(interaction: discord.Interaction):
         embed.set_footer(text="Your cats now have proper HP, DMG, abilities, and weaknesses!")
         await interaction.followup.send(embed=embed, ephemeral=True)
     else:
-        await interaction.followup.send("You don't have any cats to update!", ephemeral=True)
+        await interaction.followup.send("You don't have any cats to update! If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=True)
 
 
 @bot.tree.command(name="syncats", description="Sync your cat instances with database counts (admin/troubleshooting)")
@@ -5927,7 +5930,7 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
             continue
 
     if not owned:
-        await interaction.followup.send("You don't have any cats to send on an adventure. Get some cats first!")
+        await interaction.followup.send("You don't have any cats to send on an adventure. Get some cats first!\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.")
         return
 
     # choose cat: either user-specified or random
@@ -8349,7 +8352,7 @@ async def send_instances_paged(interaction: discord.Interaction, guild_id: int, 
     cats_list = await get_user_cats(guild_id, user_id)
     filtered = [c for c in cats_list if c.get("type") == match]
     if not filtered:
-        await interaction.followup.send(f"You have no {match} cats.", ephemeral=ephemeral)
+        await interaction.followup.send(f"You have no {match} cats.\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=ephemeral)
         return
 
     lines = [f"{i}. **{inst.get('name')}** — Bond: {inst.get('bond',0)} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})" for i, inst in enumerate(filtered, start=1)]
