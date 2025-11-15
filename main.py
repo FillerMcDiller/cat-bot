@@ -935,7 +935,19 @@ async def setup_hook():
     try:
         bot.load_extension("battles")
     except Exception:
-        logging.exception("Failed to load 'battles' extension")
+        logging.exception("Failed to load 'battles' extension via load_extension; attempting fallback import")
+        try:
+            import importlib
+
+            mod = importlib.import_module("battles")
+            # If module provides setup(bot), call it (extension style)
+            if hasattr(mod, "setup"):
+                try:
+                    mod.setup(bot)
+                except Exception:
+                    logging.exception("'battles.setup' failed")
+        except Exception:
+            logging.exception("Fallback import of 'battles' failed")
 
     # Ensure application commands are registered
     try:
@@ -1518,6 +1530,11 @@ async def generate_quest(user: Profile, quest_type: str):
     if quest_type == "vote":
         user.vote_reward = random.randint(quest_data["xp_min"] // 10, quest_data["xp_max"] // 10) * 10
         user.vote_cooldown = 0
+    elif quest_type == "extra":
+        # persistent extra quest fields
+        user.extra_reward = random.randint(quest_data.get("xp_min", 100) // 10, quest_data.get("xp_max", 200) // 10) * 10
+        user.extra_quest = quest
+        user.extra_cooldown = 0
     elif quest_type == "catch":
         user.catch_reward = random.randint(quest_data["xp_min"] // 10, quest_data["xp_max"] // 10) * 10
         user.catch_quest = quest
@@ -1559,6 +1576,8 @@ async def refresh_quests(user):
         await generate_quest(user, "catch")
     if 12 * 3600 < user.misc_cooldown + 12 * 3600 < time.time():
         await generate_quest(user, "misc")
+    if 12 * 3600 < (getattr(user, 'extra_cooldown', 1) or 1) + 12 * 3600 < time.time():
+        await generate_quest(user, "extra")
 
 
 async def progress(message: discord.Message | discord.Interaction, user: Profile, quest: str, is_belated: Optional[bool] = False):
@@ -1609,6 +1628,19 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             current_xp = user.progress + user.misc_reward
             user.misc_progress = 0
             user.reminder_misc = 1
+    elif getattr(user, "extra_quest", "") == quest:
+        if getattr(user, "extra_cooldown", 1) != 0:
+            return
+        quest_data = battle.get("quests", {}).get("extra", {}).get(quest)
+        if not quest_data:
+            return
+        user.extra_progress = (user.extra_progress or 0) + 1
+        if user.extra_progress >= quest_data.get("progress", 1):
+            quest_complete = True
+            user.extra_cooldown = int(time.time())
+            current_xp = user.progress + (user.extra_reward or 0)
+            user.extra_progress = 0
+            user.reminder_extra = 1
     else:
         return
 
@@ -2801,6 +2833,14 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
     embed = discord.Embed(title="Adventure Started!", color=Colors.yellow)
     embed.description = f"Your **{chosen}** has left on an adventure and will return <t:{int(end_time)}:R>. Good luck!\n*(Your cat will be marked as (On Adventure) in menus)*"
     await interaction.followup.send(f"<@{user_id}>", embed=embed)
+    try:
+        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=user_id)
+        try:
+            await progress(interaction, profile, "adventure")
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 
@@ -3796,6 +3836,17 @@ async def on_message(message: discord.Message):
                     elif channel.cattype == "Nice" and user.catch_progress in [0, 1]:
                         await progress(message, user, "finenice")
                         await progress(message, user, "finenice")
+                # Extra quest: catch a Water or better cat
+                try:
+                    if le_emoji in cattypes:
+                        water_idx = cattypes.index("Water") if "Water" in cattypes else None
+                        if water_idx is not None and cattypes.index(le_emoji) >= water_idx:
+                            try:
+                                await progress(message, user, "catch_water")
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             finally:
                 await channel.save()
                 if decided_time:
@@ -7871,6 +7922,19 @@ async def battlepass(message: discord.Interaction):
                 progress_string = f" ({user.misc_progress}/{misc_quest.get('progress',1)})"
             description += f"{get_emoji(misc_quest.get('emoji','mystery'))} {misc_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {user.misc_reward} XP\n\n"
 
+        # extra
+        extra_quest = battle.get("quests", {}).get("extra", {}).get(user.extra_quest)
+        if not extra_quest:
+            # show placeholder if no configured extra
+            extra_quest = {"title": "No Extra Quest", "emoji": "mystery", "progress": 1}
+        if getattr(user, "extra_cooldown", 1) != 0:
+            description += f"✅ ~~{extra_quest['title']}~~\n- Refreshes <t:{int(getattr(user, 'extra_cooldown', 1) + 12 * 3600 if getattr(user, 'extra_cooldown', 1) + 12 * 3600 < timestamp else timestamp)}:R>\n\n"
+        else:
+            progress_string = ""
+            if extra_quest.get("progress", 1) != 1:
+                progress_string = f" ({getattr(user, 'extra_progress', 0)}/{extra_quest.get('progress',1)})"
+            description += f"{get_emoji(extra_quest.get('emoji','mystery'))} {extra_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {getattr(user, 'extra_reward', 0)} XP\n\n"
+
         if user.battlepass >= len(battle["seasons"][str(user.season)]):
             description += f"**Extra Rewards** [{user.progress}/1500 XP]\n"
             colored = int(user.progress / 150)
@@ -9478,6 +9542,10 @@ async def atm(message: discord.Interaction):
                                                     profile_now.kibble += kib_per * len(selected_objs)
                                                     await profile_now.save()
                                                     await interaction3.edit_original_response(content=f"Converted {len(selected_objs)} {chosen_ct} cat(s) into {kib_per * len(selected_objs):,} Kibble.", embed=None, view=None)
+                                                    try:
+                                                        await progress(interaction3, profile_now, "atm")
+                                                    except Exception:
+                                                        pass
                                                 except Exception:
                                                     await interaction3.edit_original_response(content="Conversion failed.", embed=None, view=None)
 
@@ -11585,6 +11653,17 @@ async def breed(message: discord.Interaction, first: str, second: str):
         )
 
         await message.response.send_message(reply_text)
+
+        # Extra quest progression: count breeds for 'breed3' and 'breed5'
+        try:
+            for extra_key in ("breed3", "breed5"):
+                try:
+                    await progress(message, profile, extra_key)
+                except Exception:
+                    # don't let extra quest handling crash the breed command
+                    pass
+        except Exception:
+            pass
 # --- END: Cat Breeding feature ---
 
 async def reward_vote(user_id: int):
@@ -11699,6 +11778,117 @@ async def reward_vote(user_id: int):
         except Exception:
             # per-guild failure shouldn't stop others
             continue
+
+
+# --- Extra quest runtime support (non-DB, lightweight) ---
+# Tracks ephemeral progress for multi-step extra quests (breed counts).
+EXTRA_PROGRESS: dict = {}  # key: (user_id, quest_key) -> int
+EXTRA_COMPLETED: set = set()
+
+
+def _extra_key(user_id: int, quest_key: str) -> tuple:
+    return (int(user_id), str(quest_key))
+
+
+async def _apply_xp_to_profile(profile, xp: int):
+    """Apply XP to a Profile and handle level-ups (battlepass) similarly to progress/reward_vote.
+    This mirrors the level-up loop used elsewhere but keeps the behavior local.
+    """
+    try:
+        current_xp = (profile.progress or 0) + int(xp or 0)
+    except Exception:
+        current_xp = int(xp or 0)
+
+    profile.quests_completed = (profile.quests_completed or 0) + 1
+
+    try:
+        if profile.battlepass >= len(battle.get("seasons", {}).get(str(profile.season), [])):
+            level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+        else:
+            level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+    except Exception:
+        level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+
+    try:
+        if current_xp >= level_data["xp"]:
+            xp_progress = current_xp
+            active_level_data = level_data
+            while xp_progress >= active_level_data["xp"]:
+                profile.battlepass += 1
+                xp_progress -= active_level_data["xp"]
+                profile.progress = xp_progress
+                try:
+                    if active_level_data["reward"] == "Rain":
+                        profile.rain_minutes = (profile.rain_minutes or 0) + active_level_data["amount"]
+                    elif active_level_data["reward"] in [p["name"] for p in pack_data]:
+                        profile[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
+                    elif active_level_data["reward"] in cattypes:
+                        profile[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
+                except Exception:
+                    pass
+                try:
+                    await profile.save()
+                except Exception:
+                    pass
+                if profile.battlepass >= len(battle.get("seasons", {}).get(str(profile.season), [])):
+                    active_level_data = {"xp": 1500, "reward": "Stone", "amount": 1}
+                else:
+                    active_level_data = battle["seasons"][str(profile.season)][profile.battlepass]
+        else:
+            profile.progress = current_xp
+        try:
+            await profile.save()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            profile.progress = current_xp
+            await profile.save()
+        except Exception:
+            pass
+
+
+async def award_extra_quest(profile, source_context, quest_key: str):
+    """Grant the configured extra quest reward if not already completed for this user.
+    - profile: Profile instance (guild-level)
+    - source_context: discord.Message or discord.Interaction (optional) for permission checking
+    - quest_key: key under battle['quests']['extra']
+    """
+    # Prefer persistent extra quest flow: only award if this profile currently
+    # has the given extra quest active and it's available.
+    try:
+        await profile.refresh_from_db()
+    except Exception:
+        pass
+
+    if getattr(profile, "extra_quest", "") != quest_key:
+        return False
+    if getattr(profile, "extra_cooldown", 1) != 0:
+        return False
+
+    qdata = battle.get("quests", {}).get("extra", {}).get(quest_key)
+    if not qdata:
+        return False
+
+    # Prefer using configured user reward if present
+    reward = getattr(profile, "extra_reward", None)
+    if not reward:
+        reward = random.randint(qdata.get("xp_min", 100) // 10, qdata.get("xp_max", 200) // 10) * 10
+
+    # mark as completed and set cooldown like other quests
+    profile.extra_cooldown = int(time.time())
+    profile.extra_progress = 0
+    try:
+        await _apply_xp_to_profile(profile, reward)
+    except Exception:
+        try:
+            profile.progress = (profile.progress or 0) + reward
+            await profile.save()
+        except Exception:
+            pass
+
+    EXTRA_COMPLETED.add(_extra_key(profile.user_id, quest_key))
+    return True
 
 
 async def log_vote_to_channel(user_id: int, source: str = "unknown"):

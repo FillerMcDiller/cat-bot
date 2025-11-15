@@ -8,13 +8,54 @@ from typing import Dict, List, Optional
 import discord
 from discord.ext import commands
 
-# We'll import helper functions from main for cat instance access
-try:
-    from main import get_user_cats, save_user_cats
-except Exception:
-    # fallback imports if extension ordering differs; they'll be resolved at runtime
-    get_user_cats = None
-    save_user_cats = None
+# Avoid import-time circular dependencies by resolving functions from `main` at runtime.
+def _resolve_main_module():
+    try:
+        import importlib
+
+        return importlib.import_module("main")
+    except Exception:
+        return None
+
+
+def _get_user_cats(guild_id, user_id):
+    mod = _resolve_main_module()
+    if not mod:
+        return []
+    try:
+        return mod.get_user_cats(guild_id, user_id)
+    except Exception:
+        return []
+
+
+def _save_user_cats(guild_id, user_id, cats):
+    mod = _resolve_main_module()
+    if not mod:
+        return None
+    try:
+        return mod.save_user_cats(guild_id, user_id, cats)
+    except Exception:
+        return None
+
+
+async def _award_extra_quest(profile, source_context, key):
+    mod = _resolve_main_module()
+    if not mod:
+        return False
+    func = getattr(mod, "award_extra_quest", None)
+    if not func:
+        return False
+    try:
+        return await func(profile, source_context, key)
+    except Exception:
+        return False
+
+
+# Expose stable names used below
+get_user_cats = _get_user_cats
+save_user_cats = _save_user_cats
+award_extra_quest = _award_extra_quest
+from database import Profile
 
 DATA_PATH = "data/battles"
 DECKS_FILE = os.path.join(DATA_PATH, "decks.json")
@@ -311,6 +352,15 @@ class BattlesCog(commands.Cog):
             else:
                 winner = battle.p2
             await channel.send(f"Battle over! {winner.mention} wins!")
+            # Award extra quest for winning a battle (if available)
+            try:
+                prof = await Profile.get_or_create(guild_id=battle.guild_id, user_id=winner.id)
+                try:
+                    await award_extra_quest(prof, None, "win_battle")
+                except Exception:
+                    pass
+            except Exception:
+                pass
         del BATTLES[battle.channel.id]
 
 

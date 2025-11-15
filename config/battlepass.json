@@ -386,8 +386,13 @@
     ]
   },
   "quests": {
-    "third": {
-      "third": {"emoji": "✨", "title": "Complete the Third Quest", "xp_min": 250, "xp_max": 350, "progress": 1}
+    "extra": {
+      "breed3": {"emoji": "🐾", "title": "Breed 3 cats", "xp_min": 200, "xp_max": 300, "progress": 3},
+      "breed5": {"emoji": "🐾", "title": "Breed 5 cats", "xp_min": 350, "xp_max": 450, "progress": 5},
+      "win_battle": {"emoji": "⚔️", "title": "Win a battle", "xp_min": 220, "xp_max": 320, "progress": 1},
+      "adventure": {"emoji": "🧭", "title": "Send a cat on an adventure", "xp_min": 180, "xp_max": 260, "progress": 1},
+      "atm": {"emoji": "🏧", "title": "Use the Cat ATM", "xp_min": 160, "xp_max": 240, "progress": 1},
+      "catch_water": {"emoji": "💧", "title": "Catch a Water or better cat", "xp_min": 260, "xp_max": 340, "progress": 1}
     },
     "catch": {
       "2fine": {"emoji": "finecat", "title": "Catch 2 Fine cats", "xp_min": 330, "xp_max": 370, "progress": 2},
