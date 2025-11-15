@@ -660,15 +660,23 @@ def _save_cat_db(data: dict):
         json.dump(data, f, ensure_ascii=False)
 
 
-def get_user_cats(guild_id: int, user_id: int) -> list:
-    db = _ensure_cat_db()
-    return db.get(str(guild_id), {}).get(str(user_id), [])
+async def get_user_cats(guild_id: int, user_id: int) -> list:
+    """Get user's cat instances from database."""
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+    if profile.cat_instances:
+        # If it's already a list, return it; if it's a JSON string, parse it
+        if isinstance(profile.cat_instances, str):
+            return json.loads(profile.cat_instances)
+        return profile.cat_instances
+    return []
 
 
-def save_user_cats(guild_id: int, user_id: int, cats: list):
-    db = _ensure_cat_db()
-    db.setdefault(str(guild_id), {})[str(user_id)] = cats
-    _save_cat_db(db)
+async def save_user_cats(guild_id: int, user_id: int, cats: list):
+    """Save user's cat instances to database."""
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+    # Store as JSON string for catpg
+    profile.cat_instances = json.dumps(cats)
+    await profile.save()
 
 
 # ----- Items DB (simple JSON storage) -----
@@ -795,15 +803,15 @@ def save_guild_shop(guild_id: int, shop_data: dict):
 
 
 
-def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int):
-    """Create `amount` instances in the JSON store WITHOUT touching aggregated DB counters.
+async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int):
+    """Create `amount` instances in the database WITHOUT touching aggregated DB counters.
 
     This is used to repair/sync per-instance storage when aggregated counters indicate the
-    user should have instances but the JSON store is missing them.
+    user should have instances but the database store is missing them.
     """
     if amount <= 0:
         return
-    cats = get_user_cats(guild_id, user_id)
+    cats = await get_user_cats(guild_id, user_id)
     for _ in range(amount):
         # ensure unique id
         while True:
@@ -831,7 +839,7 @@ def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: i
             "acquired_at": int(time.time()),
         }
         cats.append(instance)
-    save_user_cats(guild_id, user_id, cats)
+    await save_user_cats(guild_id, user_id, cats)
 
 
 async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
@@ -845,7 +853,7 @@ async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
     except Exception:
         return
 
-    cats = get_user_cats(guild_id, user_id)
+    cats = await get_user_cats(guild_id, user_id)
     # If there's an on-adventure instance of this type, restore it first
     if amount > 0:
         for c in cats:
@@ -885,7 +893,7 @@ async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
         }
         cats.append(instance)
 
-    save_user_cats(guild_id, user_id, cats)
+    await save_user_cats(guild_id, user_id, cats)
 
     # keep aggregated DB counters in sync
     try:
@@ -895,12 +903,12 @@ async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
         pass
 
 
-def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
+async def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
     """Update all existing cat instances to use stats from CAT_BATTLE_STATS.
     
     This function should be called to migrate old cats to the new stat system.
     """
-    cats = get_user_cats(guild_id, user_id)
+    cats = await get_user_cats(guild_id, user_id)
     updated = False
     
     for cat in cats:
@@ -917,7 +925,7 @@ def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
             updated = True
     
     if updated:
-        save_user_cats(guild_id, user_id, cats)
+        await save_user_cats(guild_id, user_id, cats)
     
     return updated
 
@@ -1870,18 +1878,18 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                 try:
                     await ensure_user_instances(guild.id, self.opponent.id)
                     # Update stats for existing cats
-                    update_cat_stats_from_battle_stats(guild.id, self.opponent.id)
+                    await update_cat_stats_from_battle_stats(guild.id, self.opponent.id)
                 except Exception:
                     pass
 
-                challenger_cats = get_user_cats(guild.id, self.challenger.id) or []
-                opponent_cats = get_user_cats(guild.id, self.opponent.id) or []
+                challenger_cats = await get_user_cats(guild.id, self.challenger.id) or []
+                opponent_cats = await get_user_cats(guild.id, self.opponent.id) or []
 
                 if not challenger_cats:
                     # create 3 starter Fine cats for challenger
                     try:
-                        _create_instances_only(guild.id, self.challenger.id, "Fine", 3)
-                        challenger_cats = get_user_cats(guild.id, self.challenger.id) or []
+                        await _create_instances_only(guild.id, self.challenger.id, "Fine", 3)
+                        challenger_cats = await get_user_cats(guild.id, self.challenger.id) or []
                         await interaction.channel.send(f"No cats found for {self.challenger.mention}; created 3 starter Fine cats.")
                     except Exception:
                         await interaction.channel.send(f"{self.challenger.mention} has no cats to fight with and could not be given starters.")
@@ -1890,8 +1898,8 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
                 if not opponent_cats:
                     # create 3 starter Fine cats for opponent
                     try:
-                        _create_instances_only(guild.id, self.opponent.id, "Fine", 3)
-                        opponent_cats = get_user_cats(guild.id, self.opponent.id) or []
+                        await _create_instances_only(guild.id, self.opponent.id, "Fine", 3)
+                        opponent_cats = await get_user_cats(guild.id, self.opponent.id) or []
                         await interaction.channel.send(f"No cats found for {self.opponent.mention}; created 3 starter Fine cats.")
                     except Exception:
                         await interaction.channel.send(f"{self.opponent.mention} has no cats to fight with and could not be given starters.")
@@ -2533,25 +2541,25 @@ async def fight_placeholder(interaction: discord.Interaction, opponent: discord.
             try:
                 await ensure_user_instances(guild.id, bot.user.id)
                 # Update stats for existing cats
-                update_cat_stats_from_battle_stats(guild.id, bot.user.id)
+                await update_cat_stats_from_battle_stats(guild.id, bot.user.id)
             except Exception:
                 pass
 
             # Load inventories
-            challenger_cats = get_user_cats(guild.id, executor.id) or []
-            bot_cats = get_user_cats(guild.id, bot.user.id) or []
+            challenger_cats = await get_user_cats(guild.id, executor.id) or []
+            bot_cats = await get_user_cats(guild.id, bot.user.id) or []
 
             # Create starter cats for either side if empty
             if not challenger_cats:
                 try:
-                    _create_instances_only(guild.id, executor.id, "Fine", 3)
-                    challenger_cats = get_user_cats(guild.id, executor.id) or []
+                    await _create_instances_only(guild.id, executor.id, "Fine", 3)
+                    challenger_cats = await get_user_cats(guild.id, executor.id) or []
                 except Exception:
                     pass
             if not bot_cats:
                 try:
-                    _create_instances_only(guild.id, bot.user.id, "Fine", 3)
-                    bot_cats = get_user_cats(guild.id, bot.user.id) or []
+                    await _create_instances_only(guild.id, bot.user.id, "Fine", 3)
+                    bot_cats = await get_user_cats(guild.id, bot.user.id) or []
                 except Exception:
                     pass
 
@@ -3113,19 +3121,28 @@ async def battles_command(interaction: discord.Interaction):
             guild_id = interaction.guild.id if interaction.guild else 0
             user_id = it.user.id
             
-            # Ensure user instances are synced from DB to JSON
+            # Debug: Check what we have before ensure
+            cats_before = await get_user_cats(guild_id, user_id) or []
+            print(f"[DECK DEBUG] User {user_id} in guild {guild_id} - Cats before ensure: {len(cats_before)}")
+            
+            # Ensure user instances are synced from DB
             try:
                 await ensure_user_instances(guild_id, user_id)
+                print(f"[DECK DEBUG] ensure_user_instances completed")
                 # Update stats for existing cats
-                update_cat_stats_from_battle_stats(guild_id, user_id)
+                await update_cat_stats_from_battle_stats(guild_id, user_id)
+                print(f"[DECK DEBUG] update_cat_stats_from_battle_stats completed")
             except Exception as e:
-                print(f"Error ensuring instances: {e}")
+                print(f"[DECK DEBUG] Error ensuring instances: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Get user's cats
-            all_cats = get_user_cats(guild_id, user_id) or []
+            all_cats = await get_user_cats(guild_id, user_id) or []
+            print(f"[DECK DEBUG] User {user_id} - Cats after ensure: {len(all_cats)}")
             
             if not all_cats:
-                await it.followup.send("You don't have any cats yet! Catch some cats first.", ephemeral=True)
+                await it.followup.send("You don't have any cats yet! Catch some cats first.\n\n**Debug info:** If you should have cats, they may not have been synced. Try catching a new cat first.", ephemeral=True)
                 return
             
             # Get current deck
@@ -3529,12 +3546,12 @@ async def battles_command(interaction: discord.Interaction):
             try:
                 await ensure_user_instances(guild_id, user_id)
                 # Update stats for existing cats
-                update_cat_stats_from_battle_stats(guild_id, user_id)
+                await update_cat_stats_from_battle_stats(guild_id, user_id)
             except Exception as e:
                 print(f"Error ensuring instances: {e}")
             
             # Get user's cats and deck
-            all_cats = get_user_cats(guild_id, user_id) or []
+            all_cats = await get_user_cats(guild_id, user_id) or []
             deck_ids = get_user_deck(guild_id, user_id)
             
             # Calculate stats
@@ -3611,11 +3628,11 @@ async def update_cat_stats_command(interaction: discord.Interaction):
     user_id = interaction.user.id
     
     # Update cat stats
-    updated = update_cat_stats_from_battle_stats(guild_id, user_id)
+    updated = await update_cat_stats_from_battle_stats(guild_id, user_id)
     
     if updated:
         # Get cat counts by type
-        cats = get_user_cats(guild_id, user_id)
+        cats = await get_user_cats(guild_id, user_id)
         type_counts = {}
         for cat in cats:
             cat_type = cat.get('type', 'Unknown')
@@ -3661,20 +3678,20 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
             pass
 
         # Load inventories
-        challenger_cats = get_user_cats(guild.id, executor.id) or []
-        bot_cats = get_user_cats(guild.id, bot.user.id) or []
+        challenger_cats = await get_user_cats(guild.id, executor.id) or []
+        bot_cats = await get_user_cats(guild.id, bot.user.id) or []
 
         # Create starter cats for either side if empty
         if not challenger_cats:
             try:
-                _create_instances_only(guild.id, executor.id, "Fine", 3)
-                challenger_cats = get_user_cats(guild.id, executor.id) or []
+                await _create_instances_only(guild.id, executor.id, "Fine", 3)
+                challenger_cats = await get_user_cats(guild.id, executor.id) or []
             except Exception:
                 pass
         if not bot_cats:
             try:
-                _create_instances_only(guild.id, bot.user.id, "Fine", 3)
-                bot_cats = get_user_cats(guild.id, bot.user.id) or []
+                await _create_instances_only(guild.id, bot.user.id, "Fine", 3)
+                bot_cats = await get_user_cats(guild.id, bot.user.id) or []
             except Exception:
                 pass
 
@@ -4116,17 +4133,16 @@ async def background_index_all_cats():
 
 
 async def ensure_user_instances(guild_id: int, user_id: int):
-    """Ensure per-instance JSON has at least as many instances as DB aggregated counters.
+    """Ensure database has at least as many instances as DB aggregated counters.
 
-    If the DB indicates the user should have more instances than the JSON store, create
+    If the DB indicates the user should have more instances than stored, create
     missing instances using `_create_instances_only`.
     """
     try:
         import collections
 
-        db = _ensure_cat_db()
-        guild_bucket = db.get(str(guild_id), {})
-        user_list = guild_bucket.get(str(user_id), [])
+        # Get current instances from database
+        user_list = await get_user_cats(guild_id, user_id)
         counter = collections.Counter()
         for c in user_list:
             try:
@@ -4153,7 +4169,7 @@ async def ensure_user_instances(guild_id: int, user_id: int):
                 if db_count > inst_count:
                     missing = db_count - inst_count
                     try:
-                        _create_instances_only(guild_id, user_id, ct, missing)
+                        await _create_instances_only(guild_id, user_id, ct, missing)
                     except Exception:
                         pass
     except Exception:
@@ -4872,7 +4888,7 @@ async def get_available_cat_count(profile: Profile, cat_type: str) -> int:
     """
     # Prefer instance-level counts so favourites are respected
     try:
-        cats = get_user_cats(profile.guild_id, profile.user_id)
+        cats = await get_user_cats(profile.guild_id, profile.user_id)
         nonfav = sum(1 for c in cats if c.get("type") == cat_type and not c.get("on_adventure") and not c.get("favorite"))
         if nonfav > 0:
             return nonfav
@@ -4888,16 +4904,16 @@ async def get_available_cat_count(profile: Profile, cat_type: str) -> int:
                 db_total = int(getattr(profile, f"cat_{cat_type}", 0) or 0)
             except Exception:
                 db_total = 0
-        # count all instances of this type in JSON (including favourites/on_adventure)
+        # count all instances of this type in database (including favourites/on_adventure)
         inst_total = sum(1 for c in cats if c.get("type") == cat_type)
         if db_total > inst_total:
             missing = db_total - inst_total
             # safeguard: don't create absurd amounts in one go
             if missing > 0 and missing <= 1000:
                 try:
-                    _create_instances_only(profile.guild_id, profile.user_id, cat_type, missing)
+                    await _create_instances_only(profile.guild_id, profile.user_id, cat_type, missing)
                     # reload cats and recompute nonfav
-                    cats = get_user_cats(profile.guild_id, profile.user_id)
+                    cats = await get_user_cats(profile.guild_id, profile.user_id)
                     nonfav = sum(1 for c in cats if c.get("type") == cat_type and not c.get("on_adventure") and not c.get("favorite"))
                     if nonfav > 0:
                         return nonfav
@@ -5136,7 +5152,7 @@ async def maintaince_loop():
                 instance_id = adv.get("instance_id")
                 if instance_id:
                     try:
-                        user_cats = get_user_cats(guild_id, user_id)
+                        user_cats = await get_user_cats(guild_id, user_id)
                         for c in user_cats:
                             if c.get("id") == instance_id:
                                 inst = c
@@ -5178,7 +5194,7 @@ async def maintaince_loop():
                         if inst:
                             try:
                                 inst["on_adventure"] = False
-                                save_user_cats(guild_id, user_id, user_cats)
+                                await save_user_cats(guild_id, user_id, user_cats)
                             except Exception:
                                 pass
                         else:
@@ -5313,7 +5329,7 @@ async def maintaince_loop():
                         if inst:
                             try:
                                 inst["on_adventure"] = False
-                                save_user_cats(guild_id, user_id, user_cats)
+                                await save_user_cats(guild_id, user_id, user_cats)
                             except Exception:
                                 pass
                         else:
@@ -5342,7 +5358,7 @@ async def maintaince_loop():
                         if inst:
                             try:
                                 inst["on_adventure"] = False
-                                save_user_cats(guild_id, user_id, user_cats)
+                                await save_user_cats(guild_id, user_id, user_cats)
                             except Exception:
                                 pass
                         else:
@@ -5376,7 +5392,7 @@ async def maintaince_loop():
                     if inst:
                         try:
                             inst["on_adventure"] = False
-                            save_user_cats(guild_id, user_id, user_cats)
+                            await save_user_cats(guild_id, user_id, user_cats)
                         except Exception:
                             pass
                     else:
@@ -5408,7 +5424,7 @@ async def maintaince_loop():
                         inc = random.randint(1, 3)
                         inst["bond"] = min(100, inst.get("bond", 0) + inc)
                         inst["on_adventure"] = False
-                        save_user_cats(guild_id, user_id, user_cats)
+                        await save_user_cats(guild_id, user_id, user_cats)
                 except Exception:
                     pass
 
@@ -5801,14 +5817,14 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
     # Pick a specific instance to send on the adventure and mark it as on_adventure
     instance_id = None
     try:
-        user_cats = get_user_cats(interaction.guild.id, user_id)
+        user_cats = await get_user_cats(interaction.guild.id, user_id)
         for c in user_cats:
             if c.get("type") == chosen and not c.get("on_adventure"):
                 c["on_adventure"] = True
                 instance_id = c.get("id")
                 break
         if instance_id:
-            save_user_cats(interaction.guild.id, user_id, user_cats)
+            await save_user_cats(interaction.guild.id, user_id, user_cats)
     except Exception:
         instance_id = None
 
@@ -8156,10 +8172,10 @@ async def build_instances_embed(guild_id: int, user_id: int, catname: str):
     if not match:
         return f"Couldn't find a cat named '{catname}'. Try /catalogue to see available types."
 
-    cats_list = get_user_cats(guild_id, user_id)
+    cats_list = await get_user_cats(guild_id, user_id)
     filtered = [c for c in cats_list if c.get("type") == match]
 
-    # If aggregated counters show the user has cats but the per-iinstance JSON store is empty,
+    # If aggregated counters show the user has cats but the per-instance database is empty,
     # auto-create placeholder instances to match the aggregated count. This keeps old code paths
     # that increment aggregated counters (packs, gifts, etc.) compatible with instance-based UI.
     if not filtered:
@@ -8172,9 +8188,9 @@ async def build_instances_embed(guild_id: int, user_id: int, catname: str):
         existing = sum(1 for c in cats_list if c.get("type") == match)
         missing = (total_count or 0) - existing
         if missing > 0:
-            # create missing instances in JSON only (don't bump aggregated counters)
-            _create_instances_only(guild_id, user_id, match, missing)
-            cats_list = get_user_cats(guild_id, user_id)
+            # create missing instances in database only (don't bump aggregated counters)
+            await _create_instances_only(guild_id, user_id, match, missing)
+            cats_list = await get_user_cats(guild_id, user_id)
             filtered = [c for c in cats_list if c.get("type") == match]
 
     if not filtered:
@@ -8195,7 +8211,7 @@ async def send_instances_paged(interaction: discord.Interaction, guild_id: int, 
 
     Assumes the caller has already deferred the interaction (so this uses followup.send).
     """
-    cats_list = get_user_cats(guild_id, user_id)
+    cats_list = await get_user_cats(guild_id, user_id)
     filtered = [c for c in cats_list if c.get("type") == match]
     if not filtered:
         await interaction.followup.send(f"You have no {match} cats.", ephemeral=ephemeral)
@@ -8351,7 +8367,7 @@ class FavoriteView(View):
             return
 
         # load cats, find instance, toggle favorite
-        cats = get_user_cats(self.guild_id, interaction.user.id)
+        cats = await get_user_cats(self.guild_id, interaction.user.id)
         inst = None
         for c in cats:
             if c.get("id") == self.inst_id:
@@ -8362,7 +8378,7 @@ class FavoriteView(View):
             return
 
         inst["favorite"] = not bool(inst.get("favorite", False))
-        save_user_cats(self.guild_id, interaction.user.id, cats)
+        await save_user_cats(self.guild_id, interaction.user.id, cats)
 
         # rebuild embed and update message
         new_embed = build_instance_detail_embed(self.cat_type, inst)
@@ -8420,7 +8436,7 @@ async def cat_inventory_cmd(message: discord.Interaction, catname: Optional[str]
         await message.followup.send(result)
         return
 
-    cats_list = get_user_cats(message.guild.id, message.user.id)
+    cats_list = await get_user_cats(message.guild.id, message.user.id)
     filtered = [c for c in cats_list if c.get("type") == match]
     if len(filtered) > 25:
         # send a paginated view (interaction already deferred)
@@ -8452,7 +8468,7 @@ async def cat_inventory_cmd(message: discord.Interaction, catname: Optional[str]
                             await modal_interaction.followup.send("Invalid number.", ephemeral=True)
                             return
 
-                        cats_list_local = get_user_cats(message.guild.id, modal_interaction.user.id)
+                        cats_list_local = await get_user_cats(message.guild.id, modal_interaction.user.id)
                         filtered_local = [c for c in cats_list_local if c.get("type") == match]
                         if not filtered_local or idx < 1 or idx > len(filtered_local):
                             await modal_interaction.followup.send("Invalid index — run the list again to confirm indexes.", ephemeral=True)
@@ -8486,7 +8502,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
 
     # gather user's instances and find exact name matches (case-insensitive)
     try:
-        cats_list = get_user_cats(message.guild.id, message.user.id)
+        cats_list = await get_user_cats(message.guild.id, message.user.id)
     except Exception:
         cats_list = []
 
@@ -8533,7 +8549,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
                 return
 
             # fetch latest instances
-            cats_now = get_user_cats(self.guild_id, self.owner_id)
+            cats_now = await get_user_cats(self.guild_id, self.owner_id)
             inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
             if not inst:
                 await interaction2.followup.send("That instance no longer exists.", ephemeral=True)
@@ -8541,7 +8557,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
 
             gain = random.randint(1, 3)
             inst['bond'] = min(100, inst.get('bond', 0) + gain)
-            save_user_cats(self.guild_id, self.owner_id, cats_now)
+            await save_user_cats(self.guild_id, self.owner_id, cats_now)
             pet_cooldowns[key] = now_ts
 
             # update embed in place
@@ -8601,7 +8617,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
 
                     # If the item targets a specific instance, apply directly to this instance
                     if key_local in ("ball", "dogtreat", "pancakes"):
-                        cats_now = get_user_cats(self.guild_id, self.owner_id)
+                        cats_now = await get_user_cats(self.guild_id, self.owner_id)
                         inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
                         if not inst:
                             await sel_inter.response.send_message("That instance no longer exists.", ephemeral=True)
@@ -8616,7 +8632,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
                             inst['bond'] = 100
                         else:
                             inst['bond'] = min(100, inst.get('bond', 0) + int(bond_amt))
-                        save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
+                        await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
 
                         # update embed in place
                         try:
@@ -8722,7 +8738,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str):
                         await do_funny(interaction2)
                         return
                     await interaction2.response.defer()
-                    cats_now = get_user_cats(message.guild.id, interaction2.user.id)
+                    cats_now = await get_user_cats(message.guild.id, interaction2.user.id)
                     if idx_local < 1 or idx_local > len(cats_now):
                         await interaction2.followup.send("That instance no longer exists.", ephemeral=True)
                         return
@@ -8775,7 +8791,7 @@ async def rename_cat_cmd(message: discord.Interaction, catname: str, index: int,
         await message.followup.send(f"Couldn't find a cat type named '{catname}'.")
         return
 
-    cats_list = get_user_cats(message.guild.id, message.user.id)
+    cats_list = await get_user_cats(message.guild.id, message.user.id)
     filtered = [c for c in cats_list if c.get("type") == match]
     if not filtered or index < 1 or index > len(filtered):
         await message.followup.send(f"Invalid index — run `/cats {catname}` to see indexes.")
@@ -8783,7 +8799,7 @@ async def rename_cat_cmd(message: discord.Interaction, catname: str, index: int,
 
     inst = filtered[index - 1]
     inst["name"] = new_name
-    save_user_cats(message.guild.id, message.user.id, cats_list)
+    await save_user_cats(message.guild.id, message.user.id, cats_list)
     await message.followup.send(f"Renamed cat #{index} ({match}) to **{new_name}**.")
 
 
@@ -9302,7 +9318,7 @@ __Highlighted Stat__
                             return
 
                         # after auto-sync, check how many instances exist and page if needed
-                        cats_list = get_user_cats(interaction.guild.id, interaction.user.id)
+                        cats_list = await get_user_cats(interaction.guild.id, interaction.user.id)
                         filtered = [c for c in cats_list if c.get("type") == chosen]
                         if len(filtered) > 25:
                             await send_instances_paged(interaction, interaction.guild.id, interaction.user.id, chosen, ephemeral=True)
@@ -9450,7 +9466,7 @@ __Highlighted Stat__
                                             return
                                         await modal_inter.response.defer()
                                         target_name = self2.name_input.value.strip()
-                                        cats_list = get_user_cats(modal_inter.guild.id, modal_inter.user.id)
+                                        cats_list = await get_user_cats(modal_inter.guild.id, modal_inter.user.id)
                                         matches_local = [(i + 1, c) for i, c in enumerate(cats_list) if (c.get("name") or "").lower() == target_name.lower()]
                                         if not matches_local:
                                             await modal_inter.followup.send(f"Couldn't find a cat named '{target_name}'.", ephemeral=True)
@@ -9471,7 +9487,7 @@ __Highlighted Stat__
                                                 inst_local['bond'] = 100
                                             else:
                                                 inst_local['bond'] = min(100, inst_local.get('bond', 0) + int(bond_amt))
-                                            save_user_cats(modal_inter.guild.id, modal_inter.user.id, cats_list)
+                                            await save_user_cats(modal_inter.guild.id, modal_inter.user.id, cats_list)
                                             await modal_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst_local.get('name')}** — Bond now {inst_local['bond']}.", ephemeral=True)
 
                                         # if single match, apply directly
@@ -9494,7 +9510,7 @@ __Highlighted Stat__
                                                             await do_funny(inter)
                                                             return
                                                         await inter.response.defer()
-                                                        cats_now2 = get_user_cats(inter.guild.id, inter.user.id)
+                                                        cats_now2 = await get_user_cats(inter.guild.id, inter.user.id)
                                                         if idx_localm < 1 or idx_localm > len(cats_now2):
                                                             await inter.followup.send("That instance no longer exists.", ephemeral=True)
                                                             return
@@ -12241,7 +12257,7 @@ async def atm(message: discord.Interaction):
                                 await amt_inter.response.send_message(f"You only have {available2} available {chosen_ct} cats to convert.", ephemeral=True)
                                 return
 
-                            user_cats = get_user_cats(guild_id, owner_id)
+                            user_cats = await get_user_cats(guild_id, owner_id)
                             candidates = [c for c in user_cats if c.get("type") == chosen_ct and not c.get("on_adventure") and not c.get("favorite")]
                             def cand_key(x):
                                 try:
@@ -12363,10 +12379,10 @@ async def atm(message: discord.Interaction):
                                                 await interaction3.response.defer()
                                                 try:
                                                     profile_now = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
-                                                    cats_now = get_user_cats(guild_id, owner_id)
+                                                    cats_now = await get_user_cats(guild_id, owner_id)
                                                     ids_to_remove = set(s.get('id') for s in selected_objs)
                                                     cats_after = [c for c in cats_now if c.get('id') not in ids_to_remove]
-                                                    save_user_cats(guild_id, owner_id, cats_after)
+                                                    await save_user_cats(guild_id, owner_id, cats_after)
                                                     try:
                                                         profile_now[f"cat_{chosen_ct}"] = max(0, profile_now[f"cat_{chosen_ct}"] - len(selected_objs))
                                                     except Exception:
