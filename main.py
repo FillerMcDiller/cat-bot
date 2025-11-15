@@ -3695,6 +3695,50 @@ async def update_cat_stats_command(interaction: discord.Interaction):
         await interaction.followup.send("You don't have any cats to update!", ephemeral=True)
 
 
+@bot.tree.command(name="syncats", description="Sync your cat instances with database counts (admin/troubleshooting)")
+async def sync_cats_command(interaction: discord.Interaction):
+    """Manually trigger cat instance sync for your account."""
+    await interaction.response.defer(ephemeral=True)
+    
+    guild_id = interaction.guild.id if interaction.guild else 0
+    user_id = interaction.user.id
+    
+    try:
+        # Get profile
+        profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+        
+        # Run auto-sync
+        created = await auto_sync_cat_instances(profile)
+        
+        # Get current cats
+        cats = await get_user_cats(guild_id, user_id)
+        
+        if created:
+            type_counts = {}
+            for cat in cats:
+                cat_type = cat.get('type', 'Unknown')
+                type_counts[cat_type] = type_counts.get(cat_type, 0) + 1
+            
+            embed = discord.Embed(
+                title="✅ Cats Synced!",
+                description=f"Your cat instances have been synced with the database.\n\n**Total Cats: {len(cats)}**\n\n**By Type:**\n" + 
+                           "\n".join([f"• {count}x {cat_type}" for cat_type, count in sorted(type_counts.items(), key=lambda x: type_dict.get(x[0], 0), reverse=True)]),
+                color=0x3498db
+            )
+            embed.set_footer(text="All missing instances have been created!")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            embed = discord.Embed(
+                title="✅ Already Synced",
+                description=f"Your cats are already in sync! You have {len(cats)} cat instances.\n\n" +
+                           "All your database counts match your instance counts.",
+                color=0x2ecc71
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error during sync: {e}", ephemeral=True)
+
+
 async def _start_pvp_challenge(interaction: discord.Interaction, executor: discord.Member, opponent: discord.Member):
     """Start a PvP challenge - reuses ChallengeView from fight command."""
     # Just call the existing fight command logic
@@ -4089,6 +4133,7 @@ async def start_public_webhook(port: int = 3001, auth: str | None = None):
 async def background_index_all_cats():
     """Background task: ensure cat instances are in sync with DB aggregated counters.
 
+    - On first run, checks for cats.json and migrates it to database automatically.
     - For all users in the database, checks if DB cat counts match instance counts.
     - If DB counter > instance count, creates missing instances automatically.
     Runs once on startup (after 10 second delay) and then every 30 minutes.
@@ -4097,10 +4142,52 @@ async def background_index_all_cats():
     await asyncio.sleep(10)  # delay for DB readiness
     
     run_count = 0
+    migrated_from_json = False
 
     while not bot.is_closed():
         try:
             run_count += 1
+            
+            # On first run, check if cats.json exists and migrate it
+            if run_count == 1 and not migrated_from_json:
+                cats_json_path = "data/cats.json"
+                if os.path.exists(cats_json_path):
+                    print(f"[AUTO-SYNC] Found cats.json, migrating to database...")
+                    try:
+                        with open(cats_json_path, "r", encoding="utf-8") as f:
+                            json_data = json.load(f)
+                        
+                        migrated_users = 0
+                        migrated_cats = 0
+                        
+                        for guild_id_str, users in json_data.items():
+                            guild_id = int(guild_id_str)
+                            for user_id_str, cats_list in users.items():
+                                user_id = int(user_id_str)
+                                if cats_list:
+                                    try:
+                                        profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+                                        profile.cat_instances = json.dumps(cats_list)
+                                        await profile.save()
+                                        migrated_users += 1
+                                        migrated_cats += len(cats_list)
+                                    except Exception as e:
+                                        print(f"[AUTO-SYNC] Error migrating user {user_id}: {e}")
+                        
+                        # Create backup
+                        backup_path = cats_json_path + ".backup"
+                        try:
+                            with open(backup_path, "w", encoding="utf-8") as f:
+                                json.dump(json_data, f, ensure_ascii=False, indent=2)
+                            print(f"[AUTO-SYNC] Migration complete! {migrated_users} users, {migrated_cats} cats")
+                            print(f"[AUTO-SYNC] Backup created at: {backup_path}")
+                        except Exception as e:
+                            print(f"[AUTO-SYNC] Could not create backup: {e}")
+                        
+                        migrated_from_json = True
+                    except Exception as e:
+                        print(f"[AUTO-SYNC] Error during JSON migration: {e}")
+            
             print(f"[AUTO-SYNC] Starting background cat instance sync (run #{run_count})...")
             
             synced_users = 0
