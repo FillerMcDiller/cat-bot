@@ -965,14 +965,156 @@ async def fight(interaction: discord.Interaction, opponent: discord.Member):
     await interaction.response.defer()
     cog = bot.get_cog("BattlesCog")
     if not cog:
-        await interaction.followup.send("Battles feature not available.", ephemeral=True)
-        return
+        # Attempt robust dynamic loading of the Battles cog and provide diagnostics
+        exc_text = None
+        try:
+            import importlib
+
+            mod = importlib.import_module("battles")
+            if hasattr(mod, "setup"):
+                try:
+                    mod.setup(bot)
+                except Exception:
+                    logging.exception("battles.setup failed during dynamic registration")
+            if not bot.get_cog("BattlesCog") and hasattr(mod, "BattlesCog"):
+                try:
+                    inst = mod.BattlesCog(bot)
+                    bot.add_cog(inst)
+                except Exception:
+                    logging.exception("Failed to add BattlesCog instance dynamically")
+        except Exception as e:
+            # try importing by file path as a last resort (avoids package import issues)
+            try:
+                import importlib.util, types, os, traceback
+
+                path = os.path.join(os.path.dirname(__file__), "battles.py")
+                if os.path.exists(path):
+                    spec = importlib.util.spec_from_file_location("battles_dynamic", path)
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore
+                    if hasattr(mod, "setup"):
+                        try:
+                            mod.setup(bot)
+                        except Exception:
+                            logging.exception("battles.setup failed during file-based dynamic registration")
+                    if not bot.get_cog("BattlesCog") and hasattr(mod, "BattlesCog"):
+                        try:
+                            inst = mod.BattlesCog(bot)
+                            bot.add_cog(inst)
+                        except Exception:
+                            logging.exception("Failed to add BattlesCog instance from file")
+                else:
+                    exc_text = f"battles.py not found at {path}"
+            except Exception:
+                exc_text = traceback.format_exc()
+
+        cog = bot.get_cog("BattlesCog")
+        if not cog:
+            # send diagnostics to the user if available
+            diag = "Battles feature not available."
+            if exc_text:
+                diag += "\n```" + (exc_text[:1900] + "..." if len(exc_text) > 1900 else exc_text) + "```"
+            else:
+                diag += "\nNo additional diagnostics available. Check the bot console for tracebacks."
+            await interaction.followup.send(diag, ephemeral=True)
+            return
     try:
         # `start_fight` expects (channel, user1, user2)
         await cog.start_fight(interaction.channel, interaction.user, opponent)
     except Exception as e:
         logging.exception("Error starting fight: %s", e)
         await interaction.followup.send("Failed to start fight.", ephemeral=True)
+
+
+@bot.tree.command(name="debug_battles", description="Debug the Battles cog loading and helpers")
+async def debug_battles(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    import importlib, importlib.util, os, traceback, sys
+
+    lines = []
+    try:
+        initial_keys = list(bot.cogs.keys())
+        lines.append(f"Initial cog keys: {initial_keys}")
+        lines.append(f"Bot id: {id(bot)}")
+    except Exception as e:
+        lines.append(f"Error reading initial cogs: {e}")
+
+    # Try normal import
+    try:
+        mod = importlib.import_module("battles")
+        lines.append(f"import battles: OK (module name: {getattr(mod, '__name__', '')})")
+        lines.append(f"has setup: {hasattr(mod, 'setup')}, has BattlesCog: {hasattr(mod, 'BattlesCog')}")
+    except Exception:
+        tb = traceback.format_exc()
+        lines.append("import battles: FAILED")
+        lines.append(tb[:1900])
+
+    # Try file-based import
+    try:
+        path = os.path.join(os.path.dirname(__file__), "battles.py")
+        if os.path.exists(path):
+            spec = importlib.util.spec_from_file_location("battles_file", path)
+            modf = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(modf)  # type: ignore
+            lines.append(f"file import: OK (path: {path})")
+            lines.append(f"has setup: {hasattr(modf, 'setup')}, has BattlesCog: {hasattr(modf, 'BattlesCog')}")
+        else:
+            lines.append(f"file import: NOT FOUND at {path}")
+    except Exception:
+        tb = traceback.format_exc()
+        lines.append("file import: FAILED")
+        lines.append(tb[:1900])
+
+    # Try to call setup() if module available but cog missing
+    try:
+        before_keys = list(bot.cogs.keys())
+        lines.append(f"Cog keys before setup attempts: {before_keys}")
+        if not bot.get_cog("BattlesCog"):
+            try:
+                mod = importlib.import_module("battles")
+                if hasattr(mod, "setup"):
+                    try:
+                        mod.setup(bot)
+                        lines.append("Called battles.setup(bot)")
+                    except Exception:
+                        lines.append("battles.setup(bot) raised:")
+                        lines.append(traceback.format_exc()[:1900])
+                # try instantiating class if present
+                if hasattr(mod, "BattlesCog") and not bot.get_cog("BattlesCog"):
+                    try:
+                        inst = mod.BattlesCog(bot)
+                        added = False
+                        try:
+                            bot.add_cog(inst)
+                            added = True
+                        except Exception:
+                            lines.append("bot.add_cog raised during dynamic instantiation:")
+                            lines.append(traceback.format_exc()[:1900])
+                        lines.append(f"Instantiated BattlesCog class: {inst.__class__.__name__}, added={added}")
+                        lines.append(f"Inst type id: {id(inst)}, inst qualified name: {getattr(inst, 'qualified_name', getattr(inst, '__class__').__name__)}")
+                        lines.append(f"Cog keys after add attempt: {list(bot.cogs.keys())}")
+                    except Exception:
+                        lines.append("Instantiating or adding BattlesCog failed:")
+                        lines.append(traceback.format_exc()[:1900])
+            except Exception:
+                lines.append("Attempt to call setup/instantiate failed:")
+                lines.append(traceback.format_exc()[:1900])
+    except Exception:
+        lines.append(f"Unexpected error during setup attempts: {traceback.format_exc()[:1900]}")
+
+    # Final status
+    try:
+        cog = bot.get_cog("BattlesCog")
+        lines.append(f"Final cog present: {bool(cog)}")
+        lines.append(f"Final cog keys: {list(bot.cogs.keys())}")
+    except Exception:
+        lines.append(f"Error checking final cog: {traceback.format_exc()[:1900]}")
+
+    out = "\n".join(lines)
+    if len(out) > 1900:
+        out = out[:1900] + "..."
+    msg = "```\n" + out + "\n```"
+    await interaction.followup.send(msg, ephemeral=True)
 
 
 async def start_internal_server(port: int = 3002):
