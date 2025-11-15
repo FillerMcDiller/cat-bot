@@ -12339,6 +12339,10 @@ async def atm(message: discord.Interaction):
                 if avail > 0:
                     label = f"{ct} (x{avail})"
                     options.append(discord.SelectOption(label=label, value=ct, description=f"You have {avail} available"))
+            
+            # Discord Select menus can only have max 25 options
+            if len(options) > 25:
+                options = options[:25]
 
             if not options:
                 # Nothing to list — complete next bit: inform user and return
