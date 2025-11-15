@@ -961,7 +961,7 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
         types_to_check = []
         for ct in cattypes:
             try:
-                db_count = int(profile.get(f"cat_{ct}") or 0)
+                db_count = int(getattr(profile, f"cat_{ct}", 0) or 0)
                 if db_count > 0:
                     types_to_check.append(ct)
             except Exception:
@@ -971,7 +971,7 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
     created_any = False
     for ct in types_to_check:
         try:
-            db_count = int(profile.get(f"cat_{ct}") or 0)
+            db_count = int(getattr(profile, f"cat_{ct}", 0) or 0)
         except Exception:
             db_count = 0
         
@@ -1757,6 +1757,7 @@ async def setup_hook():
     bot.loop.create_task(scheduled_restart())
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
+    print("[STARTUP] Creating background_index_all_cats task...", flush=True)
     bot.loop.create_task(background_index_all_cats())
     # start the internal HTTP receiver on localhost for external webhook forwards
     try:
@@ -4142,7 +4143,7 @@ async def start_public_webhook(port: int = 3001, auth: str | None = None):
         logging.exception("Failed to start public webhook server")
 
 
-async def background_index_all_cats():
+async def background_index_all_cats(bot_instance=None):
     """Background task: ensure cat instances are in sync with DB aggregated counters.
 
     - On first run, checks for cats.json and migrates it to database automatically.
@@ -4150,15 +4151,21 @@ async def background_index_all_cats():
     - If DB counter > instance count, creates missing instances automatically.
     Runs once on startup (after 10 second delay) and then every 30 minutes.
     """
-    print("[AUTO-SYNC] Background task started, waiting for bot to be ready...")
-    await bot.wait_until_ready()
-    print("[AUTO-SYNC] Bot ready, starting in 10 seconds...")
+    import sys
+    print("[AUTO-SYNC] Background task FUNCTION CALLED", flush=True, file=sys.stderr)
+    print("[AUTO-SYNC] Background task started, waiting for bot to be ready...", flush=True)
+    
+    # Use the provided bot instance or fall back to the global bot
+    target_bot = bot_instance if bot_instance is not None else bot
+    
+    await target_bot.wait_until_ready()
+    print("[AUTO-SYNC] Bot ready, starting in 10 seconds...", flush=True)
     await asyncio.sleep(10)  # delay for DB readiness
     
     run_count = 0
     migrated_from_json = False
 
-    while not bot.is_closed():
+    while not target_bot.is_closed():
         try:
             run_count += 1
             
@@ -4166,7 +4173,7 @@ async def background_index_all_cats():
             if run_count == 1 and not migrated_from_json:
                 cats_json_path = "data/cats.json"
                 if os.path.exists(cats_json_path):
-                    print(f"[AUTO-SYNC] Found cats.json, migrating to database...")
+                    print(f"[AUTO-SYNC] Found cats.json, migrating to database...", flush=True)
                     try:
                         with open(cats_json_path, "r", encoding="utf-8") as f:
                             json_data = json.load(f)
@@ -4186,27 +4193,27 @@ async def background_index_all_cats():
                                         migrated_users += 1
                                         migrated_cats += len(cats_list)
                                     except Exception as e:
-                                        print(f"[AUTO-SYNC] Error migrating user {user_id}: {e}")
+                                        print(f"[AUTO-SYNC] Error migrating user {user_id}: {e}", flush=True)
                         
                         # Create backup
                         backup_path = cats_json_path + ".backup"
                         try:
                             with open(backup_path, "w", encoding="utf-8") as f:
                                 json.dump(json_data, f, ensure_ascii=False, indent=2)
-                            print(f"[AUTO-SYNC] Migration complete! {migrated_users} users, {migrated_cats} cats")
-                            print(f"[AUTO-SYNC] Backup created at: {backup_path}")
+                            print(f"[AUTO-SYNC] Migration complete! {migrated_users} users, {migrated_cats} cats", flush=True)
+                            print(f"[AUTO-SYNC] Backup created at: {backup_path}", flush=True)
                         except Exception as e:
-                            print(f"[AUTO-SYNC] Could not create backup: {e}")
+                            print(f"[AUTO-SYNC] Could not create backup: {e}", flush=True)
                         
                         migrated_from_json = True
                     except Exception as e:
-                        print(f"[AUTO-SYNC] Error during JSON migration: {e}")
+                        print(f"[AUTO-SYNC] Error during JSON migration: {e}", flush=True)
                         import traceback
                         traceback.print_exc()
                 else:
-                    print(f"[AUTO-SYNC] No cats.json found at {cats_json_path}, skipping migration")
+                    print(f"[AUTO-SYNC] No cats.json found at {cats_json_path}, skipping migration", flush=True)
             
-            print(f"[AUTO-SYNC] Starting background cat instance sync (run #{run_count})...")
+            print(f"[AUTO-SYNC] Starting background cat instance sync (run #{run_count})...", flush=True)
             
             synced_users = 0
             synced_cats = 0
@@ -4229,14 +4236,21 @@ async def background_index_all_cats():
                         # per-user failure shouldn't stop whole pass
                         continue
                 
-                print(f"[AUTO-SYNC] Complete: {synced_users} users synced, ~{synced_cats} total instances")
+                print(f"[AUTO-SYNC] Complete: {synced_users} users synced, ~{synced_cats} total instances", flush=True)
             except Exception as e:
-                print(f"[AUTO-SYNC] Error during sync: {e}")
+                print(f"[AUTO-SYNC] Error during sync: {e}", flush=True)
+            
+            # Wait 30 minutes before next run (1800 seconds)
+            await asyncio.sleep(1800)
+        
         except Exception as e:
-            print(f"[AUTO-SYNC] Fatal error: {e}")
-
-        # run again in 30 minutes
-        await asyncio.sleep(30 * 60)
+            print(f"[AUTO-SYNC] Unexpected error in background task: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            # Wait before retrying to avoid spam
+            await asyncio.sleep(60)
+    
+    print("[AUTO-SYNC] Background task ended (bot closed)", flush=True)
 
 
 async def ensure_user_instances(guild_id: int, user_id: int):
@@ -5771,6 +5785,8 @@ async def on_ready():
     
     # Start the daily random rain task
     bot.loop.create_task(schedule_daily_rain())
+    
+    # Note: background_index_all_cats is started in setup() function, not here
 
 async def schedule_daily_rain():
     while True:
@@ -14329,6 +14345,8 @@ async def on_error(*args, **kwargs):
 
 async def setup(bot2):
     global bot, RAIN_ID, vote_server
+    
+    print("=== SETUP FUNCTION CALLED ===", flush=True)
 
     # Diagnostic wrapper: record calls to add_cog on the real bot instance.
     # This is temporary debugging code to understand why bot.add_cog
@@ -14419,6 +14437,13 @@ async def setup(bot2):
     bot = bot2
 
     config.SOFT_RESTART_TIME = time.time()
+
+    # Start background tasks
+    import sys
+    print("[SETUP] About to create background_index_all_cats task...", flush=True, file=sys.stderr)
+    print("[STARTUP] Creating background_index_all_cats task...", flush=True)
+    bot.loop.create_task(background_index_all_cats(bot2))
+    print("[SETUP] Task created!", flush=True, file=sys.stderr)
 
     app_commands = await bot.tree.sync()
     for i in app_commands:
