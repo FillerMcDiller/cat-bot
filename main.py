@@ -930,7 +930,7 @@ async def setup_hook():
 bot.setup_hook = setup_hook
 
 
-async def start_internal_server(port: int = 3001):
+async def start_internal_server(port: int = 3002):
     """Start a small internal aiohttp server on localhost that accepts POST /_internal_vote
 
     This endpoint is intended to be called by the external `webhook_server.py` process which
