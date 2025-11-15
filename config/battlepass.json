@@ -386,8 +386,8 @@
     ]
   },
   "quests": {
-    "vote": {
-      "vote": {"emoji": "topgg", "title": "[Vote on Top.gg](https://top.gg/bot/1387305159264309399/vote)", "xp_min": 250, "xp_max": 350, "progress": 1}
+    "third": {
+      "third": {"emoji": "✨", "title": "Complete the Third Quest", "xp_min": 250, "xp_max": 350, "progress": 1}
     },
     "catch": {
       "2fine": {"emoji": "finecat", "title": "Catch 2 Fine cats", "xp_min": 330, "xp_max": 370, "progress": 2},

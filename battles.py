@@ -49,6 +49,20 @@ PASSIVES = {
     "Donut": {"hp_bonus": 5},
 }
 
+
+def _hp_bar(hp: int, max_hp: int = 100, length: int = 12) -> str:
+    """Return a simple text HP bar for embeds."""
+    try:
+        hp = max(0, int(hp))
+        max_hp = max(1, int(max_hp))
+    except Exception:
+        return "HP:?"
+    frac = min(1.0, hp / max_hp)
+    filled = int(frac * length)
+    empty = length - filled
+    bar = "█" * filled + "░" * empty
+    return f"{bar} {hp}/{max_hp}"
+
 # In-memory battles: channel_id -> Battle
 BATTLES: Dict[int, "Battle"] = {}
 
@@ -221,7 +235,17 @@ class BattlesCog(commands.Cog):
                 label = f"{c.get('name','?')} ({c.get('type','?')}) HP:{c.get('hp',0)} DMG:{c.get('dmg',0)} id:{c.get('id')[:6]}"
                 options.append(discord.SelectOption(label=label, value=c.get('id')))
             view = CatDeckView(user.id, options)
-            msg = await user.send("Select up to 3 cats for your deck", view=view)
+            # Prefer DM; if it fails (users disabled DMs) fall back to asking in-channel
+            try:
+                msg = await user.send("Select up to 3 cats for your deck", view=view)
+            except Exception:
+                # send selection publicly but restrict interactions to the player via interaction_check
+                try:
+                    await user.guild.system_channel.send(f"{user.mention}, please select up to 3 cats for the upcoming battle.")
+                except Exception:
+                    # last resort: send to the battle channel
+                    await channel.send(f"{user.mention}, please select up to 3 cats for the upcoming battle.")
+                msg = await channel.send(f"{user.mention} — select up to 3 cats for your deck below:", view=view)
             # wait until they submit or timeout
             await view.wait()
             if view.result:
@@ -297,54 +321,22 @@ class BattleActionView(discord.ui.View):
         self.battle = battle
         self.actor_id = actor_id
 
+        # dynamically add attack options as a select
+        a_cat = self.battle.active_cat(self.actor_id)
+        atk_type = a_cat.get("type") if a_cat else None
+        attacks = TYPE_ATTACKS.get(atk_type, [("Bite", 1.0)])
+        opts = [discord.SelectOption(label=f"{name} (x{int(mult*100)}%)", value=str(i)) for i, (name, mult) in enumerate(attacks)]
+        self.attack_select = AttackSelect(opts, attacks, self)
+        self.add_item(self.attack_select)
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.actor_id
 
     @discord.ui.button(label="Attack", style=discord.ButtonStyle.primary)
     async def attack(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # pick default attack
-        a_cat = self.battle.active_cat(self.actor_id)
-        o_cat = self.battle.active_cat(self.battle.opponent_of(self.actor_id))
-        if not a_cat or not o_cat:
-            await interaction.response.send_message("Invalid cats.", ephemeral=True)
-            return
-        base = int(a_cat.get('dmg', 1))
-        atk_type = a_cat.get('type')
-        def_type = o_cat.get('type')
-
-        # choose an attack for the type (or fallback)
-        attacks = TYPE_ATTACKS.get(atk_type, [("Bite", 1.0)])
-        attack_name, atk_mult = random.choice(attacks)
-
-        # base multiplier from weaknesses
-        mult = 1.0
-        if def_type in WEAKNESSES and atk_type in WEAKNESSES[def_type]:
-            mult *= 1.25
-
-        # apply passives
-        atk_passive = PASSIVES.get(atk_type, {})
-        def_passive = PASSIVES.get(def_type, {})
-        if atk_passive.get("attack_mult"):
-            mult *= float(atk_passive["attack_mult"])
-        if def_passive.get("defend_mult"):
-            mult *= float(def_passive["defend_mult"])
-
-        # critical hit check
-        crit = False
-        crit_chance = float(atk_passive.get("crit_chance", 0))
-        crit_mult = float(atk_passive.get("crit_mult", 1.5))
-        if crit_chance and random.random() < crit_chance:
-            crit = True
-            mult *= crit_mult
-
-        final = int(base * atk_mult * mult)
-        o_cat['hp'] = max(0, o_cat.get('hp', 0) - final)
-        crit_text = " (CRITICAL!)" if crit else ""
-        await interaction.response.send_message(f"{a_cat.get('name')} uses {attack_name} and hits {o_cat.get('name')} for {final} damage!{crit_text} (mult {round(mult,2)})")
-        # check KO
-        if o_cat['hp'] <= 0:
-            await interaction.followup.send(f"{o_cat.get('name')} has been knocked out!")
-        self.stop()
+        # Deprecated: Attack button retained for compatibility but suggests using attack select
+        await interaction.response.send_message("Please choose a specific attack from the dropdown instead.", ephemeral=True)
+        return
 
     @discord.ui.button(label="Switch", style=discord.ButtonStyle.secondary)
     async def switch(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -384,6 +376,75 @@ class SwitchSelect(discord.ui.Select):
         self.value = self.values[0]
         await interaction.response.defer()
         self.view.stop()
+
+
+class AttackSelect(discord.ui.Select):
+    def __init__(self, options, attacks, parent_view: BattleActionView):
+        super().__init__(placeholder="Choose an attack...", min_values=1, max_values=1, options=options)
+        self.attacks = attacks
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        view: BattleActionView = self.parent_view
+        a_cat = view.battle.active_cat(view.actor_id)
+        o_cat = view.battle.active_cat(view.battle.opponent_of(view.actor_id))
+        if not a_cat or not o_cat:
+            await interaction.response.send_message("Invalid cats.", ephemeral=True)
+            return
+
+        idx = int(self.values[0])
+        attack_name, atk_mult = self.attacks[idx]
+        base = int(a_cat.get('dmg', 1))
+        atk_type = a_cat.get('type')
+        def_type = o_cat.get('type')
+
+        mult = 1.0
+        if def_type in WEAKNESSES and atk_type in WEAKNESSES[def_type]:
+            mult *= 1.25
+
+        atk_passive = PASSIVES.get(atk_type, {})
+        def_passive = PASSIVES.get(def_type, {})
+        if atk_passive.get("attack_mult"):
+            mult *= float(atk_passive["attack_mult"])
+        if def_passive.get("defend_mult"):
+            mult *= float(def_passive["defend_mult"])
+
+        crit = False
+        crit_chance = float(atk_passive.get("crit_chance", 0))
+        crit_mult = float(atk_passive.get("crit_mult", 1.5))
+        if crit_chance and random.random() < crit_chance:
+            crit = True
+            mult *= crit_mult
+
+        final = int(base * atk_mult * mult)
+        o_cat['hp'] = max(0, o_cat.get('hp', 0) - final)
+
+        # Build updated embed showing HP bars
+        a_hp = a_cat.get('hp', 0)
+        a_max = a_cat.get('max_hp', max(1, int(a_cat.get('hp', 0))))
+        o_hp = o_cat.get('hp', 0)
+        o_max = o_cat.get('max_hp', max(1, int(o_cat.get('hp', 0))))
+
+        embed = discord.Embed(title=f"{a_cat.get('name')} used {attack_name}!", color=0x6E593C)
+        embed.add_field(name=f"{a_cat.get('name')}", value=_hp_bar(a_hp, a_max), inline=True)
+        embed.add_field(name=f"{o_cat.get('name')}", value=_hp_bar(o_hp, o_max), inline=True)
+
+        crit_text = " (CRITICAL!)" if crit else ""
+        # edit the original message (the action prompt) to show result and disable the view
+        try:
+            await interaction.response.edit_message(embed=embed, view=None)
+        except Exception:
+            # fallback: send a followup
+            await interaction.response.send_message(f"{a_cat.get('name')} hits {o_cat.get('name')} for {final} damage!{crit_text}")
+
+        if o_cat['hp'] <= 0:
+            try:
+                await interaction.followup.send(f"{o_cat.get('name')} has been knocked out!")
+            except Exception:
+                pass
+
+        # advance turn and stop view
+        view.stop()
 
 
 class ConfirmView(discord.ui.View):

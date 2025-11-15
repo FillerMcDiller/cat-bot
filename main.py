@@ -1476,7 +1476,15 @@ async def _check_full_stack_and_huzzful(profile, message, cat_type: str):
             
 async def generate_quest(user: Profile, quest_type: str):
     while True:
-        quest = random.choice(list(battle["quests"][quest_type].keys()))
+        # Map the old 'vote' quest type to the new 'third' quest config.
+        if quest_type == "vote":
+            quest_choices = list(battle.get("quests", {}).get("third", {}).keys())
+        else:
+            quest_choices = list(battle["quests"][quest_type].keys())
+        if not quest_choices:
+            # No available quests for this type; bail out to avoid infinite loop.
+            return
+        quest = random.choice(quest_choices)
         if quest in ["slots", "reminder"]:
             # removed quests
             continue
@@ -1500,7 +1508,13 @@ async def generate_quest(user: Profile, quest_type: str):
                 continue
         break
 
-    quest_data = battle["quests"][quest_type][quest]
+    # The public 'vote' quest has been removed from config; map internal 'vote'
+    # generation to the new 'third' quest configuration so DB fields can remain.
+    if quest_type == "vote":
+        quest_data = battle.get("quests", {}).get("third", {}).get(quest)
+    else:
+        quest_data = battle["quests"][quest_type][quest]
+
     if quest_type == "vote":
         user.vote_reward = random.randint(quest_data["xp_min"] // 10, quest_data["xp_max"] // 10) * 10
         user.vote_cooldown = 0
@@ -1567,7 +1581,8 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
     elif quest == "vote":
         if user.vote_cooldown != 0:
             return
-        quest_data = battle["quests"]["vote"][quest]
+        # Map internal 'vote' progression to the new 'third' quest config.
+        quest_data = battle.get("quests", {}).get("third", {}).get(quest)
         global_user = await User.get_or_create(user_id=user.user_id)
         user.vote_cooldown = global_user.vote_time_topgg
 
@@ -1701,7 +1716,7 @@ async def progress_embed(message, user, level_data, current_xp, old_xp, quest_da
 
     progress_line = get_emoji("staring_square") * percentage_before + "🟨" * (percentage_after - percentage_before) + "⬛" * percenteage_left
 
-    title = quest_data["title"] if "top.gg" not in quest_data["title"] else "Vote on Top.gg"
+    title = quest_data["title"]
 
     if level_data["reward"] == "Rain":
         reward_text = f"☔ {level_data['amount']}m of Rain"
@@ -1992,11 +2007,8 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None):
 
 async def postpone_reminder(interaction):
     reminder_type = interaction.data["custom_id"]
-    if reminder_type == "vote":
-        user = await User.get_or_create(user_id=interaction.user.id)
-        user.reminder_vote = int(time.time()) + 30 * 60
-        await user.save()
-    else:
+    # We removed Top.gg vote reminders; handle guild-scoped reminders only.
+    if "_" in reminder_type:
         guild_id = reminder_type.split("_")[1]
         user = await Profile.get_or_create(guild_id=int(guild_id), user_id=interaction.user.id)
         if reminder_type.startswith("catch"):
@@ -2004,6 +2016,7 @@ async def postpone_reminder(interaction):
         else:
             user.reminder_misc = int(time.time()) + 30 * 60
         await user.save()
+    # For other (removed) reminder types, acknowledge without DB changes.
     await interaction.response.send_message(f"ok, i will remind you <t:{int(time.time()) + 30 * 60}:R>", ephemeral=True)
 
 
@@ -2391,43 +2404,8 @@ async def maintaince_loop():
     except Exception:
         pass
 
-    # THIS IS CONSENTUAL AND TURNED OFF BY DEFAULT DONT BAN ME
-    #
-    # i wont go into the details of this because its a complicated mess which took me like solid 30 minutes of planning
-    #
-    # vote reminders
-    proccessed_users = []
-    async for user in User.limit(
-        ["user_id", "reminder_vote", "vote_streak"],
-        "vote_time_topgg != 0 AND vote_time_topgg + 43200 < $1 AND reminder_vote != 0 AND reminder_vote < $1",
-        time.time(),
-    ):
-        if not await Profile.count("user_id = $1 AND reminders_enabled = true LIMIT 1", user.user_id):
-            continue
-        await asyncio.sleep(0.1)
-
-        view = View(timeout=VIEW_TIMEOUT)
-        button = Button(
-            emoji=get_emoji("topgg"),
-            label=random.choice(vote_button_texts),
-            url="https://top.gg/bot/1387305159264309399/vote",
-        )
-        view.add_item(button)
-
-        button = Button(label="Postpone", custom_id="vote")
-        button.callback = postpone_reminder
-        view.add_item(button)
-
-        try:
-            user_dm = await bot.fetch_user(user.user_id)
-            await user_dm.send("You can vote now!" if user.vote_streak < 10 else f"Vote now to keep your {user.vote_streak} streak going!", view=view)
-        except Exception:
-            pass
-        # no repeat reminers for now
-        user.reminder_vote = 0
-        proccessed_users.append(user)
-
-    await User.bulk_update(proccessed_users, "reminder_vote")
+    # Vote (Top.gg) reminders and related flows were removed because external voting
+    # delivery is unreliable. No action here — catch/misc/guild reminders continue below.
 
     # i know the next two are similiar enough to be merged but its currently dec 30 and i cant be bothered
     # catch reminders
@@ -7854,31 +7832,14 @@ async def battlepass(message: discord.Interaction):
 
         description = f"Season ends <t:{timestamp}:R>\n\n"
 
-        # vote
-        streak_string = ""
-        if global_user.vote_streak >= 5 and global_user.vote_time_topgg + 24 * 3600 > time.time():
-            streak_string = f" (🔥 {global_user.vote_streak}x streak)"
+        # Third quest (replaces the previous Top.gg vote quest). We keep the
+        # underlying DB fields for compatibility but present the new quest info
+        # here.
+        third_quest = battle.get("quests", {}).get("third", {}).get("third", {"title": "Third Quest", "emoji": "✨"})
         if user.vote_cooldown != 0:
-            description += f"✅ ~~Vote on Top.gg~~\n- Refreshes <t:{int(user.vote_cooldown + 12 * 3600)}:R>{streak_string}\n"
+            description += f"✅ ~~{third_quest['title']}~~\n- Refreshes <t:{int(user.vote_cooldown + 12 * 3600)}:R>\n"
         else:
-            # inform double vote xp during weekends
-            is_weekend = now.weekday() >= 4
-
-            if is_weekend:
-                description += "-# *Double Vote XP During Weekends*\n"
-
-            description += f"{get_emoji('topgg')} [Vote on Top.gg](https://top.gg/bot/1387305159264309399/vote)\n"
-
-            if is_weekend:
-                description += f"- Reward: ~~{user.vote_reward}~~ **{user.vote_reward * 2}** XP"
-            else:
-                description += f"- Reward: {user.vote_reward} XP"
-
-            next_streak_data = get_streak_reward(global_user.vote_streak + 1)
-            if next_streak_data["reward"] and global_user.vote_time_topgg + 24 * 3600 > time.time():
-                description += f" + {next_streak_data['emoji']} 1 {next_streak_data['reward'].capitalize()} pack"
-
-            description += f"{streak_string}\n"
+            description += f"{get_emoji(third_quest.get('emoji','✨'))} {third_quest.get('title')}\n- Reward: {user.vote_reward} XP\n\n"
 
         # catch
         catch_quest = battle["quests"]["catch"][user.catch_quest]
@@ -11648,7 +11609,7 @@ async def reward_vote(user_id: int):
 
             # ensure there's a vote_reward; if not, generate a sensible one
             try:
-                qdata = battle.get("quests", {}).get("vote", {}).get("vote", {})
+                qdata = battle.get("quests", {}).get("third", {}).get("third", {})
                 if not getattr(profile, "vote_reward", 0):
                     profile.vote_reward = random.randint(qdata.get("xp_min", 250) // 10, qdata.get("xp_max", 350) // 10) * 10
             except Exception:
