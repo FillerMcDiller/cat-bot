@@ -12638,6 +12638,8 @@ async def cosmetics(message: discord.Interaction):
             select = discord.ui.Select(placeholder="Select item to purchase", options=options)
             
             async def purchase_callback(select_interaction: discord.Interaction):
+                nonlocal user, owned
+                
                 if select_interaction.user.id != message.user.id:
                     await do_funny(select_interaction)
                     return
@@ -12675,7 +12677,6 @@ async def cosmetics(message: discord.Interaction):
                     await fresh_user.save()
                     
                     # Update global user reference
-                    nonlocal user
                     user = fresh_user
                     
                     await select_interaction.response.send_message(
@@ -12689,7 +12690,6 @@ async def cosmetics(message: discord.Interaction):
                     await fresh_user.save()
                     
                     # Update global user reference
-                    nonlocal user, owned
                     user = fresh_user
                     owned = get_owned_cosmetics(user)
                     
