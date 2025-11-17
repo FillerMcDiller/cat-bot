@@ -1,0 +1,459 @@
+{
+  "badges": {
+    "starter": {
+      "name": "🌟 Starter",
+      "description": "Welcome to the cat collector!",
+      "price": 0,
+      "requirement": null
+    },
+    "collector": {
+      "name": "📚 Collector",
+      "description": "You love collecting cats",
+      "price": 100,
+      "requirement": "collecter"
+    },
+    "speedster": {
+      "name": "⚡ Speedster",
+      "description": "Lightning fast catcher",
+      "price": 100,
+      "requirement": "fast_catcher"
+    },
+    "champion": {
+      "name": "🏆 Champion",
+      "description": "Battle champion",
+      "price": 250,
+      "requirement": null
+    },
+    "wealthy": {
+      "name": "💎 Wealthy",
+      "description": "Swimming in riches",
+      "price": 500,
+      "requirement": "rich"
+    },
+    "legendary": {
+      "name": "⭐ Legendary",
+      "description": "Legendary status achieved",
+      "price": 1000,
+      "requirement": null
+    },
+    "royal": {
+      "name": "👑 Royal",
+      "description": "Cat royalty",
+      "price": 2500,
+      "requirement": null
+    },
+    "cosmic": {
+      "name": "🌌 Cosmic",
+      "description": "Beyond legendary",
+      "price": 5000,
+      "requirement": null
+    },
+    "genius": {
+      "name": "🧬 Genius",
+      "description": "Genetically gifted master",
+      "price": 0,
+      "requirement": "genetically_gifted"
+    },
+    "perfectionist": {
+      "name": "💎 Perfectionist",
+      "description": "Perfect precision achieved",
+      "price": 0,
+      "requirement": "perfection"
+    },
+    "rainmaker": {
+      "name": "🌧️ Rainmaker",
+      "description": "Cat rain survivor",
+      "price": 0,
+      "requirement": "cat_rain"
+    },
+    "completionist_badge": {
+      "name": "📚 Completionist",
+      "description": "All cats collected",
+      "price": 0,
+      "requirement": "collecter"
+    },
+    "story_hero": {
+      "name": "📖 Story Hero",
+      "description": "Story completed",
+      "price": 0,
+      "requirement": "thanksforplaying"
+    },
+    "lucky_charm": {
+      "name": "🍀 Lucky Charm",
+      "description": "0.1% chance achieved",
+      "price": 0,
+      "requirement": "lucky"
+    },
+    "hyper_hidden": {
+      "name": "🌑 Hyper Hidden",
+      "description": "20x more hidden",
+      "price": 0,
+      "requirement": "darkest_market"
+    }
+  },
+  "titles": {
+    "newbie": {
+      "name": "Newbie",
+      "description": "Just getting started",
+      "price": 0,
+      "requirement": null
+    },
+    "cat_whisperer": {
+      "name": "Cat Whisperer",
+      "description": "Speaks fluent meow",
+      "price": 150,
+      "requirement": null
+    },
+    "breeding_expert": {
+      "name": "Breeding Expert",
+      "description": "Master of genetics",
+      "price": 200,
+      "requirement": null
+    },
+    "battle_master": {
+      "name": "Battle Master",
+      "description": "Undefeated warrior",
+      "price": 300,
+      "requirement": null
+    },
+    "the_collector": {
+      "name": "The Collector",
+      "description": "Gotta catch 'em all",
+      "price": 400,
+      "requirement": "collecter"
+    },
+    "cat_lord": {
+      "name": "Cat Lord",
+      "description": "Ruler of all cats",
+      "price": 1000,
+      "requirement": null
+    },
+    "supreme_leader": {
+      "name": "Supreme Leader",
+      "description": "The one and only",
+      "price": 2000,
+      "requirement": "leader"
+    },
+    "cat_god": {
+      "name": "Cat God",
+      "description": "Ascended beyond mortal limits",
+      "price": 10000,
+      "requirement": null
+    },
+    "master_scientist": {
+      "name": "Master Scientist",
+      "description": "DNA manipulation expert",
+      "price": 0,
+      "requirement": "genetically_gifted"
+    },
+    "speed_demon": {
+      "name": "Speed Demon",
+      "description": "Lightning reflexes",
+      "price": 0,
+      "requirement": "fast_catcher"
+    },
+    "time_traveler": {
+      "name": "Time Traveler",
+      "description": "Patience personified",
+      "price": 0,
+      "requirement": "slow_catcher"
+    },
+    "completionist": {
+      "name": "The Completionist",
+      "description": "Collected them all",
+      "price": 0,
+      "requirement": "collecter"
+    },
+    "elite_leader": {
+      "name": "Elite Leader",
+      "description": "Top of the charts",
+      "price": 0,
+      "requirement": "leader"
+    },
+    "tycoon": {
+      "name": "Cat Tycoon",
+      "description": "Ultimate wealth achieved",
+      "price": 0,
+      "requirement": "rich"
+    },
+    "fortune_favored": {
+      "name": "Fortune Favored",
+      "description": "Blessed by RNG",
+      "price": 0,
+      "requirement": "lucky"
+    },
+    "perfect_one": {
+      "name": "The Perfect One",
+      "description": "Absolute precision master",
+      "price": 0,
+      "requirement": "perfection"
+    },
+    "shadow_broker": {
+      "name": "Shadow Broker",
+      "description": "Master of secrets",
+      "price": 0,
+      "requirement": "dark_market"
+    },
+    "story_master": {
+      "name": "Story Master",
+      "description": "Journey completed",
+      "price": 0,
+      "requirement": "thanksforplaying"
+    },
+    "bp_champion": {
+      "name": "BP Champion",
+      "description": "Battlepass completed",
+      "price": 0,
+      "requirement": "grinder"
+    },
+    "trade_mogul": {
+      "name": "Trade Mogul",
+      "description": "Master negotiator",
+      "price": 0,
+      "requirement": "capitalism"
+    },
+    "jackpot_king": {
+      "name": "Jackpot King",
+      "description": "777 legendary win",
+      "price": 0,
+      "requirement": "big_win_slots"
+    },
+    "void_walker": {
+      "name": "Void Walker",
+      "description": "Escaped the darkness",
+      "price": 0,
+      "requirement": "blackhole"
+    }
+  },
+  "colors": {
+    "default": {
+      "name": "Default Blue",
+      "value": "#3498db",
+      "price": 0,
+      "requirement": null
+    },
+    "red": {
+      "name": "Fiery Red",
+      "value": "#e74c3c",
+      "price": 50,
+      "requirement": null
+    },
+    "green": {
+      "name": "Nature Green",
+      "value": "#2ecc71",
+      "price": 50,
+      "requirement": null
+    },
+    "purple": {
+      "name": "Royal Purple",
+      "value": "#9b59b6",
+      "price": 100,
+      "requirement": null
+    },
+    "gold": {
+      "name": "Golden Glory",
+      "value": "#f1c40f",
+      "price": 200,
+      "requirement": null
+    },
+    "pink": {
+      "name": "Pretty Pink",
+      "value": "#e91e63",
+      "price": 150,
+      "requirement": null
+    },
+    "orange": {
+      "name": "Sunset Orange",
+      "value": "#ff9800",
+      "price": 100,
+      "requirement": null
+    },
+    "cyan": {
+      "name": "Cool Cyan",
+      "value": "#00bcd4",
+      "price": 150,
+      "requirement": null
+    },
+    "dark": {
+      "name": "Dark Mode",
+      "value": "#2c3e50",
+      "price": 300,
+      "requirement": null
+    },
+    "rainbow": {
+      "name": "Rainbow 🌈",
+      "value": "#ff69b4",
+      "price": 1000,
+      "requirement": null
+    },
+    "emerald": {
+      "name": "Emerald Green",
+      "value": "#00ff88",
+      "price": 0,
+      "requirement": "collecter"
+    },
+    "void_black": {
+      "name": "Void Black",
+      "value": "#0a0a0a",
+      "price": 0,
+      "requirement": "blackhole"
+    },
+    "prismatic": {
+      "name": "Prismatic Shift",
+      "value": "#9400d3",
+      "price": 0,
+      "requirement": "prism"
+    },
+    "lucky_gold": {
+      "name": "Lucky Gold",
+      "value": "#ffd700",
+      "price": 0,
+      "requirement": "lucky"
+    },
+    "perfect_white": {
+      "name": "Perfect White",
+      "value": "#ffffff",
+      "price": 0,
+      "requirement": "perfection"
+    },
+    "genetic_cyan": {
+      "name": "Genetic Cyan",
+      "value": "#00ffff",
+      "price": 0,
+      "requirement": "genetically_gifted"
+    }
+  },
+  "effects": {
+    "none": {
+      "name": "None",
+      "description": "No effect",
+      "emoji": "",
+      "price": 0,
+      "requirement": null
+    },
+    "sparkles": {
+      "name": "Sparkles",
+      "description": "✨ Sparkly aura",
+      "emoji": "✨",
+      "price": 200,
+      "requirement": null
+    },
+    "fire": {
+      "name": "Fire",
+      "description": "🔥 Burning passion",
+      "emoji": "🔥",
+      "price": 250,
+      "requirement": null
+    },
+    "stars": {
+      "name": "Stars",
+      "description": "⭐ Shining bright",
+      "emoji": "⭐",
+      "price": 300,
+      "requirement": null
+    },
+    "hearts": {
+      "name": "Hearts",
+      "description": "💕 Loving vibes",
+      "emoji": "💕",
+      "price": 350,
+      "requirement": null
+    },
+    "lightning": {
+      "name": "Lightning",
+      "description": "⚡ Electric energy",
+      "emoji": "⚡",
+      "price": 400,
+      "requirement": "fast_catcher"
+    },
+    "crown": {
+      "name": "Crown",
+      "description": "👑 Royal presence",
+      "emoji": "👑",
+      "price": 1000,
+      "requirement": "leader"
+    },
+    "galaxy": {
+      "name": "Galaxy",
+      "description": "🌌 Cosmic power",
+      "emoji": "🌌",
+      "price": 2000,
+      "requirement": null
+    },
+    "dna": {
+      "name": "DNA Helix",
+      "description": "🧬 Genetic mastery",
+      "emoji": "🧬",
+      "price": 0,
+      "requirement": "genetically_gifted"
+    },
+    "gem": {
+      "name": "Diamond",
+      "description": "💎 Perfect clarity",
+      "emoji": "💎",
+      "price": 0,
+      "requirement": "perfection"
+    },
+    "clover": {
+      "name": "Four Leaf Clover",
+      "description": "🍀 Extreme luck",
+      "emoji": "🍀",
+      "price": 0,
+      "requirement": "lucky"
+    },
+    "trophy": {
+      "name": "Trophy",
+      "description": "🏆 Champion's glory",
+      "emoji": "🏆",
+      "price": 0,
+      "requirement": "leader"
+    },
+    "rainbow": {
+      "name": "Rainbow",
+      "description": "🌈 Full spectrum",
+      "emoji": "🌈",
+      "price": 0,
+      "requirement": "collecter"
+    },
+    "book": {
+      "name": "Storybook",
+      "description": "📖 Tale complete",
+      "emoji": "📖",
+      "price": 0,
+      "requirement": "thanksforplaying"
+    },
+    "void": {
+      "name": "Void",
+      "description": "⚫ Darkness conquered",
+      "emoji": "⚫",
+      "price": 0,
+      "requirement": "blackhole"
+    }
+  },
+  "showcases": {
+    "slot_3": {
+      "name": "Showcase Slot #3",
+      "description": "Add a third showcase slot to your profile",
+      "price": 5000,
+      "requirement": null
+    },
+    "slot_4": {
+      "name": "Showcase Slot #4",
+      "description": "Add a fourth showcase slot to your profile",
+      "price": 10000,
+      "requirement": null
+    },
+    "slot_5": {
+      "name": "Showcase Slot #5",
+      "description": "Add a fifth showcase slot to your profile",
+      "price": 20000,
+      "requirement": null
+    },
+    "slot_6": {
+      "name": "Showcase Slot #6",
+      "description": "Add a sixth showcase slot to your profile",
+      "price": 50000,
+      "requirement": null
+    }
+  }
+}

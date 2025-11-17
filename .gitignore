@@ -2,7 +2,7 @@
 catbot.db
 catbot.db-shm
 catbot.db-wal
-data/
+
 app.py
 .vscode
 config.py
