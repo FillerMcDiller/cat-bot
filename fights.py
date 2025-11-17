@@ -528,6 +528,19 @@ class AbilitySelect(discord.ui.Select):
                 # defender has no cats left -> attacker wins
                 win_text = f"{interaction.user.display_name} wins the fight!"
                 self.session.set_last_action(win_text)
+                
+                # Track battle win
+                try:
+                    mm = _get_main()
+                    if mm:
+                        Profile = getattr(mm, "Profile", None)
+                        if Profile:
+                            winner = await Profile.get_or_create(guild_id=self.session.guild.id, user_id=user_id)
+                            winner.battles_won = (winner.battles_won or 0) + 1
+                            await winner.save()
+                except Exception as e:
+                    print(f"[BATTLE] Failed to track win: {e}")
+                
                 # update embed and finish
                 if self.session.message:
                     try:
@@ -615,6 +628,19 @@ class ConfirmView(discord.ui.View):
         other = self.session.opponent if self.surrendering_id == self.session.challenger.id else self.session.challenger
         text = f"{interaction.user.display_name} surrendered. {other.display_name} wins!"
         self.session.set_last_action(text)
+        
+        # Track battle win for the other player
+        try:
+            mm = _get_main()
+            if mm:
+                Profile = getattr(mm, "Profile", None)
+                if Profile:
+                    winner = await Profile.get_or_create(guild_id=self.session.guild.id, user_id=other.id)
+                    winner.battles_won = (winner.battles_won or 0) + 1
+                    await winner.save()
+        except Exception as e:
+            print(f"[BATTLE] Failed to track win on surrender: {e}")
+        
         if self.session.message:
             try:
                 emb = discord.Embed(title="Cat Battle", description=text)
