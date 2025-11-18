@@ -5938,6 +5938,7 @@ async def on_ready():
     # Note: background_index_all_cats is started in setup() function, not here
 
 async def schedule_daily_rain():
+    """Daily random rain task - picks a random channel and starts a 5-minute rain once per day."""
     while True:
         # Wait until next day
         now = datetime.datetime.now()
@@ -5951,30 +5952,17 @@ async def schedule_daily_rain():
             await asyncio.sleep(random_seconds)
             
             # Get a random channel that has had cat activity
-            channels = await Channel.collect(filter="cat > 0")
+            channels = await Channel.collect(filter="cat_rains = 0")
             if not channels:
                 continue
                 
-            channel = random.choice(channels)
-            discord_channel = bot.get_channel(channel.channel_id)
+            channel_data = random.choice(channels)
+            discord_channel = bot.get_channel(channel_data.channel_id)
             if not discord_channel:
                 continue
             
-            # Start a 5-minute rain
-            await discord_channel.send("☔ A mysterious rain has started! Cats will spawn frequently for the next 5 minutes!")
-            
-            # Do the rain spawns
-            for _ in range(30):  # About 30 spawns over 5 minutes
-                try:
-                    if random.random() < 0.8:  # 80% chance each cycle
-                        await spawn_cat(discord_channel, force_spawn=True)
-                except Exception as e:
-                    print(f"Error in daily rain spawn: {e}")
-                    continue
-                    
-                await asyncio.sleep(10)  # 10 second delay between spawns
-                
-            await discord_channel.send("The rain has stopped!")
+            # Start a 5-minute rain using the proper rain system
+            await give_rain(discord_channel, 5)
             
         except Exception as e:
             print(f"Error in daily rain scheduler: {e}")
@@ -7400,9 +7388,14 @@ async def help(message):
                     desc = getattr(c, "description", "") or "No description."
                     # mark admin commands if description contains admin or command has default permissions
                     is_admin = False
+                    is_owner_only = False
                     try:
                         if "admin" in desc.lower() or desc.strip().upper().startswith("(ADMIN)"):
                             is_admin = True
+                        # Skip owner-only commands
+                        if name in ["admin", "servers", "adventure_list", "debug_battles"]:
+                            is_owner_only = True
+                            continue
                     except Exception:
                         pass
                     cmds.append({"name": name, "desc": desc, "admin": is_admin})
@@ -7425,15 +7418,15 @@ async def help(message):
                 key = (cmd["name"] + " " + cmd["desc"]).lower()
                 if cmd.get("admin") or "admin" in key or "give" in key or "manage" in key:
                     return "Admin"
-                if any(k in key for k in ["shop", "pack", "kibble", "buy", "sell", "rain", "battlepass", "pack"]):
+                if any(k in key for k in ["shop", "pack", "kibble", "buy", "sell", "rain", "battlepass", "pack", "daily", "trade"]):
                     return "Economy"
-                if any(k in key for k in ["cat", "cats", "play", "catch", "inventory", "rename", "catalogue", "catpedia", "purr"]):
+                if any(k in key for k in ["cat", "cats", "play", "catch", "inventory", "rename", "catalogue", "catpedia", "purr", "breed", "battle", "fight", "adventure"]):
                     return "Cats"
-                if any(k in key for k in ["slot", "slots", "pig", "tictactoe", "tiktok", "8ball", "news", "wiki", "credits"]):
+                if any(k in key for k in ["slot", "slots", "pig", "tictactoe", "tiktok", "8ball", "news", "wiki", "credits", "cookie"]):
                     return "Fun"
                 if any(k in key for k in ["slot", "casino", "gamble", "bet", "pig"]):
                     return "Gambling"
-                if any(k in key for k in ["help", "info", "stats", "getid", "last", "catpedia", "wiki", "news"]):
+                if any(k in key for k in ["help", "info", "stats", "getid", "last", "catpedia", "wiki", "news", "profile", "cosmetics", "mystyle", "suggestion"]):
                     return "Utility"
                 return "Other"
 
@@ -7824,6 +7817,14 @@ class AdminPanelModal(discord.ui.Modal):
         elif action == "Start Giveaway":
             self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Type of cat to give away"))
             self.add_item(discord.ui.TextInput(label="Duration", placeholder="Duration (e.g. 5m, 1h)"))
+        elif action == "Start Rain":
+            self.add_item(discord.ui.TextInput(label="Channel ID", placeholder="Channel ID to start rain in"))
+            self.add_item(discord.ui.TextInput(label="Duration (minutes)", placeholder="Duration in minutes (default 10)"))
+        elif action == "Give Kibbles":
+            self.add_item(discord.ui.TextInput(label="Username", placeholder="Username, ID, or nickname"))
+            self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of kibbles to give"))
+        elif action == "Test Adventure":
+            self.add_item(discord.ui.TextInput(label="Test Type", placeholder="Type 'instant' to complete an adventure", value="instant"))
             
     async def find_member(self, name: str) -> discord.Member:
         """Find a member by name, nickname, ID, or mention"""
@@ -7859,19 +7860,17 @@ class AdminPanelModal(discord.ui.Modal):
             except (ValueError, discord.NotFound, discord.HTTPException) as e:
                 print(f"[DEBUG] Mention lookup failed: {str(e)}")
 
-        # Search by name (includes partial matches)
+        # Search by username and display name (case-insensitive)
+        name_lower = name.lower()
         for member in self.guild.members:
-            member_name = member.name
-            member_display = member.display_name
-            member_full = str(member)
-            
-            # Check exact matches first
-            if name in [member_name, member_display, member_full]:
+            # Check exact matches first (case-insensitive)
+            if name_lower in [member.name.lower(), member.display_name.lower(), str(member).lower()]:
                 print(f"[DEBUG] Found user by exact name match: {member}")
                 return member
-                
-            # Then check partial matches
-            if name in member_name or name in member_display or name in member_full:
+        
+        # Then check partial matches
+        for member in self.guild.members:
+            if name_lower in member.name.lower() or name_lower in member.display_name.lower() or name_lower in str(member).lower():
                 print(f"[DEBUG] Found user by partial name match: {member}")
                 return member
 
@@ -7984,33 +7983,103 @@ class AdminPanelModal(discord.ui.Modal):
             else:
                 embed.description = "No one entered the giveaway 😢"
                 await msg.edit(embed=embed, view=None)
+        
+        elif self.action == "Start Rain":
+            try:
+                channel_id = int(self.children[0].value.strip())
+                duration_minutes = int(self.children[1].value.strip()) if len(self.children) > 1 and self.children[1].value.strip() else 10
+                duration_seconds = duration_minutes * 60
+                
+                channel = bot.get_channel(channel_id)
+                if not channel:
+                    await interaction.response.send_message(f"Could not find channel with ID {channel_id}!", ephemeral=True)
+                    return
+                
+                # Start the rain
+                await give_rain(channel, duration_seconds)
+                await interaction.response.send_message(f"✅ Started a {duration_minutes} minute cat rain in {channel.mention}!", ephemeral=True)
+            except ValueError:
+                await interaction.response.send_message("Invalid channel ID or duration!", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"Error starting rain: {str(e)}", ephemeral=True)
+        
+        elif self.action == "Give Kibbles":
+            member = await self.find_member(self.children[0].value)
+            if not member:
+                await interaction.response.send_message(f"Couldn't find user '{self.children[0].value}'!", ephemeral=True)
+                return
+            
+            try:
+                amount = int(self.children[1].value)
+                user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+                user.kibble = (user.kibble or 0) + amount
+                await user.save()
+                await interaction.response.send_message(f"✅ Gave {amount:,} 🍖 Kibbles to {member.mention}!", ephemeral=True)
+            except ValueError:
+                await interaction.response.send_message("Invalid kibble amount!", ephemeral=True)
+        
+        elif self.action == "Test Adventure":
+            # Give instant adventure rewards to the owner for testing
+            try:
+                user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+                
+                # Give test rewards
+                test_kibbles = 1000
+                test_packs = 3
+                
+                user.kibble = (user.kibble or 0) + test_kibbles
+                user.pack_silver = (user.pack_silver or 0) + test_packs
+                await user.save()
+                
+                await interaction.response.send_message(
+                    f"✅ **Adventure Test Complete!**\n"
+                    f"Rewards given:\n"
+                    f"🍖 {test_kibbles:,} Kibbles\n"
+                    f"📦 {test_packs} Silver Packs\n\n"
+                    f"Use this to verify adventure rewards are working correctly!",
+                    ephemeral=True
+                )
+            except Exception as e:
+                await interaction.response.send_message(f"Error testing adventure: {str(e)}", ephemeral=True)
 
 class AdminPanel(discord.ui.View):
     def __init__(self, guild: discord.Guild):
         super().__init__()
         self.guild = guild
         
-    @discord.ui.button(label="Give Cats", style=ButtonStyle.blurple)
+    @discord.ui.button(label="Give Cats", style=ButtonStyle.blurple, row=0)
     async def give_cats(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Give Cats", self.guild))
         
-    @discord.ui.button(label="Give Rains", style=ButtonStyle.blurple)
+    @discord.ui.button(label="Give Rains", style=ButtonStyle.blurple, row=0)
     async def give_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Give Rains", interaction.guild))
         
-    @discord.ui.button(label="Give XP", style=ButtonStyle.blurple)
+    @discord.ui.button(label="Give XP", style=ButtonStyle.blurple, row=0)
     async def give_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Give XP", interaction.guild))
         
-    @discord.ui.button(label="Give Packs", style=ButtonStyle.blurple)
+    @discord.ui.button(label="Give Packs", style=ButtonStyle.blurple, row=0)
     async def give_packs(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Give Packs", interaction.guild))
+    
+    @discord.ui.button(label="Give Kibbles", style=ButtonStyle.blurple, row=1)
+    async def give_kibbles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Give Kibbles", interaction.guild))
         
-    @discord.ui.button(label="Speak", style=ButtonStyle.green)
+    @discord.ui.button(label="Start Rain", style=ButtonStyle.green, row=1)
+    async def start_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Start Rain", interaction.guild))
+    
+    @discord.ui.button(label="Test Adventure", style=ButtonStyle.green, row=1)
+    async def test_adventure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AdminPanelModal("Test Adventure", interaction.guild))
+        
+    @discord.ui.button(label="Speak", style=ButtonStyle.green, row=2)
     async def speak(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Speak", interaction.guild))
         
-    @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green)
+    @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green, row=2)
     async def start_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Start Giveaway", interaction.guild))
 
@@ -8026,6 +8095,116 @@ async def admin(interaction: discord.Interaction):
         color=Colors.brown
     )
     await interaction.response.send_message(embed=embed, view=AdminPanel(guild=interaction.guild), ephemeral=True)
+
+@bot.tree.command(description="Submit a suggestion to the bot owner")
+@discord.app_commands.describe(suggestion="Your suggestion for the bot")
+async def suggestion(interaction: discord.Interaction, suggestion: str):
+    """Send a suggestion to the bot owner"""
+    await interaction.response.defer(ephemeral=True)
+    
+    # Create suggestion embed
+    embed = discord.Embed(
+        title="💡 New Suggestion",
+        description=suggestion,
+        color=Colors.brown,
+        timestamp=datetime.datetime.utcnow()
+    )
+    embed.set_author(name=f"{interaction.user} ({interaction.user.id})", icon_url=interaction.user.display_avatar.url)
+    embed.add_field(name="Server", value=f"{interaction.guild.name} ({interaction.guild.id})", inline=False)
+    
+    # Try to send to owner's DM first
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        await owner.send(embed=embed)
+        sent_to = "DM"
+    except Exception:
+        # Fallback to log channel if DM fails
+        try:
+            if config.BACKUP_ID:
+                log_channel = bot.get_channel(config.BACKUP_ID)
+                if log_channel:
+                    await log_channel.send(embed=embed)
+                    sent_to = "log channel"
+                else:
+                    await interaction.followup.send("Failed to send suggestion - contact the bot owner directly.", ephemeral=True)
+                    return
+            else:
+                await interaction.followup.send("Failed to send suggestion - contact the bot owner directly.", ephemeral=True)
+                return
+        except Exception:
+            await interaction.followup.send("Failed to send suggestion - contact the bot owner directly.", ephemeral=True)
+            return
+    
+    await interaction.followup.send(f"✅ Your suggestion has been sent to the bot owner via {sent_to}! Thank you for your feedback.", ephemeral=True)
+
+# Admin subcommands (owner-only)
+@bot.tree.command(description="(OWNER) Start a cat rain in a channel")
+@discord.app_commands.describe(channel_id="Channel ID to start rain in", duration="Duration in minutes (default 10)")
+async def rainstart(interaction: discord.Interaction, channel_id: str, duration: int = 10):
+    """Start a cat rain in specified channel"""
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    try:
+        ch_id = int(channel_id)
+        channel = bot.get_channel(ch_id)
+        if not channel:
+            await interaction.response.send_message(f"Could not find channel with ID {ch_id}!", ephemeral=True)
+            return
+        
+        duration_seconds = duration * 60
+        await give_rain(channel, duration_seconds)
+        await interaction.response.send_message(f"✅ Started a {duration} minute cat rain in {channel.mention}!", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error starting rain: {str(e)}", ephemeral=True)
+
+@bot.tree.command(description="(OWNER) Give kibbles to a user")
+@discord.app_commands.describe(user="User to give kibbles to", amount="Amount of kibbles to give")
+async def givekibbles(interaction: discord.Interaction, user: discord.User, amount: int):
+    """Give kibbles to a user"""
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    try:
+        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=user.id)
+        profile.kibble = (profile.kibble or 0) + amount
+        await profile.save()
+        await interaction.response.send_message(f"✅ Gave {amount:,} 🍖 Kibbles to {user.mention}!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error giving kibbles: {str(e)}", ephemeral=True)
+
+@bot.tree.command(description="(OWNER) Test adventure rewards")
+async def adventuretest(interaction: discord.Interaction):
+    """Give instant adventure rewards for testing"""
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    try:
+        user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+        
+        # Give test rewards
+        test_kibbles = 1000
+        test_packs = 3
+        
+        user.kibble = (user.kibble or 0) + test_kibbles
+        user.pack_silver = (user.pack_silver or 0) + test_packs
+        await user.save()
+        
+        await interaction.response.send_message(
+            f"✅ **Adventure Test Complete!**\n"
+            f"Rewards given:\n"
+            f"🍖 {test_kibbles:,} Kibbles\n"
+            f"📦 {test_packs} Silver Packs\n\n"
+            f"Use this to verify adventure rewards are working correctly!",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(f"Error testing adventure: {str(e)}", ephemeral=True)
 
 @bot.tree.command(description="List all servers the bot is in")
 async def servers(interaction: discord.Interaction):
@@ -8169,11 +8348,20 @@ async def check_daily_reminder_after_catch(user, guild, channel):
 async def give_rain(channel, duration):
     # Remember the channel for rain
     channel_data = await Channel.get_or_create(channel_id=channel.id)
-    channel_data.cat_rains += 1
+    # Set the rain timer (same logic as regular /rain command)
+    channel_data.cat_rains = time.time() + (duration * 60)
+    channel_data.yet_to_spawn = 0
     await channel_data.save()
+    await spawn_cat(str(channel.id))
     # Notify the channel that a rain event has started
     try:
-        await channel.send("🌧️ A Cat Rain has started in this channel!")
+        await channel.send(f"🌧️ A Cat Rain has started in this channel for {duration} minutes, ending <t:{int(channel_data.cat_rains)}:R>!")
+    except Exception:
+        pass
+    # Log to rain channel
+    try:
+        ch = bot.get_channel(config.RAIN_CHANNEL_ID)
+        await ch.send(f"Admin started {duration}m rain in {channel.id} (random rain)")
     except Exception:
         pass
 
