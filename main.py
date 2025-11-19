@@ -4200,12 +4200,12 @@ async def start_internal_server(port: int = 3002):
 
             try:
                 # schedule reward and log
+                print(f"[VOTE] ✅ Vote received from user {user_id}", flush=True)
+                print(f"[VOTE] Scheduling reward_vote() task...", flush=True)
                 bot.loop.create_task(reward_vote(user_id))
-                try:
-                    print(f"[VOTE] Received vote from user {user_id}, granting rewards across all servers...", flush=True)
-                except Exception:
-                    logging.info("vote received from %s, granting rewards..", user_id)
-            except Exception:
+                print(f"[VOTE] Task scheduled, will process rewards across all servers", flush=True)
+            except Exception as e:
+                print(f"[VOTE ERROR] Failed to schedule reward_vote for {user_id}: {e}", flush=True)
                 logging.exception("Failed to schedule reward_vote for %s", user_id)
                 return web.json_response({"status": "error"}, status=500)
 
@@ -17021,11 +17021,15 @@ async def reward_vote(user_id: int):
     (i.e. profile.vote_cooldown == 0). It mirrors the logic from progress(..., quest='vote')
     but runs without a discord interaction.
     """
+    print(f"[REWARD_VOTE] Starting reward_vote for user {user_id}", flush=True)
     try:
         global_user = await User.get_or_create(user_id=user_id)
-    except Exception:
+        print(f"[REWARD_VOTE] Got global user, processing {len(bot.guilds)} guilds", flush=True)
+    except Exception as e:
+        print(f"[REWARD_VOTE ERROR] Failed to get user {user_id}: {e}", flush=True)
         return
 
+    rewards_given = 0
     # iterate servers the bot is in and apply to each Profile for this user
     for guild in list(bot.guilds):
         try:
@@ -17072,6 +17076,8 @@ async def reward_vote(user_id: int):
                 current_xp = int(getattr(profile, "vote_reward", 0) or 0)
 
             profile.quests_completed = (profile.quests_completed or 0) + 1
+            rewards_given += 1
+            print(f"[REWARD_VOTE] Giving {profile.vote_reward} XP to user {user_id} in guild {guild.name} (ID: {guild.id})", flush=True)
 
             # determine level data loop
             try:
@@ -17125,9 +17131,12 @@ async def reward_vote(user_id: int):
                 except Exception:
                     pass
 
-        except Exception:
+        except Exception as e:
             # per-guild failure shouldn't stop others
+            print(f"[REWARD_VOTE ERROR] Failed to process guild {guild.id}: {e}", flush=True)
             continue
+    
+    print(f"[REWARD_VOTE] ✅ Completed! Gave rewards to {rewards_given} servers for user {user_id}", flush=True)
 
 
 # --- Extra quest runtime support (non-DB, lightweight) ---
