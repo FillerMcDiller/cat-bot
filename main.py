@@ -17021,12 +17021,17 @@ async def reward_vote(user_id: int):
     (i.e. profile.vote_cooldown == 0). It mirrors the logic from progress(..., quest='vote')
     but runs without a discord interaction.
     """
+    print(f"\n{'='*60}", flush=True)
     print(f"[REWARD_VOTE] Starting reward_vote for user {user_id}", flush=True)
+    print(f"[REWARD_VOTE] Bot has {len(bot.guilds)} guilds", flush=True)
     try:
         global_user = await User.get_or_create(user_id=user_id)
         print(f"[REWARD_VOTE] Got global user, processing {len(bot.guilds)} guilds", flush=True)
+        print(f"[REWARD_VOTE] User vote_time_topgg: {getattr(global_user, 'vote_time_topgg', 'N/A')}", flush=True)
+        print(f"[REWARD_VOTE] User vote_streak: {getattr(global_user, 'vote_streak', 'N/A')}", flush=True)
     except Exception as e:
         print(f"[REWARD_VOTE ERROR] Failed to get user {user_id}: {e}", flush=True)
+        logging.exception(f"Failed to get user {user_id}")
         return
 
     rewards_given = 0
@@ -17137,6 +17142,14 @@ async def reward_vote(user_id: int):
             continue
     
     print(f"[REWARD_VOTE] ✅ Completed! Gave rewards to {rewards_given} servers for user {user_id}", flush=True)
+    print(f"{'='*60}\n", flush=True)
+    
+    # Log to the channel after completing rewards
+    try:
+        await log_vote_to_channel(user_id, source="reward_vote")
+    except Exception as e:
+        print(f"[REWARD_VOTE ERROR] Failed to log to channel: {e}", flush=True)
+        logging.exception("Failed to log vote to channel")
 
 
 # --- Extra quest runtime support (non-DB, lightweight) ---
@@ -17258,31 +17271,45 @@ async def log_vote_to_channel(user_id: int, source: str = "unknown"):
     This is intentionally defensive: it won't raise if the channel is missing or the bot
     lacks permissions.
     """
+    print(f"[LOG_VOTE] log_vote_to_channel called for user {user_id}, source: {source}", flush=True)
     try:
         chan_id = int(getattr(config, "RAIN_CHANNEL_ID", 0) or 0)
+        print(f"[LOG_VOTE] RAIN_CHANNEL_ID: {chan_id}", flush=True)
         if not chan_id:
+            print(f"[LOG_VOTE] No RAIN_CHANNEL_ID configured, skipping", flush=True)
             return
         ch = None
         try:
             ch = bot.get_channel(chan_id)
-        except Exception:
+            print(f"[LOG_VOTE] bot.get_channel result: {ch}", flush=True)
+        except Exception as e:
+            print(f"[LOG_VOTE] bot.get_channel failed: {e}", flush=True)
             ch = None
         if ch is None:
             try:
+                print(f"[LOG_VOTE] Trying bot.fetch_channel...", flush=True)
                 ch = await bot.fetch_channel(chan_id)
-            except Exception:
+                print(f"[LOG_VOTE] bot.fetch_channel result: {ch}", flush=True)
+            except Exception as e:
+                print(f"[LOG_VOTE] bot.fetch_channel failed: {e}", flush=True)
                 ch = None
         if ch is None:
+            print(f"[LOG_VOTE] Channel {chan_id} not found, cannot send log", flush=True)
             return
 
-        text = f"Vote received: <@{user_id}> (ID: {user_id}) — source: {source}"
+        text = f"🎉 Vote received: <@{user_id}> (ID: {user_id}) — source: {source}"
+        print(f"[LOG_VOTE] Attempting to send message to channel {ch.name} ({ch.id})", flush=True)
         try:
-            await ch.send(text)
-        except Exception:
+            msg = await ch.send(text)
+            print(f"[LOG_VOTE] ✅ Message sent successfully! Message ID: {msg.id}", flush=True)
+        except Exception as e:
+            print(f"[LOG_VOTE] Failed to send message: {e}", flush=True)
             # fallback: attempt to send a shorter message
             try:
-                await ch.send(f"Vote received: {user_id} — {source}")
-            except Exception:
-                pass
-    except Exception:
-        pass
+                msg = await ch.send(f"Vote received: {user_id} — {source}")
+                print(f"[LOG_VOTE] ✅ Fallback message sent! Message ID: {msg.id}", flush=True)
+            except Exception as e2:
+                print(f"[LOG_VOTE] Fallback also failed: {e2}", flush=True)
+    except Exception as e:
+        print(f"[LOG_VOTE ERROR] Unhandled exception: {e}", flush=True)
+        logging.exception("Unhandled exception in log_vote_to_channel")
