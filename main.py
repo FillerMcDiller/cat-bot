@@ -4172,9 +4172,9 @@ async def debug_battles(interaction: discord.Interaction):
 
 
 async def start_internal_server(port: int = 3002):
-    """Start a small internal aiohttp server on localhost that accepts POST /_internal_vote
+    """Start a small internal aiohttp server on localhost that accepts POST /vote
 
-    This endpoint is intended to be called by the external `webhook_server.py` process which
+    This endpoint is intended to be called by the external vote webhook server which
     forwards Top.gg votes. The handler schedules `reward_vote` on the bot loop and logs.
     """
     try:
@@ -4194,23 +4194,25 @@ async def start_internal_server(port: int = 3002):
                 # schedule reward and log
                 bot.loop.create_task(reward_vote(user_id))
                 try:
-                    print(f"vote received from {user_id}, granting rewards..", flush=True)
+                    print(f"[VOTE] Received vote from user {user_id}, granting rewards across all servers...", flush=True)
                 except Exception:
                     logging.info("vote received from %s, granting rewards..", user_id)
             except Exception:
                 logging.exception("Failed to schedule reward_vote for %s", user_id)
                 return web.json_response({"status": "error"}, status=500)
 
-            return web.json_response({"status": "ok"})
+            return web.json_response({"status": "success", "user_id": user_id})
 
-        app.router.add_post("/_internal_vote", _handle)
+        # Add both endpoints for compatibility
+        app.router.add_post("/_internal_vote", _handle)  # Old endpoint
+        app.router.add_post("/vote", _handle)  # New endpoint for draft webhook
 
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", port)
         await site.start()
         try:
-            print(f"Internal vote receiver listening on 127.0.0.1:{port}", flush=True)
+            print(f"[VOTE] Internal vote receiver listening on 127.0.0.1:{port} [endpoints: /vote, /_internal_vote]", flush=True)
         except Exception:
             logging.info("Internal vote receiver listening on 127.0.0.1:%s", port)
     except Exception:
