@@ -43,8 +43,28 @@ bot = commands.AutoShardedBot(
 
 @bot.event
 async def setup_hook():
+    print("[BOT.PY] setup_hook starting...", flush=True)
     await database.connect()
+    print("[BOT.PY] Database connected, loading main extension...", flush=True)
     await bot.load_extension("main")
+    print("[BOT.PY] Main extension loaded", flush=True)
+    
+    # Start internal vote receiver
+    try:
+        import os
+        print("[BOT.PY] Starting internal vote receiver...", flush=True)
+        
+        # Import the start_internal_server function from main
+        from main import start_internal_server
+        
+        internal_port = int(os.getenv("BOT_INTERNAL_PORT", "3002"))
+        print(f"[BOT.PY] Creating vote server task on port {internal_port}...", flush=True)
+        bot.loop.create_task(start_internal_server(internal_port))
+        print(f"[BOT.PY] Vote server task created", flush=True)
+    except Exception as e:
+        print(f"[BOT.PY ERROR] Failed to start vote receiver: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
 
 
 async def reload(reload_db):

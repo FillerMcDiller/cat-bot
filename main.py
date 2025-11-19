@@ -1769,35 +1769,41 @@ async def cleanup_cooldowns():
 
 # Use proper setup_hook to start background tasks safely
 async def setup_hook():
+    print("[SETUP_HOOK] ========== SETUP HOOK STARTED ==========", flush=True)
     try:
         ensure_bot_cogs(bot)
     except Exception:
         logging.exception("Failed to ensure bot cogs mapping at setup_hook start")
+    print("[SETUP_HOOK] Creating scheduled_restart task...", flush=True)
     bot.loop.create_task(scheduled_restart())
+    print("[SETUP_HOOK] Creating cleanup_cooldowns task...", flush=True)
     bot.loop.create_task(cleanup_cooldowns())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     print("[STARTUP] Creating background_index_all_cats task...", flush=True)
     bot.loop.create_task(background_index_all_cats())
     # start the internal HTTP receiver on localhost for external webhook forwards
     try:
+        print("[STARTUP] Configuring internal vote receiver...", flush=True)
         env_port = os.getenv("BOT_INTERNAL_PORT")
         if env_port:
             internal_port = int(env_port)
+            print(f"[STARTUP] Using BOT_INTERNAL_PORT from env: {internal_port}", flush=True)
         else:
             internal_port = int(getattr(config, "INTERNAL_WEBHOOK_PORT", 0) or 3002)
+            print(f"[STARTUP] Using default internal port: {internal_port}", flush=True)
 
         # avoid accidental collision with public webhook port
         public_port = int(getattr(config, "WEBHOOK_PORT", 0) or 3001)
         if internal_port == public_port:
             internal_port = public_port + 1
-            print(f"Adjusted internal webhook port to {internal_port} to avoid conflict with public webhook", flush=True)
+            print(f"[STARTUP] Adjusted internal webhook port to {internal_port} to avoid conflict with public webhook", flush=True)
 
-        try:
-            bot.loop.create_task(start_internal_server(internal_port))
-        except Exception:
-            logging.exception("Failed to start internal vote receiver")
-    except Exception:
-        pass
+        print(f"[STARTUP] Starting internal vote receiver on port {internal_port}...", flush=True)
+        bot.loop.create_task(start_internal_server(internal_port))
+        print(f"[STARTUP] Internal vote receiver task created", flush=True)
+    except Exception as e:
+        print(f"[STARTUP ERROR] Failed to start internal vote receiver: {e}", flush=True)
+        logging.exception("Failed to start internal vote receiver")
     # Try to load Battles cog if available
     try:
         await bot.load_extension("battles")
@@ -4177,7 +4183,9 @@ async def start_internal_server(port: int = 3002):
     This endpoint is intended to be called by the external vote webhook server which
     forwards Top.gg votes. The handler schedules `reward_vote` on the bot loop and logs.
     """
+    print(f"[VOTE SERVER] start_internal_server called with port {port}", flush=True)
     try:
+        print(f"[VOTE SERVER] Creating web.Application...", flush=True)
         app = web.Application()
 
         async def _handle(request):
@@ -4204,19 +4212,22 @@ async def start_internal_server(port: int = 3002):
             return web.json_response({"status": "success", "user_id": user_id})
 
         # Add both endpoints for compatibility
+        print(f"[VOTE SERVER] Adding routes...", flush=True)
         app.router.add_post("/_internal_vote", _handle)  # Old endpoint
         app.router.add_post("/vote", _handle)  # New endpoint for draft webhook
 
+        print(f"[VOTE SERVER] Creating AppRunner...", flush=True)
         runner = web.AppRunner(app)
         await runner.setup()
+        print(f"[VOTE SERVER] Creating TCPSite on 127.0.0.1:{port}...", flush=True)
         site = web.TCPSite(runner, "127.0.0.1", port)
         await site.start()
-        try:
-            print(f"[VOTE] Internal vote receiver listening on 127.0.0.1:{port} [endpoints: /vote, /_internal_vote]", flush=True)
-        except Exception:
-            logging.info("Internal vote receiver listening on 127.0.0.1:%s", port)
-    except Exception:
+        print(f"[VOTE] ✅ Internal vote receiver listening on 127.0.0.1:{port} [endpoints: /vote, /_internal_vote]", flush=True)
+    except Exception as e:
+        print(f"[VOTE SERVER ERROR] Failed to start: {type(e).__name__}: {e}", flush=True)
         logging.exception("Failed to start internal vote receiver server")
+        import traceback
+        traceback.print_exc()
 
 
 async def start_public_webhook(port: int = 3001, auth: str | None = None):
