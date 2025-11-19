@@ -42,11 +42,6 @@ Please note that self-hosting is hacky and isn't supported; instructions below a
 
 7. Done!
 
-# License
-
-Cat Bot is licensed under GNU Affero General Public License v3.0 license. View `LICENSE` for more information.
-
-CatPG, our custom-made `asyncpg` wrapper, is licensed under MIT License instead. The license text is present in the beginning of `catpg.py` file.
 =======
 # cat-botmcdiller
 
@@ -55,18 +50,4 @@ Discord Cat Bot by milenakos, edited by fillermcdiller
 not public as of rn, don't plan on doing that. Used in my discord server.
 
 Hosted on 10 year old pc with Debian 13
->>>>>>> c4e158a99e9060fb7f3b314071f1539adeae21fd
-=======
 
-# CAT BOT
-
-FillerMcDiller's cat bot source code
-
-just a lil public repository I made to have my bot as a resource
-# cat-botmcdiller
-ORIGINAL BOT BY MILENAKOS
-self-hosted edit of it
-
-Hosted on 10 year old pc with Debian 13
->>>>>>> this is so auraful!
->>>>>>> cecfd1166729bb523bc005358dc29054597b95ae

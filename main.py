@@ -121,7 +121,7 @@ type_dict = {
     "Real": 5,
     "Ultimate": 3,
     "eGirl": 2,
-    "TV": 1,
+    "TV": 1000,
     "Donut": 0.5,
 }
 
