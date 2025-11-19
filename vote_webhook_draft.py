@@ -3,9 +3,12 @@ DRAFT: Top.gg Vote Webhook System
 This is a draft implementation - DO NOT merge to main without testing!
 
 This system receives Top.gg vote webhooks via Cloudflare tunnel on port 3001
-and rewards users with:
-- 300 battlepass XP (600 on weekends)
-- 1 Wooden pack
+and instantly rewards users across all servers with:
+- 300 battlepass XP (600 on Fri/Sat/Sun)
+- 1 Wooden pack (opens automatically)
+- Streak bonuses (every 7th vote, special rewards at 25/50/75/100)
+
+Uses the existing reward_vote() system from main.py for instant per-server rewards!
 
 Requirements:
     pip install fastapi uvicorn
@@ -71,14 +74,20 @@ def is_weekend() -> bool:
     return datetime.now().weekday() in [5, 6]
 
 
-async def notify_bot(user_id: int, is_weekend_vote: bool):
-    """Send vote notification to the bot's internal webhook receiver"""
+async def notify_bot(user_id: int):
+    """
+    Send vote notification to the bot's internal webhook receiver
+    
+    The bot's reward_vote() function handles:
+    - Weekend detection (Fri/Sat/Sun = 2x XP)
+    - Streak bonuses
+    - Per-server rewards instantly
+    """
     import aiohttp
     
     try:
         vote_data = {
             "user_id": user_id,
-            "is_weekend": is_weekend_vote,
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -146,7 +155,6 @@ async def topgg_webhook(
         # Extract data
         user_id = int(payload.get("user", 0))
         vote_type = payload.get("type", "")
-        is_weekend_vote = payload.get("isWeekend", False) or is_weekend()
         
         if not user_id:
             logger.error(f"Invalid user_id in payload: {payload}")
@@ -156,17 +164,16 @@ async def topgg_webhook(
             logger.info(f"Received non-upvote type: {vote_type}")
             return {"status": "ignored", "reason": "not an upvote"}
         
-        logger.info(f"Received vote from user {user_id} (weekend: {is_weekend_vote})")
+        logger.info(f"Received vote from user {user_id}")
         
-        # Forward to bot
-        success = await notify_bot(user_id, is_weekend_vote)
+        # Forward to bot (bot handles weekend detection, streaks, etc.)
+        success = await notify_bot(user_id)
         
         if success:
             return {
                 "status": "success",
                 "user_id": user_id,
-                "is_weekend": is_weekend_vote,
-                "message": "Vote recorded and user will be rewarded"
+                "message": "Vote recorded and rewards applied instantly to all servers!"
             }
         else:
             # Still return 200 to Top.gg so they don't retry

@@ -2,21 +2,70 @@
 DRAFT: Bot-side vote receiver
 This is a draft implementation - DO NOT merge to main without testing!
 
-This code should be integrated into main.py to receive vote notifications
-from the vote_webhook_draft.py server and reward users.
+This code integrates with the EXISTING reward_vote() function in main.py!
+No need for pending rewards - everything happens instantly per-server.
 
-Add this to your main.py setup_hook or as a background task.
+Integration Steps:
+1. Add internal_vote_handler() function to main.py
+2. The start_internal_server() call is ALREADY in setup_hook!
+3. Just make sure it calls reward_vote() with the user_id
+
+The existing reward_vote() function already handles:
+- Per-server battlepass XP (300, or 600 on Fri/Sat/Sun)
+- Wooden pack rewards (via streak system)
+- All streak bonuses
+- Auto-claiming (no /claimvote needed!)
 """
 
 import asyncio
 import logging
 from aiohttp import web
-import json
 
 logger = logging.getLogger("bot.vote_receiver")
 
 
-async def handle_vote_reward(user_id: int, is_weekend: bool):
+# ============================================================================
+# NEW SIMPLIFIED APPROACH - Uses existing reward_vote() from main.py
+# ============================================================================
+
+async def internal_vote_handler(request):
+    """
+    Handle incoming vote notifications from vote_webhook_draft.py
+    
+    This simply calls the EXISTING reward_vote() function which:
+    - Awards 300 BP XP per server (600 on Fri/Sat/Sun)
+    - Gives wooden pack
+    - Handles all streak logic
+    - Instantly rewards across all servers!
+    """
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        
+        if not user_id:
+            return web.json_response({"error": "Missing user_id"}, status=400)
+        
+        logger.info(f"Received vote notification for user {user_id}, calling reward_vote()")
+        
+        # Import and call the existing reward_vote function
+        from main import reward_vote
+        
+        # Process reward asynchronously using existing system
+        asyncio.create_task(reward_vote(user_id))
+        
+        return web.json_response({"status": "success", "user_id": user_id})
+        
+    except Exception as e:
+        logger.error(f"Error handling vote: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# ============================================================================
+# OLD COMPLEX APPROACH - NOT NEEDED ANYMORE!
+# Keeping this for reference, but the above simple handler is all you need.
+# ============================================================================
+
+async def handle_vote_reward_OLD_COMPLEX_VERSION(user_id: int, is_weekend: bool):
     """
     Process vote reward for a user
     
@@ -131,34 +180,16 @@ async def handle_vote_reward(user_id: int, is_weekend: bool):
         return False
 
 
-async def internal_vote_handler(request):
-    """Handle incoming vote notifications from vote_webhook_draft.py"""
-    try:
-        data = await request.json()
-        user_id = data.get("user_id")
-        is_weekend = data.get("is_weekend", False)
-        
-        if not user_id:
-            return web.json_response({"error": "Missing user_id"}, status=400)
-        
-        logger.info(f"Received vote notification for user {user_id}")
-        
-        # Process reward asynchronously
-        asyncio.create_task(handle_vote_reward(user_id, is_weekend))
-        
-        return web.json_response({"status": "success", "user_id": user_id})
-        
-    except Exception as e:
-        logger.error(f"Error handling vote: {e}")
-        return web.json_response({"error": str(e)}, status=500)
+
 
 
 async def start_internal_server(port: int = 3002):
     """
     Start internal HTTP server to receive vote notifications
     
-    This should be called in bot's setup_hook:
-    bot.loop.create_task(start_internal_server(3002))
+    NOTE: This function is ALREADY in main.py!
+    If you see it there, you don't need to copy this.
+    Just add the internal_vote_handler function above.
     """
     app = web.Application()
     app.router.add_post('/vote', internal_vote_handler)
@@ -172,44 +203,32 @@ async def start_internal_server(port: int = 3002):
 
 
 # ============================================================================
-# INTEGRATION INSTRUCTIONS:
+# SIMPLIFIED INTEGRATION INSTRUCTIONS:
 # ============================================================================
 # 
-# 1. Add to User model in database.py:
-#    pending_vote_rewards = Column(Text, default="[]")
+# GOOD NEWS: The bot already has reward_vote() which does everything!
 # 
-# 2. Add to main.py setup_hook (already exists in your code):
-#    - The start_internal_server() call is already there!
-#    - Just copy the handle_vote_reward and internal_vote_handler functions
+# 1. Find the start_internal_server() function in main.py (around line 16300)
 # 
-# 3. Add command to claim rewards in any server:
-#    @bot.tree.command(description="Claim your pending vote rewards")
-#    async def claimvote(interaction: discord.Interaction):
-#        user = await User.get_or_create(user_id=interaction.user.id)
-#        pending = user.pending_vote_rewards or "[]"
-#        pending_list = json.loads(pending)
-#        
-#        if not pending_list:
-#            await interaction.response.send_message("No pending vote rewards!", ephemeral=True)
-#            return
-#        
-#        # Process all pending rewards
-#        for reward in pending_list:
-#            cats = reward.get("cats", {})
-#            profile = await Profile.get_or_create(
-#                guild_id=interaction.guild.id,
-#                user_id=interaction.user.id
-#            )
+# 2. Find the recieve_vote() handler function
+# 
+# 3. Replace it with this simple version:
+#
+#    async def recieve_vote(request):
+#        """Handle Top.gg vote webhooks (internal receiver)"""
+#        try:
+#            request_json = await request.json()
+#            user_id = int(request_json.get("user_id", 0))
 #            
-#            for cat_type, amount in cats.items():
-#                await add_cat_instances(profile, cat_type, amount)
-#        
-#        # Clear pending rewards
-#        user.pending_vote_rewards = "[]"
-#        await user.save()
-#        
-#        total_cats = sum(r.get("cats", {}).values() for r in pending_list)
-#        await interaction.response.send_message(
-#            f"✅ Claimed {len(pending_list)} vote reward(s)! Added {total_cats} cats to your inventory!",
-#            ephemeral=True
-#        )
+#            if not user_id:
+#                return web.json_response({"error": "Missing user_id"}, status=400)
+#            
+#            # Call existing reward_vote function
+#            asyncio.create_task(reward_vote(user_id))
+#            
+#            return web.json_response({"status": "success"})
+#        except Exception as e:
+#            logger.error(f"Error in recieve_vote: {e}")
+#            return web.json_response({"error": str(e)}, status=500)
+#
+# That's it! No database changes, no new commands, no pending rewards!
