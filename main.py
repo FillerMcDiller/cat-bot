@@ -11725,6 +11725,9 @@ async def steal(interaction: discord.Interaction, target: discord.User):
 
 @bot.tree.command(description="why would anyone think a cattlepass would be a good idea")
 async def battlepass(message: discord.Interaction):
+    # Defer immediately to avoid interaction timeout
+    await message.response.defer()
+    
     current_mode = ""
     user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     global_user = await User.get_or_create(user_id=message.user.id)
@@ -11773,7 +11776,9 @@ async def battlepass(message: discord.Interaction):
         if interaction.user.id != message.user.id:
             await do_funny(interaction)
             return
-        await interaction.response.defer()
+        # Don't defer here since it's already deferred at command start or in buttons
+        if not first:
+            await interaction.response.defer()
         current_mode = "Main"
 
         await refresh_quests(user)
