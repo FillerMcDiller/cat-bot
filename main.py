@@ -7357,7 +7357,7 @@ async def help(message):
         )
         .add_field(
             name="Other features",
-            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/staring).",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/staring).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
         .set_footer(
@@ -7488,6 +7488,47 @@ async def help(message):
 
     view = HelpView(author_id=message.user.id)
     await message.response.send_message(embeds=[embed1, embed2], view=view)
+
+
+@bot.tree.command(description="Get support and help with KITTAYYYYYYY")
+async def support(message: discord.Interaction):
+    """Provides support links - adapts based on whether used in the official server or externally"""
+    SUPPORT_SERVER_ID = 861745089525055508
+    SUPPORT_FORUM_CHANNEL_ID = "1182425780488151090"  # Forum channel ID
+    
+    is_support_server = message.guild and message.guild.id == SUPPORT_SERVER_ID
+    
+    embed = discord.Embed(
+        title="🆘 KITTAYYYYYYY Support",
+        color=Colors.brown
+    )
+    
+    if is_support_server:
+        # User is in the official support server
+        embed.description = (
+            "Welcome to the KITTAYYYYYYY support server!\n\n"
+            f"📋 **Get Help:** Visit <#1182425780488151090> to create a support thread\n"
+            "💬 Ask your questions and our team will assist you!\n\n"
+            "📚 **Also check out:**\n"
+            "• [KITTAYYYYYYY Wiki](https://wiki.minkos.lol) for guides and info\n"
+            "• `/help` command for basic instructions"
+        )
+    else:
+        # User is in an external server
+        embed.description = (
+            "Need help with KITTAYYYYYYY?\n\n"
+            "🔗 **Join our Discord server for support:**\n"
+            "https://discord.gg/Zx6em4AEq2\n\n"
+            "Once there, visit **#‼️kittay-support‼️** to create a support thread!\n\n"
+            "📚 **Also check out:**\n"
+            "• [KITTAYYYYYYY Wiki](https://wiki.minkos.lol) for guides and info\n"
+            "• `/help` command for basic instructions"
+        )
+    
+    embed.set_thumbnail(url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png")
+    embed.set_footer(text="We're here to help!")
+    
+    await message.response.send_message(embed=embed)
 
 
 @bot.tree.command(description="Roll the credits")
@@ -12720,7 +12761,12 @@ async def cosmetics(message: discord.Interaction):
                     style=ButtonStyle.primary if cat == self.category else ButtonStyle.secondary,
                     row=0
                 )
-                btn.callback = lambda i, c=cat: self.change_category(i, c)
+                # Create proper async callback using a factory function
+                def make_callback(category):
+                    async def callback(interaction):
+                        await self.change_category(interaction, category)
+                    return callback
+                btn.callback = make_callback(cat)
                 self.add_item(btn)
             
             # Navigation buttons (row 1)
