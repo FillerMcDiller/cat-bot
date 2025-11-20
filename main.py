@@ -4197,12 +4197,15 @@ async def start_internal_server(port: int = 3002):
         async def _handle(request):
             try:
                 data = await request.json()
+                print(f"[VOTE] Received payload: {data}", flush=True)
                 user_id = int(data.get("user") or data.get("user_id") or 0)
-            except Exception:
-                return web.json_response({"error": "invalid payload"}, status=400)
+            except Exception as e:
+                print(f"[VOTE ERROR] Failed to parse JSON: {e}", flush=True)
+                return web.json_response({"error": "invalid payload", "details": str(e)}, status=400)
 
             if not user_id:
-                return web.json_response({"error": "missing user"}, status=400)
+                print(f"[VOTE ERROR] No user_id in payload: {data}", flush=True)
+                return web.json_response({"error": "missing user", "payload": data}, status=400)
 
             try:
                 # schedule reward and log
