@@ -10152,7 +10152,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                     try:
                         if key_local == 'rains':
                             minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
-                            user_obj = await User.get_or_create(user_id=parent_inter.user.id)
+                            user_obj = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
                             if not user_obj.rain_minutes:
                                 user_obj.rain_minutes = 0
                             user_obj.rain_minutes += int(minutes)
@@ -13379,36 +13379,45 @@ async def cosmetics(message: discord.Interaction):
                     await do_funny(select_interaction)
                     return
                 
-                item_id = select.values[0]
-                item_data = category_data[item_id]
-                
-                # Reload and equip
-                fresh_user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-                
-                # Determine field name
-                if self.category == "badges":
-                    fresh_user.equipped_badge = item_id
-                elif self.category == "titles":
-                    fresh_user.equipped_title = item_id
-                elif self.category == "colors":
-                    fresh_user.equipped_color = item_id
-                elif self.category == "effects":
-                    fresh_user.equipped_effect = item_id
-                
-                await fresh_user.save()
-                
-                # Update global user reference
-                nonlocal user
-                user = fresh_user
-                
-                await select_interaction.response.send_message(
-                    f"✨ Equipped **{item_data['name']}**!",
-                    ephemeral=True
-                )
-                
-                # Refresh main view
-                self.update_buttons()
-                await interaction.edit_original_response(embed=self.get_embed(), view=self)
+                try:
+                    item_id = select.values[0]
+                    item_data = category_data[item_id]
+                    
+                    # Reload and equip
+                    fresh_user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                    
+                    # Determine field name
+                    if self.category == "badges":
+                        fresh_user.equipped_badge = item_id
+                    elif self.category == "titles":
+                        fresh_user.equipped_title = item_id
+                    elif self.category == "colors":
+                        fresh_user.equipped_color = item_id
+                    elif self.category == "effects":
+                        fresh_user.equipped_effect = item_id
+                    
+                    await fresh_user.save()
+                    
+                    # Update global user reference
+                    nonlocal user
+                    user = fresh_user
+                    
+                    await select_interaction.response.send_message(
+                        f"✨ Equipped **{item_data['name']}**!",
+                        ephemeral=True
+                    )
+                    
+                    # Refresh main view - use the correct interaction reference
+                    self.update_buttons()
+                    try:
+                        await message.edit_original_response(embed=self.get_embed(), view=self)
+                    except Exception:
+                        pass  # Main view might have timed out
+                except Exception as e:
+                    await select_interaction.response.send_message(
+                        f"Failed to equip cosmetic: {str(e)}",
+                        ephemeral=True
+                    )
             
             select.callback = equip_callback
             
@@ -14454,400 +14463,109 @@ async def bal(message: discord.Interaction):
 
 @bot.tree.command(description="Convert cats to Kibble via the CatATM (irreversible)")
 async def atm(message: discord.Interaction):
-    """Open an ATM embed with a button to select cat type and amount to convert."""
+    """Open an ATM with advanced cat selector to convert cats into Kibble."""
     await message.response.defer()
     guild_id = message.guild.id
     owner_id = message.user.id
 
-    embed = discord.Embed(
-        title="CatATM",
-        description="Convert your cats into Kibble. This is irreversible. Click the button below to choose a cat type and amount to convert.",
-        color=Colors.brown,
-    )
-
-    class OpenATMView(View):
-        def __init__(self, author_id: int):
-            super().__init__(timeout=120)
-            self.author_id = author_id
-
-        @discord.ui.button(label="Convert cats", style=ButtonStyle.danger)
-        async def open_modal(self, interaction: discord.Interaction, button: Button):
-            if interaction.user.id != self.author_id:
-                await do_funny(interaction)
-                return
-            
-            # Defer the interaction immediately to prevent timeout
-            await interaction.response.defer()
-            
-            # Build a dropdown (Select) of cat types the user can convert (per-instance availability checked)
-            profile = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
-            options = []
-            for ct in cattypes:
-                try:
-                    avail = await get_available_cat_count(profile, ct)
-                except Exception:
-                    avail = 0
-                if avail > 0:
-                    label = f"{ct} (x{avail})"
-                    options.append(discord.SelectOption(label=label, value=ct, description=f"You have {avail} available"))
-            
-            # Discord Select menus can only have max 25 options
-            if len(options) > 25:
-                options = options[:25]
-
-            if not options:
-                # Nothing to list — complete next bit: inform user and return
-                await interaction.followup.send("You have no convertible cats (all either favourite or on adventure).", ephemeral=True)
-                return
-
-            class CatTypeSelect(discord.ui.Select):
-                def __init__(self, opts: list[discord.SelectOption]):
-                    super().__init__(placeholder="Choose a cat type to convert...", min_values=1, max_values=1, options=opts)
-
-                async def callback(self2, select_interaction: discord.Interaction):
-                    if select_interaction.user.id != owner_id:
-                        await do_funny(select_interaction)
-                        return
-                    chosen = select_interaction.data.get("values", [None])[0]
-                    if not chosen:
-                        await select_interaction.response.send_message("No cat type selected.", ephemeral=True)
-                        return
-                    # refresh profile and available count
-                    prof = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
-                    avail_now = await get_available_cat_count(prof, chosen)
-                    if avail_now <= 0:
-                        await select_interaction.response.edit_message(content="Selected cat type is no longer available.", embed=None, view=None)
-                        return
-
-                    # build amount options (1,5,10,all capped to avail_now)
-                    amount_options = []
-                    for n in [1, 5, 10, 25, 50]:
-                        if n <= avail_now:
-                            amount_options.append(discord.SelectOption(label=str(n), value=str(n)))
-                    if avail_now not in [1,5,10,25,50]:
-                        amount_options.append(discord.SelectOption(label=f"All ({avail_now})", value=str(avail_now)))
-
-                    class AmountSelect(discord.ui.Select):
-                        def __init__(self, opts: list[discord.SelectOption]):
-                            super().__init__(placeholder="Choose amount to convert...", min_values=1, max_values=1, options=opts)
-
-                        async def callback(self3, amt_inter: discord.Interaction):
-                            if amt_inter.user.id != owner_id:
-                                await do_funny(amt_inter)
-                                return
-                            amt_val = amt_inter.data.get("values", [None])[0]
-                            try:
-                                amt_int = int(amt_val)
-                                if amt_int < 1:
-                                    raise Exception
-                            except Exception:
-                                await amt_inter.response.send_message("Invalid amount selected.", ephemeral=True)
-                                return
-
-                            # proceed to instance selection (same logic as before)
-                            chosen_ct = chosen
-                            amt = amt_int
-                            prof_now = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
-                            available2 = await get_available_cat_count(prof_now, chosen_ct)
-                            if available2 <= 0:
-                                await amt_inter.response.send_message("You don't have any available cats of that type to convert.", ephemeral=True)
-                                return
-                            if amt > available2:
-                                await amt_inter.response.send_message(f"You only have {available2} available {chosen_ct} cats to convert.", ephemeral=True)
-                                return
-
-                            user_cats = await get_user_cats(guild_id, owner_id)
-                            candidates = [c for c in user_cats if c.get("type") == chosen_ct and not c.get("on_adventure") and not c.get("favorite")]
-                            def cand_key(x):
-                                try:
-                                    bondv = int(x.get("bond", 0))
-                                except Exception:
-                                    bondv = 0
-                                try:
-                                    at = int(x.get("acquired_at") or 0)
-                                except Exception:
-                                    at = 0
-                                return (bondv, at)
-                            candidates.sort(key=cand_key)
-
-                            try:
-                                per_value = sum(type_dict.values()) / type_dict.get(chosen_ct, 100)
-                            except Exception:
-                                per_value = 100
-                            kib_per = max(1, int(round(per_value)))
-
-                            sel_limit = amt
-                            max_display = max(0, 25 - 2)
-                            display_cands = candidates[:max_display]
-                            if not display_cands:
-                                await amt_inter.response.send_message("No available instances to select. Have you tried inspecting them in your inventory? (More Details > [cat type])", ephemeral=True)
-                                return
-
-                            sel_embed = discord.Embed(
-                                title=f"Select up to {sel_limit} {chosen_ct} instance(s)",
-                                description=("Click instance buttons to toggle selection.\n"
-                                             "Selected instances are shown below. When ready, press Proceed to confirm conversion (may destroy cats)."),
-                                color=Colors.brown,
-                            )
-                            sel_embed.add_field(name="Selected (0)", value="No instances selected yet.", inline=False)
-
-                            class SelectionView(View):
-                                def __init__(self, owner_id: int, candidates: list[dict], limit: int):
-                                    super().__init__(timeout=180)
-                                    self.owner_id = owner_id
-                                    self.candidates = candidates
-                                    self.limit = limit
-                                    self.selected = []
-                                    for c in candidates:
-                                        cid = c.get('id')
-                                        lbl = f"#{cid} {c.get('name') or 'Unnamed'} (bond {c.get('bond',0)})"
-                                        btn = Button(label=lbl, style=ButtonStyle.secondary)
-                                        async def make_cb(interaction2: discord.Interaction, cid_local=cid, btn_local=btn):
-                                            if interaction2.user.id != self.owner_id:
-                                                await do_funny(interaction2)
-                                                return
-                                            if cid_local in self.selected:
-                                                self.selected.remove(cid_local)
-                                                try:
-                                                    btn_local.style = ButtonStyle.secondary
-                                                    btn_local.label = btn_local.label.replace('✅ ', '')
-                                                except Exception:
-                                                    pass
-                                            else:
-                                                if len(self.selected) >= self.limit:
-                                                    await interaction2.response.send_message(f"You can only select up to {self.limit} instances.", ephemeral=True)
-                                                    return
-                                                self.selected.append(cid_local)
-                                                try:
-                                                    btn_local.style = ButtonStyle.success
-                                                    btn_local.label = '✅ ' + btn_local.label
-                                                except Exception:
-                                                    pass
-                                            selected_objs = [next((x for x in self.candidates if x.get('id') == sid), None) for sid in self.selected]
-                                            lines = [f"#{x.get('id')} {x.get('name')} (bond {x.get('bond',0)})" for x in selected_objs if x]
-                                            if not lines:
-                                                lines = ["No instances selected yet."]
-                                            new_embed = discord.Embed(title=sel_embed.title, description=sel_embed.description, color=Colors.brown)
-                                            new_embed.add_field(name=f"Selected ({len(lines)})", value="\n".join(lines), inline=False)
-                                            try:
-                                                await interaction2.response.edit_message(embed=new_embed, view=self)
-                                            except Exception:
-                                                try:
-                                                    await interaction2.followup.send("Selection updated.", ephemeral=True)
-                                                except Exception:
-                                                    pass
-                                        btn.callback = make_cb
-                                        self.add_item(btn)
-
-                                    proceed = Button(label="Proceed", style=ButtonStyle.danger)
-                                    cancel = Button(label="Cancel", style=ButtonStyle.secondary)
-
-                                    async def proceed_cb(interaction2: discord.Interaction):
-                                        if interaction2.user.id != self.owner_id:
-                                            await do_funny(interaction2)
-                                            return
-                                        if not self.selected:
-                                            await interaction2.response.send_message("No instances selected.", ephemeral=True)
-                                            return
-                                        if len(self.selected) > self.limit:
-                                            await interaction2.response.send_message(f"You selected too many instances (max {self.limit}).", ephemeral=True)
-                                            return
-                                        selected_objs = [next((x for x in self.candidates if x.get('id') == sid), None) for sid in self.selected]
-                                        selected_objs = [s for s in selected_objs if s]
-                                        total_kibble_local = kib_per * len(selected_objs)
-                                        confirm_embed2 = discord.Embed(
-                                            title="WARNING: Final confirmation",
-                                            description=(f"Converting these {len(selected_objs)} cat(s) will permanently remove them and grant {total_kibble_local:,} Kibble.\n"
-                                                         "This action cannot be undone. Are you sure?"),
-                                            color=Colors.maroon,
-                                        )
-                                        lines2 = [f"#{s.get('id')} {s.get('name')} (bond {s.get('bond',0)})" for s in selected_objs]
-                                        if lines2:
-                                            confirm_embed2.add_field(name="Selected instances", value="\n".join(lines2), inline=False)
-
-                                        class FinalConfirmView(View):
-                                            def __init__(self, owner_id: int):
-                                                super().__init__(timeout=120)
-                                                self.owner_id = owner_id
-
-                                            @discord.ui.button(label="Confirm Conversion", style=ButtonStyle.danger)
-                                            async def final_confirm(self3, interaction3: discord.Interaction, button: Button):
-                                                if interaction3.user.id != self3.owner_id:
-                                                    await do_funny(interaction3)
-                                                    return
-                                                await interaction3.response.defer()
-                                                try:
-                                                    profile_now = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
-                                                    cats_now = await get_user_cats(guild_id, owner_id)
-                                                    ids_to_remove = set(s.get('id') for s in selected_objs)
-                                                    cats_after = [c for c in cats_now if c.get('id') not in ids_to_remove]
-                                                    await save_user_cats(guild_id, owner_id, cats_after)
-                                                    try:
-                                                        profile_now[f"cat_{chosen_ct}"] = max(0, profile_now[f"cat_{chosen_ct}"] - len(selected_objs))
-                                                    except Exception:
-                                                        pass
-                                                    profile_now.kibble += kib_per * len(selected_objs)
-                                                    await profile_now.save()
-                                                    await interaction3.edit_original_response(content=f"Converted {len(selected_objs)} {chosen_ct} cat(s) into {kib_per * len(selected_objs):,} Kibble.", embed=None, view=None)
-                                                    try:
-                                                        await progress(interaction3, profile_now, "atm")
-                                                    except Exception:
-                                                        pass
-                                                except Exception:
-                                                    await interaction3.edit_original_response(content="Conversion failed.", embed=None, view=None)
-
-                                            @discord.ui.button(label="Cancel", style=ButtonStyle.secondary)
-                                            async def final_cancel(self3, interaction3: discord.Interaction, button: Button):
-                                                if interaction3.user.id != self3.owner_id:
-                                                    await do_funny(interaction3)
-                                                    return
-                                                await interaction3.response.edit_message(content="Conversion cancelled.", embed=None, view=None)
-
-                                        try:
-                                            await interaction2.response.edit_message(embed=confirm_embed2, view=FinalConfirmView(self.owner_id))
-                                        except Exception:
-                                            try:
-                                                await interaction2.followup.send(embed=confirm_embed2, view=FinalConfirmView(self.owner_id), ephemeral=True)
-                                            except Exception:
-                                                pass
-
-                                    async def cancel_cb(interaction2: discord.Interaction):
-                                        if interaction2.user.id != self.owner_id:
-                                            await do_funny(interaction2)
-                                            return
-                                        await interaction2.response.edit_message(content="Selection cancelled.", embed=None, view=None)
-
-                                    proceed.callback = proceed_cb
-                                    cancel.callback = cancel_cb
-                                    self.add_item(proceed)
-                                    self.add_item(cancel)
-
-                            # send selection view
-                            try:
-                                await amt_inter.response.edit_message(embed=sel_embed, view=SelectionView(owner_id, display_cands, sel_limit))
-                            except Exception:
-                                try:
-                                    await amt_inter.followup.send(embed=sel_embed, view=SelectionView(owner_id, display_cands, sel_limit), ephemeral=True)
-                                except Exception:
-                                    pass
-
-                    amt_view = View(timeout=120)
-                    amt_view.add_item(AmountSelect(amount_options))
-                    try:
-                        await select_interaction.response.edit_message(content="Choose amount to convert:", embed=None, view=amt_view)
-                    except Exception:
-                        await select_interaction.followup.send("Choose amount to convert:", view=amt_view, ephemeral=True)
-
-            ct_view = View(timeout=120)
-            ct_view.add_item(CatTypeSelect(options))
-            try:
-                await interaction.edit_original_response(content="Choose a cat type to convert:", embed=None, view=ct_view)
-            except Exception:
-                try:
-                    await interaction.followup.send("Choose a cat type to convert:", view=ct_view, ephemeral=True)
-                except Exception:
-                    await interaction.followup.send("Could not open selection UI.", ephemeral=True)
-
-    view = OpenATMView(owner_id)
-    await message.followup.send(embed=embed, view=view)
-
-
-@bot.tree.command(description="Bulk convert multiple cats to Kibble at once (advanced selector)")
-async def bulkatm(message: discord.Interaction):
-    """Use the advanced selector to convert multiple cats to Kibble with filtering."""
-    await message.response.defer()
-    guild_id = message.guild.id
-    owner_id = message.user.id
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
     
-    # Ensure instances are synced
-    try:
-        await ensure_user_instances(guild_id, owner_id)
-    except Exception:
-        pass
+    # Get all user cats
+    user_cats = await get_user_cats(guild_id, owner_id)
     
-    # Get all user's cats
-    all_cats = await get_user_cats(guild_id, owner_id) or []
-    
-    # Filter out cats that are on adventure or favorited
-    convertible_cats = [c for c in all_cats if not c.get('on_adventure', False) and not c.get('favorite', False)]
+    # Filter out favorited and adventuring cats
+    convertible_cats = [c for c in user_cats if not c.get("on_adventure") and not c.get("favorite")]
     
     if not convertible_cats:
         await message.followup.send("You have no convertible cats (all either favourite or on adventure).", ephemeral=True)
         return
-    
-    selected_cats = []
-    
-    async def on_cats_selected(select_it: discord.Interaction, selected_cat: dict):
-        # For bulk, we'd use max_select >1 but Discord limits it to 25 per select
-        # So we'll use a different approach: keep selecting until user confirms
-        await select_it.response.defer()
-        
-        cat_id = selected_cat.get('id')
-        if cat_id in selected_cats:
-            selected_cats.remove(cat_id)
-            await select_it.followup.send(f"Removed {selected_cat.get('name')} from selection. Total: {len(selected_cats)}", ephemeral=True)
-        else:
-            selected_cats.append(cat_id)
-            await select_it.followup.send(f"Added {selected_cat.get('name')} to selection. Total: {len(selected_cats)}", ephemeral=True)
-    
-    # Create selector with multi-select disabled (we'll handle selection separately)
+
     embed = discord.Embed(
-        title="Bulk CatATM",
-        description="Select cats to convert to Kibble. Click cats to toggle selection, then use the button below to confirm conversion.\n\n⚠️ This is irreversible!",
-        color=Colors.maroon
+        title="🏧 CatATM - Convert Cats to Kibble",
+        description="Select cats to convert into Kibble. **This is irreversible!**\n\nCats are sorted by bond (lowest first) to help you choose wisely.",
+        color=Colors.brown,
     )
     
-    class BulkATMView(View):
-        def __init__(self, author_id: int):
-            super().__init__(timeout=180)
-            self.author_id = author_id
-            self.selector_active = False
+    selected_cats = []  # Track selected cat IDs for bulk conversion
+    
+    async def cat_selected(interaction: discord.Interaction, selected_cat: dict):
+        """Callback when a cat is selected - adds to bulk selection"""
+        cat_id = selected_cat.get('id')
+        cat_type = selected_cat.get('type')
+        cat_name = selected_cat.get('name') or 'Unnamed'
+        cat_bond = selected_cat.get('bond', 0)
         
-        @discord.ui.button(label="Select Cats", style=ButtonStyle.primary)
-        async def open_selector(self, btn_it: discord.Interaction, button: Button):
-            if btn_it.user.id != self.author_id:
+        if not cat_id or not cat_type:
+            await interaction.response.send_message("Invalid cat selected.", ephemeral=True)
+            return
+        
+        # Toggle selection
+        if cat_id in selected_cats:
+            selected_cats.remove(cat_id)
+            await interaction.response.send_message(
+                f"❌ Removed **{cat_name}** from selection.\n\n**Selected: {len(selected_cats)} cats**",
+                ephemeral=True
+            )
+            return
+        
+        # Add to selection
+        selected_cats.append(cat_id)
+        await interaction.response.send_message(
+            f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selected_cats)} cats**\n\n"
+            f"💡 Keep selecting cats, or go back to the main ATM message to convert all selected cats.",
+            ephemeral=True
+        )
+    
+    class ATMView(View):
+        def __init__(self):
+            super().__init__(timeout=300)
+            self.update_buttons()
+        
+        def update_buttons(self):
+            self.clear_items()
+            
+            select_btn = Button(label=f"📋 Select Cats ({len(selected_cats)})", style=ButtonStyle.primary, row=0)
+            select_btn.callback = self.open_selector
+            self.add_item(select_btn)
+            
+            if selected_cats:
+                convert_btn = Button(label=f"💰 Convert {len(selected_cats)} Cats", style=ButtonStyle.danger, row=0)
+                convert_btn.callback = self.convert_selected
+                self.add_item(convert_btn)
+                
+                clear_btn = Button(label="🗑️ Clear Selection", style=ButtonStyle.secondary, row=1)
+                clear_btn.callback = self.clear_selection
+                self.add_item(clear_btn)
+        
+        async def open_selector(self, btn_it: discord.Interaction):
+            if btn_it.user.id != owner_id:
                 await do_funny(btn_it)
                 return
             
-            if self.selector_active:
-                await btn_it.response.send_message("Selector already open!", ephemeral=True)
-                return
-            
-            self.selector_active = True
-            
-            async def select_callback(sel_it: discord.Interaction, sel_cat: dict):
-                await sel_it.response.defer(ephemeral=True)
-                cat_id = sel_cat.get('id')
-                
-                if cat_id in selected_cats:
-                    selected_cats.remove(cat_id)
-                    msg = f"❌ Removed **{sel_cat.get('name')}** ({sel_cat.get('type')}) from selection."
-                else:
-                    selected_cats.append(cat_id)
-                    msg = f"✅ Added **{sel_cat.get('name')}** ({sel_cat.get('type')}) to selection."
-                
-                msg += f"\n\n**Selected: {len(selected_cats)} cats**"
-                await sel_it.followup.send(msg, ephemeral=True)
-            
             selector = AdvancedCatSelector(
-                author_id=self.author_id,
+                author_id=owner_id,
                 guild_id=guild_id,
                 user_id=owner_id,
                 all_cats=convertible_cats,
-                callback_func=select_callback,
-                title="Select cats to convert (click to toggle)"
+                callback_func=cat_selected,
+                title=f"🏧 CatATM - Select cats ({len(selected_cats)} selected)"
             )
             
-            await btn_it.response.send_message("Use the selector to choose cats:", view=selector, ephemeral=True)
+            # Default sort by bond (ascending)
+            selector.sort_by = "bond"
+            selector.sort_desc = False
+            selector.update_sorting()
+            selector.update_buttons()
+            
+            await btn_it.response.send_message("Click cats to add/remove from selection:", view=selector, ephemeral=True)
         
-        @discord.ui.button(label="Convert Selected", style=ButtonStyle.danger)
-        async def convert_selected(self, btn_it: discord.Interaction, button: Button):
-            if btn_it.user.id != self.author_id:
+        async def convert_selected(self, btn_it: discord.Interaction):
+            if btn_it.user.id != owner_id:
                 await do_funny(btn_it)
                 return
             
             if not selected_cats:
-                await btn_it.response.send_message("No cats selected! Use 'Select Cats' first.", ephemeral=True)
+                await btn_it.response.send_message("No cats selected!", ephemeral=True)
                 return
             
             await btn_it.response.defer()
@@ -14874,29 +14592,28 @@ async def bulkatm(message: discord.Interaction):
                 cat_type_counts[cat_type] = cat_type_counts.get(cat_type, 0) + 1
             
             # Show confirmation
-            summary = "\n".join([f"• {ct}: {cnt}x" for ct, cnt in cat_type_counts.items()])
+            summary = "\n".join([f"• {get_emoji(ct.lower()+'cat')} {ct}: {cnt}x" for ct, cnt in cat_type_counts.items()])
             
             confirm_embed = discord.Embed(
-                title="⚠️ FINAL CONFIRMATION",
-                description=f"Converting **{len(cats_to_convert)} cats** for **{total_kibble:,} Kibble**\n\n{summary}\n\n**This cannot be undone!**",
+                title="⚠️ CONFIRM BULK CONVERSION",
+                description=f"Converting **{len(cats_to_convert)} cats** for **{total_kibble:,} Kibbles**\n\n{summary}\n\n**This cannot be undone!**",
                 color=Colors.maroon
             )
             
             class ConfirmView(View):
-                def __init__(self, author_id: int):
+                def __init__(self):
                     super().__init__(timeout=60)
-                    self.author_id = author_id
                 
-                @discord.ui.button(label="✅ CONFIRM CONVERT", style=ButtonStyle.danger)
-                async def confirm(self2, conf_it: discord.Interaction, btn: Button):
-                    if conf_it.user.id != self2.author_id:
+                @discord.ui.button(label="✅ CONFIRM", style=ButtonStyle.danger)
+                async def confirm(self2, conf_it: discord.Interaction):
+                    if conf_it.user.id != owner_id:
                         await do_funny(conf_it)
                         return
                     
                     await conf_it.response.defer()
                     
                     # Perform conversion
-                    profile = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
+                    fresh_profile = await Profile.get_or_create(guild_id=guild_id, user_id=owner_id)
                     cats_current = await get_user_cats(guild_id, owner_id)
                     ids_to_remove = set(c.get('id') for c in cats_to_convert)
                     cats_after = [c for c in cats_current if c.get('id') not in ids_to_remove]
@@ -14904,51 +14621,52 @@ async def bulkatm(message: discord.Interaction):
                     await save_user_cats(guild_id, owner_id, cats_after)
                     
                     # Update counters
-                    for cat_type, count in cat_type_counts.items():
+                    for cat_type, cnt in cat_type_counts.items():
                         try:
-                            profile[f"cat_{cat_type}"] = max(0, profile[f"cat_{cat_type}"] - count)
+                            fresh_profile[f"cat_{cat_type}"] = max(0, fresh_profile[f"cat_{cat_type}"] - cnt)
                         except Exception:
                             pass
                     
-                    profile.kibble += total_kibble
-                    await profile.save()
+                    fresh_profile.kibble = (fresh_profile.kibble or 0) + total_kibble
+                    await fresh_profile.save()
                     
-                    result_embed = discord.Embed(
-                        title="✅ Conversion Complete",
-                        description=f"Converted **{len(cats_to_convert)} cats** → **{total_kibble:,} Kibble**\n\n{summary}",
-                        color=Colors.green
+                    await conf_it.edit_original_response(
+                        content=f"✅ Converted **{len(cats_to_convert)} cats** → **{total_kibble:,} Kibbles**!\nNew balance: **{fresh_profile.kibble:,} Kibbles**",
+                        embed=None,
+                        view=None
                     )
                     
-                    await conf_it.edit_original_response(embed=result_embed, view=None)
+                    await message.channel.send(f"{message.user.mention} converted {len(cats_to_convert)} cats for {total_kibble:,} Kibbles at the CatATM!")
                     
                     # Clear selection
                     selected_cats.clear()
+                    self.update_buttons()
+                    await message.edit_original_response(embed=embed, view=self)
                 
                 @discord.ui.button(label="❌ Cancel", style=ButtonStyle.secondary)
-                async def cancel(self2, conf_it: discord.Interaction, btn: Button):
-                    if conf_it.user.id != self2.author_id:
+                async def cancel(self2, conf_it: discord.Interaction):
+                    if conf_it.user.id != owner_id:
                         await do_funny(conf_it)
                         return
-                    
-                    await conf_it.response.edit_message(content="Conversion cancelled.", embed=None, view=None)
+                    await conf_it.response.send_message("Conversion cancelled.", ephemeral=True)
             
-            await btn_it.followup.send(embed=confirm_embed, view=ConfirmView(self.author_id), ephemeral=True)
+            await btn_it.followup.send(embed=confirm_embed, view=ConfirmView(), ephemeral=True)
         
-        @discord.ui.button(label="Clear Selection", style=ButtonStyle.secondary)
-        async def clear_selection(self, btn_it: discord.Interaction, button: Button):
-            if btn_it.user.id != self.author_id:
+        async def clear_selection(self, btn_it: discord.Interaction):
+            if btn_it.user.id != owner_id:
                 await do_funny(btn_it)
                 return
             
             selected_cats.clear()
-            await btn_it.response.send_message(f"Selection cleared!", ephemeral=True)
+            self.update_buttons()
+            await btn_it.response.edit_message(embed=embed, view=self)
     
-    view = BulkATMView(owner_id)
+    view = ATMView()
     await message.followup.send(embed=embed, view=view)
 
 
 @bot.tree.command(description="Brew some coffee to catch cats more efficiently")
-async def brew(message: discord.Interaction):
+async def coffee(message: discord.Interaction):
     await message.response.send_message("HTTP 418: I'm a teapot. <https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/418>")
     await achemb(message, "coffee", "send")
 
@@ -17066,123 +16784,241 @@ def _pick_breed_result(parent_a: str, parent_b: str) -> Optional[str]:
 
 
 @bot.tree.command(description="Breed two cats to get an offspring (chances are based on parents' averaged rarity)")
-@discord.app_commands.rename(first="first_cat", second="second_cat")
-@discord.app_commands.autocomplete(first=cat_command_autocomplete, second=cat_command_autocomplete)
-async def breed(message: discord.Interaction, first: str, second: str):
+async def breed(message: discord.Interaction):
         """
-        Command: /breed <first> <second>
+        Command: /breed
+        - Opens an advanced selector to choose two parent cats.
         - Consumes one of each specified cat type from the caller's server inventory.
         - Produces an offspring whose probability distribution is centered on the
           average spawn/rarity value of both parents (not required to be strictly rarer).
         """
-        # basic validation
-        if first not in cattypes or second not in cattypes:
-            await message.response.send_message("invalid cat type", ephemeral=True)
-            return
-
-        profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-
-        # check ownership (if same type, need 2 copies)
-        needed_first = 1
-        needed_second = 1
-        if first == second:
-            needed_first = 2
-
-        if profile[f"cat_{first}"] < needed_first or profile[f"cat_{second}"] < needed_second:
-            await message.response.send_message("you don't have enough of those cats to breed!", ephemeral=True)
-            return
-
-        # prepare chance table (now averaged-based over whole cat list)
-        chances = breed_chances(first, second)
-        if not chances:
-            await message.response.send_message("Breeding failed: invalid parents or no candidates.", ephemeral=True)
-            return
-
-        # perform the breeding: consume parents first (atomic-ish)
-        profile[f"cat_{first}"] -= needed_first
-        if second != first:
-            profile[f"cat_{second}"] -= needed_second
-
-        # pick offspring
-        offspring = _pick_breed_result(first, second)
-        if not offspring:
-            # restore and abort (shouldn't happen)
-            profile[f"cat_{first}"] += needed_first
-            if second != first:
-                profile[f"cat_{second}"] += needed_second
-            await profile.save()
-            await message.response.send_message("Breeding failed unexpectedly, nothing changed.", ephemeral=True)
-            return
-
-        # award offspring
-        profile[f"cat_{offspring}"] += 1
-        profile.breeds_total = (profile.breeds_total or 0) + 1
-        await profile.save()
+        await message.response.defer()
         
-        # Auto-sync instance for offspring
-        await auto_sync_cat_instances(profile, offspring)
-
-        # award "Freak 😼" for performing a successful breed
-        try:
-            await achemb(message, "freak", "send")
-        except Exception:
-            pass
-
-        # genetic special-case checks
-        try:
-            chances_map = breed_chances(first, second)
-            chance_percent = chances_map.get(offspring, 0.0)
-            total_val = sum(type_dict.values())
-            # higher numeric "value" = more rare in UI (we keep same metric used elsewhere)
-            parent_vals = [total_val / type_dict[first], total_val / type_dict[second]]
-            offspring_val = total_val / type_dict[offspring]
-
-            # Genetically gifted: offspring <1% chance AND higher value than both parents
-            if chance_percent < 1.0 and offspring_val > max(parent_vals):
-                await achemb(message, "genetically_gifted", "send")
-
-            # Tylenol: offspring is worse (lower value) than both parents
-            if offspring_val < min(parent_vals):
-                await achemb(message, "tylenol", "send")
-        except Exception:
-            pass
-
-        # Full stack / huzzful check for the awarded offspring
-        try:
-            await _check_full_stack_and_huzzful(profile, message, offspring)
-        except Exception:
-            pass
-
-        # display chance table sorted by descending chance
-        chance_lines = []
-        for cat_type, pct in sorted(chances.items(), key=lambda kv: kv[1], reverse=True):
-            chance_lines.append(f"{get_emoji(cat_type.lower() + 'cat')} {cat_type}: {pct:.2f}%")
-
-        reply_text = (
-            f"{message.user.mention} bred {get_emoji(first.lower() + 'cat')} {first} + {get_emoji(second.lower() + 'cat')} {second} -> {get_emoji(offspring.lower() + 'cat')} {offspring}!\n\n"
-            "Offspring chances (centered on averaged parent rarity):\n" + "\n".join(chance_lines)
-        )
-
-        await message.response.send_message(reply_text)
-
-        # Extra quest progression: count breeds for 'breed3' and 'breed5'
-        try:
-            for extra_key in ("breed3", "breed5"):
+        profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+        
+        # Get user's cats for selection
+        cats_list = await get_user_cats(message.guild.id, message.user.id)
+        if not cats_list:
+            await message.followup.send("You don't have any cats to breed!", ephemeral=True)
+            return
+        
+        # State variables for breeding pairs
+        breed_pairs = []  # Will store [(cat1_type, cat2_type), ...]
+        
+        class BreedView(View):
+            def __init__(self):
+                super().__init__(timeout=300)
+                self.update_buttons()
+            
+            def update_buttons(self):
+                self.clear_items()
+                
+                add_btn = Button(label=f"➕ Add Pair ({len(breed_pairs)})", style=ButtonStyle.primary, row=0)
+                add_btn.callback = self.add_pair
+                self.add_item(add_btn)
+                
+                if breed_pairs:
+                    breed_btn = Button(label=f"🧬 Breed {len(breed_pairs)} Pairs", style=ButtonStyle.success, row=0)
+                    breed_btn.callback = self.breed_all
+                    self.add_item(breed_btn)
+                    
+                    clear_btn = Button(label="🗑️ Clear Pairs", style=ButtonStyle.secondary, row=1)
+                    clear_btn.callback = self.clear_pairs
+                    self.add_item(clear_btn)
+            
+            async def add_pair(self, btn_it: discord.Interaction):
+                if btn_it.user.id != message.user.id:
+                    await do_funny(btn_it)
+                    return
+                
+                # Track parents for this pair
+                pair_parents = []
+                
+                async def parent_selected(sel_it: discord.Interaction, selected_cat: dict):
+                    cat_type = selected_cat.get('type')
+                    if not cat_type:
+                        await sel_it.response.send_message("Invalid cat selected.", ephemeral=True)
+                        return
+                    
+                    pair_parents.append(cat_type)
+                    
+                    if len(pair_parents) == 1:
+                        # First parent selected
+                        await sel_it.response.send_message(
+                            f"✅ First parent: {get_emoji(cat_type.lower() + 'cat')} **{cat_type}**\n"
+                            f"Now select the second parent...",
+                            ephemeral=True
+                        )
+                        
+                        # Show selector for second parent
+                        selector2 = AdvancedCatSelector(
+                            author_id=message.user.id,
+                            guild_id=message.guild.id,
+                            user_id=message.user.id,
+                            all_cats=cats_list,
+                            callback_func=parent_selected,
+                            title="Select Second Parent"
+                        )
+                        await sel_it.followup.send("Select second parent:", view=selector2, ephemeral=True)
+                    
+                    elif len(pair_parents) == 2:
+                        # Both parents selected, add to pairs
+                        breed_pairs.append((pair_parents[0], pair_parents[1]))
+                        
+                        pairs_text = "\n".join([
+                            f"{i+1}. {get_emoji(p1.lower()+'cat')} {p1} + {get_emoji(p2.lower()+'cat')} {p2}"
+                            for i, (p1, p2) in enumerate(breed_pairs)
+                        ])
+                        
+                        await sel_it.response.send_message(
+                            f"✅ Added pair: {get_emoji(pair_parents[0].lower()+'cat')} **{pair_parents[0]}** + {get_emoji(pair_parents[1].lower()+'cat')} **{pair_parents[1]}**\n\n"
+                            f"**All Pairs ({len(breed_pairs)}):**\n{pairs_text}",
+                            ephemeral=True
+                        )
+                        
+                        # Update main view
+                        self.update_buttons()
+                        try:
+                            await message.edit_original_response(view=self)
+                        except:
+                            pass
+                
+                # Show selector for first parent
+                selector = AdvancedCatSelector(
+                    author_id=message.user.id,
+                    guild_id=message.guild.id,
+                    user_id=message.user.id,
+                    all_cats=cats_list,
+                    callback_func=parent_selected,
+                    title="Select First Parent"
+                )
+                await btn_it.response.send_message("Select first parent cat:", view=selector, ephemeral=True)
+            
+            async def breed_all(self, btn_it: discord.Interaction):
+                if btn_it.user.id != message.user.id:
+                    await do_funny(btn_it)
+                    return
+                
+                if not breed_pairs:
+                    await btn_it.response.send_message("No pairs to breed!", ephemeral=True)
+                    return
+                
+                await btn_it.response.defer()
+                
+                # Verify user still has all cats
+                fresh_profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                
+                # Count requirements
+                from collections import Counter
+                cat_requirements = Counter()
+                for p1, p2 in breed_pairs:
+                    if p1 == p2:
+                        cat_requirements[p1] += 2
+                    else:
+                        cat_requirements[p1] += 1
+                        cat_requirements[p2] += 1
+                
+                # Check availability
+                for cat_type, needed in cat_requirements.items():
+                    available = getattr(fresh_profile, f"cat_{cat_type}", 0)
+                    if available < needed:
+                        await btn_it.followup.send(f"❌ Not enough {cat_type} cats! Need {needed}, have {available}.", ephemeral=True)
+                        return
+                
+                # Perform all breeding
+                results = []
+                for p1, p2 in breed_pairs:
+                    # Consume parents
+                    if p1 == p2:
+                        fresh_profile[f"cat_{p1}"] -= 2
+                    else:
+                        fresh_profile[f"cat_{p1}"] -= 1
+                        fresh_profile[f"cat_{p2}"] -= 1
+                    
+                    # Generate offspring
+                    offspring = _pick_breed_result(p1, p2)
+                    if offspring:
+                        fresh_profile[f"cat_{offspring}"] += 1
+                        results.append((p1, p2, offspring))
+                        
+                        try:
+                            await auto_sync_cat_instances(fresh_profile, offspring)
+                        except Exception:
+                            pass
+                
+                # Track total breeds
+                fresh_profile.breeds_total = (fresh_profile.breeds_total or 0) + len(breed_pairs)
+                await fresh_profile.save()
+                
+                # Format results
+                result_lines = [
+                    f"{get_emoji(p1.lower()+'cat')} {p1} + {get_emoji(p2.lower()+'cat')} {p2} → {get_emoji(off.lower()+'cat')} **{off}**"
+                    for p1, p2, off in results
+                ]
+                
+                result_text = "\n".join(result_lines)
+                if len(result_text) > 1800:
+                    result_text = "\n".join(result_lines[:15]) + f"\n... and {len(results)-15} more!"
+                
+                await btn_it.followup.send(f"🧬 **Bred {len(results)} pairs!**\n\n{result_text}", ephemeral=False)
+                await message.channel.send(f"{message.user.mention} bred {len(results)} pairs of cats!")
+                
+                # Achievement
                 try:
-                    await progress(message, profile, extra_key)
+                    await achemb(message, "freak", "send")
                 except Exception:
-                    # don't let extra quest handling crash the breed command
                     pass
-        except Exception:
-            pass
+                
+                # Clear pairs
+                breed_pairs.clear()
+                self.update_buttons()
+                await message.edit_original_response(view=self)
+            
+            async def clear_pairs(self, btn_it: discord.Interaction):
+                if btn_it.user.id != message.user.id:
+                    await do_funny(btn_it)
+                    return
+                
+                breed_pairs.clear()
+                self.update_buttons()
+                await btn_it.response.edit_message(view=self)
+        
+        breed_embed = discord.Embed(
+            title="🧬 Cat Breeding",
+            description="Add breeding pairs, then breed them all at once!\n\n"
+                       "Click **Add Pair** to select two parent cats.\n"
+                       "You can add multiple pairs before breeding.",
+            color=Colors.brown
+        )
+        
+        view = BreedView()
+        await message.followup.send(embed=breed_embed, view=view)
 
 
-@bot.tree.command(description="Breed multiple pairs of cats at once (bulk breeding)")
-async def bulkbreed(message: discord.Interaction):
-    """Bulk breed multiple pairs of cats with an interactive selector."""
-    await message.response.defer()
+# --- END: Cat Breeding feature ---
+
+async def reward_vote(user_id: int):
+    """Apply vote rewards to all guild profiles for the given user_id.
+
+    This completes the 'vote' quest for any Profile in which the vote quest is available
+    (i.e. profile.vote_cooldown == 0). It mirrors the logic from progress(..., quest='vote')
+    but runs without a discord interaction.
+    """
+    print(f"\n{'='*60}", flush=True)
+    print(f"[REWARD_VOTE] Starting reward_vote for user {user_id}", flush=True)
+    print(f"[REWARD_VOTE] Bot has {len(bot.guilds)} guilds", flush=True)
     
-    guild_id = message.guild.id
+    # Check database connection
+    try:
+        from database import pool
+        if pool is None:
+            print(f"[REWARD_VOTE ERROR] Database pool is None - database not connected!", flush=True)
+            return
+        print(f"[REWARD_VOTE] Database pool status: {pool}", flush=True)
+    except Exception as e:
+        print(f"[REWARD_VOTE ERROR] Failed to check database pool: {e}", flush=True)
+    
+    try:
     user_id = message.user.id
     
     profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
