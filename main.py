@@ -138,13 +138,14 @@ async def handle_dm_chat(message: discord.Message):
     
     if user_id in dm_last_message_time:
         time_since_last = current_time - dm_last_message_time[user_id]
+        print(f"[CHATBOT] User {user_id} last message was {time_since_last:.1f}s ago (cooldown: {cooldown}s)")
         if time_since_last < cooldown:
-            remaining = int(cooldown - time_since_last)
+            remaining = int(cooldown - time_since_last) + 1
             print(f"[CHATBOT] User {user_id} on cooldown, {remaining}s remaining")
             await message.channel.send(f"woah slow down bro wait like {remaining} more seconds 😼")
             return
     
-    dm_last_message_time[user_id] = current_time
+    # Don't set timestamp yet - wait until we successfully get a response
     
     provider = CHATBOT_CONFIG["provider"]
     print(f"[CHATBOT] Using provider: {provider}, model: {CHATBOT_CONFIG['model']}")
@@ -326,6 +327,9 @@ async def handle_dm_chat(message: discord.Message):
                 conv["messages"].append({"role": "assistant", "content": response})
                 # Send response
                 await message.channel.send(response)
+                # Only set cooldown timestamp after successful response
+                dm_last_message_time[user_id] = time.time()
+                print(f"[CHATBOT] Successfully responded, cooldown set for user {user_id}")
     
     except Exception as e:
         print(f"[CHATBOT ERROR] {e}")
