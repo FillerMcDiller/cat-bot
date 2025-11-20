@@ -111,7 +111,7 @@ You are here to vibe with users who DM you.""",
     "timeout_minutes": 30,  # Clear conversation after this many minutes of inactivity
     
     # Rate limit prevention
-    "cooldown_seconds": 8,  # Minimum seconds between messages per user (prevents rate limits)
+    "cooldown_seconds": 15,  # Minimum seconds between messages per user (prevents rate limits)
     
     # Ollama settings (only if provider is "ollama")
     "ollama_base_url": "http://localhost:11434",  # Ollama server URL
@@ -231,8 +231,8 @@ async def handle_dm_chat(message: discord.Message):
             # OPENROUTER PROVIDER (FREE!)
             elif provider == "openrouter":
                 async with aiohttp.ClientSession() as session:
-                    max_retries = 3
-                    retry_delay = 1  # Start with 1 second
+                    max_retries = 5  # More attempts
+                    retry_delay = 2  # Start with 2 seconds
                     
                     for attempt in range(max_retries):
                         try:
@@ -258,13 +258,14 @@ async def handle_dm_chat(message: discord.Message):
                                 if resp.status == 429:
                                     # Rate limited - wait and retry
                                     if attempt < max_retries - 1:
-                                        print(f"[CHATBOT] Rate limited, waiting {retry_delay}s before retry...")
-                                        await asyncio.sleep(retry_delay)
-                                        retry_delay *= 2  # Exponential backoff: 1s, 2s, 4s
+                                        wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s, 16s, 32s
+                                        print(f"[CHATBOT] Rate limited, waiting {wait_time}s before retry...")
+                                        await message.channel.send(f"hold on getting rate limited gimme like {wait_time} seconds 😼")
+                                        await asyncio.sleep(wait_time)
                                         continue
                                     else:
                                         print(f"[CHATBOT ERROR] Rate limited after {max_retries} attempts")
-                                        await message.channel.send("uh oh im being rate limited rn 😿 try again in like 10 seconds bro")
+                                        await message.channel.send("uh oh still getting rate limited 😿 the free tier is getting hammered rn, try way later or increase cooldown to like 30 seconds")
                                         return
                                 
                                 if resp.status != 200:
