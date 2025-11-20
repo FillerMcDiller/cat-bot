@@ -119,11 +119,14 @@ dm_conversation_history = {}
 
 async def handle_dm_chat(message: discord.Message):
     """Handle DM conversations using AI chatbot (supports multiple FREE providers!)"""
+    print(f"[CHATBOT] Received DM from {message.author.id}: {message.content[:100]}")
+    
     if not CHATBOT_CONFIG["enabled"]:
         await message.channel.send("chatbot is disabled rn sorry :3")
         return
     
     provider = CHATBOT_CONFIG["provider"]
+    print(f"[CHATBOT] Using provider: {provider}, model: {CHATBOT_CONFIG['model']}")
     
     # Check if API key is configured for non-local providers
     if provider == "openai" and not getattr(config, "OPENAI_API_KEY", None):
@@ -194,28 +197,50 @@ async def handle_dm_chat(message: discord.Message):
             # OPENROUTER PROVIDER (FREE!)
             elif provider == "openrouter":
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-                            "Content-Type": "application/json",
-                            "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
-                            "X-Title": "KITTAYYYYYYY Bot"  # Optional
-                        },
-                        json={
-                            "model": CHATBOT_CONFIG["model"],
-                            "messages": messages,
-                            "max_tokens": CHATBOT_CONFIG["max_tokens"],
-                            "temperature": CHATBOT_CONFIG["temperature"]
-                        }
-                    ) as resp:
-                        if resp.status != 200:
+                    try:
+                        async with session.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                                "Content-Type": "application/json",
+                                "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
+                                "X-Title": "KITTAYYYYYYY Bot"  # Optional
+                            },
+                            json={
+                                "model": CHATBOT_CONFIG["model"],
+                                "messages": messages,
+                                "max_tokens": CHATBOT_CONFIG["max_tokens"],
+                                "temperature": CHATBOT_CONFIG["temperature"]
+                            },
+                            timeout=aiohttp.ClientTimeout(total=30)  # 30 second timeout
+                        ) as resp:
                             error_text = await resp.text()
-                            print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text}")
-                            await message.channel.send("uh oh my brain broke :( (openrouter error)")
-                            return
-                        data = await resp.json()
-                        response = data["choices"][0]["message"]["content"]
+                            print(f"[CHATBOT] OpenRouter response status: {resp.status}")
+                            print(f"[CHATBOT] OpenRouter response body: {error_text[:500]}")  # First 500 chars
+                            
+                            if resp.status != 200:
+                                print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text}")
+                                await message.channel.send(f"uh oh my brain broke :( (openrouter error {resp.status})")
+                                return
+                            
+                            data = await resp.json()
+                            
+                            # Check if response has the expected structure
+                            if "choices" not in data or len(data["choices"]) == 0:
+                                print(f"[CHATBOT ERROR] OpenRouter response missing choices: {data}")
+                                await message.channel.send("uh oh got weird response from openrouter 😿")
+                                return
+                            
+                            response = data["choices"][0]["message"]["content"]
+                            print(f"[CHATBOT] Successfully got response: {response[:100]}...")
+                    except asyncio.TimeoutError:
+                        print(f"[CHATBOT ERROR] OpenRouter request timed out")
+                        await message.channel.send("uh oh openrouter took too long to respond 😾")
+                        return
+                    except aiohttp.ClientError as e:
+                        print(f"[CHATBOT ERROR] OpenRouter connection error: {e}")
+                        await message.channel.send("uh oh couldnt connect to openrouter 😿")
+                        return
             
             # OLLAMA PROVIDER (LOCAL & FREE!)
             elif provider == "ollama":
