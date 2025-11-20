@@ -62,6 +62,199 @@ import os
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
 
+# ============================================================================
+# CHATBOT PERSONALITY CONFIGURATION - EDIT THIS TO CHANGE BOT'S PERSONALITY!
+# ============================================================================
+CHATBOT_CONFIG = {
+    "enabled": True, 
+    
+    "provider": "openrouter", 
+    
+    "model": "meta-llama/llama-3.2-3b-instruct:free",  # FREE MODEL!
+    
+    "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
+
+STRICT RULES YOU MUST FOLLOW:
+1. ONLY lowercase letters - NO CAPITAL LETTERS EVER (except in links/commands if needed)
+2. ONLY cat emojis allowed: 🐱 😺 😸 😹 😻 😼 😽 🙀 😿 😾 🐈 🐈‍⬛ - NO OTHER EMOJIS
+3. Use emoticons often: :3 :D ^_^ uwu owo etc
+4. NO punctuation: no apostrophes (dont not don't), no commas, no exclamation marks, no periods at end
+5. NO actions with asterisks like *purrs* or *hisses* - just type normally
+6. Be super casual and talk like a chronically online person
+7. Use simple grammar - sound like you're texting
+8. Occasionally misspell a word then say "sry im dyslexic" or similar
+9. Swear casually if it fits (damn, hell, etc)
+10. Answer bot questions if asked but keep it chill
+
+EXAMPLES OF CORRECT RESPONSES:
+- "yooo whats up dude 😼"
+- "nah bro thats not how it works lol 😹"
+- "yeah i can help with that lemme explain real quick 🐱"
+- "bruh idk what youre talking abuot 😿 sry im dyslexic"
+
+EXAMPLES OF WRONG RESPONSES (DON'T DO THIS):
+- "Hey! What's up?" (capitals, punctuation, no emojis)
+- "I can help you with that! 😊" (exclamation mark, non-cat emoji)
+- "*purrs* that's great!" (asterisk actions, punctuation)
+- "I don't know, sorry." (apostrophe, comma, period)
+
+Keep responses 1-2 sentences unless they ask for detailed help.
+You are here to vibe with users who DM you.""",
+    
+    "max_tokens": 150,  # Maximum response length
+    "temperature": 0.9,  # Creativity level (0.0 = deterministic, 2.0 = very random)
+    
+    # Conversation memory settings
+    "max_history": 10,  # How many messages to remember per user
+    "timeout_minutes": 30,  # Clear conversation after this many minutes of inactivity
+    
+    # Ollama settings (only if provider is "ollama")
+    "ollama_base_url": "http://localhost:11434",  # Ollama server URL
+}
+
+# Store conversation history per user
+dm_conversation_history = {}
+
+async def handle_dm_chat(message: discord.Message):
+    """Handle DM conversations using AI chatbot (supports multiple FREE providers!)"""
+    if not CHATBOT_CONFIG["enabled"]:
+        await message.channel.send("chatbot is disabled rn sorry :3")
+        return
+    
+    provider = CHATBOT_CONFIG["provider"]
+    
+    # Check if API key is configured for non-local providers
+    if provider == "openai" and not getattr(config, "OPENAI_API_KEY", None):
+        await message.channel.send("openai not configured meow 😿 (need OPENAI_API_KEY in .env)")
+        return
+    if provider == "openrouter" and not getattr(config, "OPENROUTER_API_KEY", None):
+        await message.channel.send("openrouter not configured :( (need OPENROUTER_API_KEY in .env - it's FREE!)")
+        return
+    
+    user_id = message.author.id
+    current_time = time.time()
+    
+    # Initialize or retrieve conversation history
+    if user_id not in dm_conversation_history:
+        dm_conversation_history[user_id] = {
+            "messages": [],
+            "last_active": current_time
+        }
+    
+    conv = dm_conversation_history[user_id]
+    
+    # Clear history if timeout exceeded
+    if current_time - conv["last_active"] > CHATBOT_CONFIG["timeout_minutes"] * 60:
+        conv["messages"] = []
+    
+    # Add user message to history
+    conv["messages"].append({"role": "user", "content": message.content})
+    
+    # Trim history to max length
+    if len(conv["messages"]) > CHATBOT_CONFIG["max_history"] * 2:
+        conv["messages"] = conv["messages"][-(CHATBOT_CONFIG["max_history"] * 2):]
+    
+    conv["last_active"] = current_time
+    
+    try:
+        async with message.channel.typing():
+            # Build messages
+            messages = [
+                {"role": "system", "content": CHATBOT_CONFIG["system_prompt"]}
+            ] + conv["messages"]
+            
+            response = None
+            
+            # OPENAI PROVIDER
+            if provider == "openai":
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": CHATBOT_CONFIG["model"],
+                            "messages": messages,
+                            "max_tokens": CHATBOT_CONFIG["max_tokens"],
+                            "temperature": CHATBOT_CONFIG["temperature"]
+                        }
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            print(f"[CHATBOT ERROR] OpenAI returned {resp.status}: {error_text}")
+                            await message.channel.send("uh oh my brain broke :( (openai error)")
+                            return
+                        data = await resp.json()
+                        response = data["choices"][0]["message"]["content"]
+            
+            # OPENROUTER PROVIDER (FREE!)
+            elif provider == "openrouter":
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
+                            "X-Title": "KITTAYYYYYYY Bot"  # Optional
+                        },
+                        json={
+                            "model": CHATBOT_CONFIG["model"],
+                            "messages": messages,
+                            "max_tokens": CHATBOT_CONFIG["max_tokens"],
+                            "temperature": CHATBOT_CONFIG["temperature"]
+                        }
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text}")
+                            await message.channel.send("uh oh my brain broke :( (openrouter error)")
+                            return
+                        data = await resp.json()
+                        response = data["choices"][0]["message"]["content"]
+            
+            # OLLAMA PROVIDER (LOCAL & FREE!)
+            elif provider == "ollama":
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{CHATBOT_CONFIG['ollama_base_url']}/api/chat",
+                        json={
+                            "model": CHATBOT_CONFIG["model"],
+                            "messages": messages,
+                            "stream": False,
+                            "options": {
+                                "temperature": CHATBOT_CONFIG["temperature"],
+                                "num_predict": CHATBOT_CONFIG["max_tokens"]
+                            }
+                        }
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            print(f"[CHATBOT ERROR] Ollama returned {resp.status}: {error_text}")
+                            await message.channel.send("uh oh ollama isnt running :( (need to start ollama server)")
+                            return
+                        data = await resp.json()
+                        response = data["message"]["content"]
+            
+            else:
+                await message.channel.send(f"unknown provider '{provider}' lol")
+                return
+            
+            if response:
+                # Add bot response to history
+                conv["messages"].append({"role": "assistant", "content": response})
+                # Send response
+                await message.channel.send(response)
+    
+    except Exception as e:
+        print(f"[CHATBOT ERROR] {e}")
+        traceback.print_exc()
+        await message.channel.send("*knocks over keyboard* oops something broke! 🙀")
+
+# ============================================================================
+
 # Load aches.json
 ACHES_FILE = os.path.join(CONFIG_PATH, "aches.json")
 with open(ACHES_FILE, "r", encoding="utf-8-sig") as f:
@@ -6250,7 +6443,15 @@ async def on_message(message: discord.Message):
         elif text == "lol_i_have_dmed_the_cat_bot_and_got_an_ach":
             await message.channel.send('which part of "send in server" was unclear?')
         else:
-            await message.channel.send('good job! please send "lol_i_have_dmed_the_cat_bot_and_got_an_ach" in server to get your ach!')
+            # Check if we've already sent the achievement message
+            dm_user = await User.get_or_create(user_id=message.author.id)
+            if not dm_user.dm_ach_sent:
+                dm_user.dm_ach_sent = 1
+                await dm_user.save()
+                await message.channel.send('good job! please send "lol_i_have_dmed_the_cat_bot_and_got_an_ach" in server to get your ach!')
+            else:
+                # Use OpenAI chatbot for conversation
+                await handle_dm_chat(message)
         return
 
     perms = await fetch_perms(message)

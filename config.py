@@ -39,3 +39,6 @@ DONOR_CHANNEL_ID = 1249343008890028144
 # cat bot will also log all rain uses/movements here
 # cat!rain commands here can be used without author check and will dm reciever a thanks message
 RAIN_CHANNEL_ID = 1436486865489236299
+
+# OpenRouter API key for chatbot 
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")

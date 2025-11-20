@@ -70,6 +70,7 @@ class Profile(catpg.Model):
 
 class User(catpg.Model):
     _primary_key = "user_id"
+    _capped_ints = ["dm_ach_sent"]  # Track if DM achievement message was sent
 
 
 class Channel(catpg.Model):
