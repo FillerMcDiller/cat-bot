@@ -4211,10 +4211,20 @@ async def start_internal_server(port: int = 3002):
 
             return web.json_response({"status": "success", "user_id": user_id})
 
+        async def _health(request):
+            """Health check endpoint to verify server is running"""
+            return web.json_response({
+                "status": "healthy",
+                "service": "KITTAYYYYYYY Internal Vote Receiver",
+                "port": port,
+                "bot_ready": bot.is_ready() if hasattr(bot, 'is_ready') else False
+            })
+
         # Add both endpoints for compatibility
         print(f"[VOTE SERVER] Adding routes...", flush=True)
         app.router.add_post("/_internal_vote", _handle)  # Old endpoint
         app.router.add_post("/vote", _handle)  # New endpoint for draft webhook
+        app.router.add_get("/health", _health)  # Health check
 
         print(f"[VOTE SERVER] Creating AppRunner...", flush=True)
         runner = web.AppRunner(app)
@@ -4222,7 +4232,8 @@ async def start_internal_server(port: int = 3002):
         print(f"[VOTE SERVER] Creating TCPSite on 127.0.0.1:{port}...", flush=True)
         site = web.TCPSite(runner, "127.0.0.1", port)
         await site.start()
-        print(f"[VOTE] ✅ Internal vote receiver listening on 127.0.0.1:{port} [endpoints: /vote, /_internal_vote]", flush=True)
+        print(f"[VOTE] ✅ Internal vote receiver listening on 127.0.0.1:{port} [endpoints: /vote, /_internal_vote, /health]", flush=True)
+        print(f"[VOTE] Test with: curl http://127.0.0.1:{port}/health", flush=True)
     except Exception as e:
         print(f"[VOTE SERVER ERROR] Failed to start: {type(e).__name__}: {e}", flush=True)
         logging.exception("Failed to start internal vote receiver server")

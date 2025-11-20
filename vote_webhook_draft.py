@@ -91,20 +91,35 @@ async def notify_bot(user_id: int):
             "timestamp": datetime.utcnow().isoformat()
         }
         
+        bot_url = f"http://127.0.0.1:{BOT_INTERNAL_PORT}/vote"
+        logger.info(f"[NOTIFY_BOT] Attempting to forward vote to bot at {bot_url}")
+        logger.info(f"[NOTIFY_BOT] Payload: {vote_data}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"http://localhost:{BOT_INTERNAL_PORT}/vote",
+                bot_url,
                 json=vote_data,
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as resp:
+                resp_text = await resp.text()
+                logger.info(f"[NOTIFY_BOT] Bot response status: {resp.status}, body: {resp_text}")
+                
                 if resp.status == 200:
-                    logger.info(f"Successfully notified bot about vote from user {user_id}")
+                    logger.info(f"✅ Successfully notified bot about vote from user {user_id}")
                     return True
                 else:
-                    logger.error(f"Bot returned status {resp.status}")
+                    logger.error(f"❌ Bot returned non-200 status: {resp.status}")
                     return False
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"❌ CONNECTION FAILED: Cannot connect to bot at localhost:{BOT_INTERNAL_PORT} - Is the bot running? Error: {e}")
+        return False
+    except asyncio.TimeoutError:
+        logger.error(f"❌ TIMEOUT: Bot at localhost:{BOT_INTERNAL_PORT} did not respond within 5 seconds")
+        return False
     except Exception as e:
-        logger.error(f"Failed to notify bot: {e}")
+        logger.error(f"❌ Failed to notify bot: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -203,13 +218,18 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    logger.info("="*60)
     logger.info(f"Starting vote webhook server on port {WEBHOOK_PORT}")
     logger.info(f"Bot internal port: {BOT_INTERNAL_PORT}")
+    logger.info(f"Bot internal URL: http://127.0.0.1:{BOT_INTERNAL_PORT}/vote")
     logger.info(f"Webhook secret configured: {bool(TOPGG_WEBHOOK_SECRET)}")
+    logger.info("="*60)
     
     if not TOPGG_WEBHOOK_SECRET:
         logger.warning("⚠️  TOPGG_WEBHOOK_SECRET not set - webhook verification disabled!")
         logger.warning("⚠️  Set this in your .env file for security!")
+    
+    logger.info("⚠️  MAKE SURE THE BOT IS RUNNING FIRST! The webhook needs to forward to the bot's internal server.")
     
     uvicorn.run(
         app,

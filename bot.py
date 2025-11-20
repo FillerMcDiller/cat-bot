@@ -42,40 +42,42 @@ bot = commands.AutoShardedBot(
 
 
 @bot.event
-    async def setup_hook(self):
-        print("\n" + "="*60)
-        print("[BOT.PY] 🚀 SETUP_HOOK STARTING!")
-        print("="*60 + "\n")
+async def setup_hook():
+    print("\n" + "="*60)
+    print("[BOT.PY] 🚀 SETUP_HOOK STARTING!")
+    print("="*60 + "\n")
+    
+    try:
+        # Load the main extension first
+        print("[BOT.PY] 📦 Loading main.py extension...")
+        await bot.load_extension('main')
+        print("[BOT.PY] ✅ main.py loaded successfully!")
         
+        # Import the vote receiver function
+        print("[BOT.PY] 📥 Importing start_internal_server...")
         try:
-            # Load the main extension first
-            print("[BOT.PY] 📦 Loading main.py extension...")
-            await self.load_extension('main')
-            print("[BOT.PY] ✅ main.py loaded successfully!")
+            from main import start_internal_server
+            print("[BOT.PY] ✅ Import successful!")
             
-            # Import the vote receiver function
-            print("[BOT.PY] 📥 Importing start_internal_server...")
-            try:
-                from main import start_internal_server
-                print("[BOT.PY] ✅ Import successful!")
-                
-                # Start the internal vote receiver
-                print("[BOT.PY] 🌐 Starting internal vote receiver on port 3002...")
-                self.loop.create_task(start_internal_server(3002))  # Pass port explicitly
-                print("[BOT.PY] ✅ Vote receiver task created!")
-            except ImportError as ie:
-                print(f"[BOT.PY] ⚠️ Could not import start_internal_server: {ie}")
-                print("[BOT.PY] Vote system will not be available!")
-            
-        except Exception as e:
-            print(f"\n[BOT.PY] ❌ ERROR in setup_hook: {e}")
-            import traceback
-            traceback.print_exc()
-            print()
+            # Start the internal vote receiver
+            print("[BOT.PY] 🌐 Starting internal vote receiver on port 3002...")
+            bot.loop.create_task(start_internal_server(3002))  # Pass port explicitly
+            print("[BOT.PY] ✅ Vote receiver task created!")
+        except ImportError as ie:
+            print(f"[BOT.PY] ⚠️ Could not import start_internal_server: {ie}")
+            print("[BOT.PY] Vote system will not be available!")
         
-        print("\n" + "="*60)
-        print("[BOT.PY] 🏁 SETUP_HOOK COMPLETE!")
-        print("="*60 + "\n")
+    except Exception as e:
+        print(f"\n[BOT.PY] ❌ ERROR in setup_hook: {e}")
+        import traceback
+        traceback.print_exc()
+        print()
+    
+    print("\n" + "="*60)
+    print("[BOT.PY] 🏁 SETUP_HOOK COMPLETE!")
+    print("="*60 + "\n")
+
+bot.setup_hook = setup_hook
 async def reload(reload_db):
     try:
         await bot.unload_extension("main")
