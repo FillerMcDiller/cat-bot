@@ -70,7 +70,7 @@ CHATBOT_CONFIG = {
     
     "provider": "openrouter", 
     
-    "model": "meta-llama/llama-3.2-3b-instruct:free",  # FREE MODEL!
+    "model": "google/gemma-2-9b-it:free",  # FREE MODEL!
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
@@ -197,50 +197,67 @@ async def handle_dm_chat(message: discord.Message):
             # OPENROUTER PROVIDER (FREE!)
             elif provider == "openrouter":
                 async with aiohttp.ClientSession() as session:
-                    try:
-                        async with session.post(
-                            "https://openrouter.ai/api/v1/chat/completions",
-                            headers={
-                                "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-                                "Content-Type": "application/json",
-                                "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
-                                "X-Title": "KITTAYYYYYYY Bot"  # Optional
-                            },
-                            json={
-                                "model": CHATBOT_CONFIG["model"],
-                                "messages": messages,
-                                "max_tokens": CHATBOT_CONFIG["max_tokens"],
-                                "temperature": CHATBOT_CONFIG["temperature"]
-                            },
-                            timeout=aiohttp.ClientTimeout(total=30)  # 30 second timeout
-                        ) as resp:
-                            error_text = await resp.text()
-                            print(f"[CHATBOT] OpenRouter response status: {resp.status}")
-                            print(f"[CHATBOT] OpenRouter response body: {error_text[:500]}")  # First 500 chars
-                            
-                            if resp.status != 200:
-                                print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text}")
-                                await message.channel.send(f"uh oh my brain broke :( (openrouter error {resp.status})")
-                                return
-                            
-                            data = await resp.json()
-                            
-                            # Check if response has the expected structure
-                            if "choices" not in data or len(data["choices"]) == 0:
-                                print(f"[CHATBOT ERROR] OpenRouter response missing choices: {data}")
-                                await message.channel.send("uh oh got weird response from openrouter 😿")
-                                return
-                            
-                            response = data["choices"][0]["message"]["content"]
-                            print(f"[CHATBOT] Successfully got response: {response[:100]}...")
-                    except asyncio.TimeoutError:
-                        print(f"[CHATBOT ERROR] OpenRouter request timed out")
-                        await message.channel.send("uh oh openrouter took too long to respond 😾")
-                        return
-                    except aiohttp.ClientError as e:
-                        print(f"[CHATBOT ERROR] OpenRouter connection error: {e}")
-                        await message.channel.send("uh oh couldnt connect to openrouter 😿")
-                        return
+                    max_retries = 3
+                    retry_delay = 1  # Start with 1 second
+                    
+                    for attempt in range(max_retries):
+                        try:
+                            async with session.post(
+                                "https://openrouter.ai/api/v1/chat/completions",
+                                headers={
+                                    "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                                    "Content-Type": "application/json",
+                                    "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
+                                    "X-Title": "KITTAYYYYYYY Bot"  # Optional
+                                },
+                                json={
+                                    "model": CHATBOT_CONFIG["model"],
+                                    "messages": messages,
+                                    "max_tokens": CHATBOT_CONFIG["max_tokens"],
+                                    "temperature": CHATBOT_CONFIG["temperature"]
+                                },
+                                timeout=aiohttp.ClientTimeout(total=30)  # 30 second timeout
+                            ) as resp:
+                                error_text = await resp.text()
+                                print(f"[CHATBOT] OpenRouter response status: {resp.status} (attempt {attempt + 1}/{max_retries})")
+                                
+                                if resp.status == 429:
+                                    # Rate limited - wait and retry
+                                    if attempt < max_retries - 1:
+                                        print(f"[CHATBOT] Rate limited, waiting {retry_delay}s before retry...")
+                                        await asyncio.sleep(retry_delay)
+                                        retry_delay *= 2  # Exponential backoff: 1s, 2s, 4s
+                                        continue
+                                    else:
+                                        print(f"[CHATBOT ERROR] Rate limited after {max_retries} attempts")
+                                        await message.channel.send("uh oh im being rate limited rn 😿 try again in like 10 seconds bro")
+                                        return
+                                
+                                if resp.status != 200:
+                                    print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text[:500]}")
+                                    await message.channel.send(f"uh oh my brain broke :( (openrouter error {resp.status})")
+                                    return
+                                
+                                data = await resp.json()
+                                
+                                # Check if response has the expected structure
+                                if "choices" not in data or len(data["choices"]) == 0:
+                                    print(f"[CHATBOT ERROR] OpenRouter response missing choices: {data}")
+                                    await message.channel.send("uh oh got weird response from openrouter 😿")
+                                    return
+                                
+                                response = data["choices"][0]["message"]["content"]
+                                print(f"[CHATBOT] Successfully got response: {response[:100]}...")
+                                break  # Success! Exit retry loop
+                                
+                        except asyncio.TimeoutError:
+                            print(f"[CHATBOT ERROR] OpenRouter request timed out")
+                            await message.channel.send("uh oh openrouter took too long to respond 😾")
+                            return
+                        except aiohttp.ClientError as e:
+                            print(f"[CHATBOT ERROR] OpenRouter connection error: {e}")
+                            await message.channel.send("uh oh couldnt connect to openrouter 😿")
+                            return
             
             # OLLAMA PROVIDER (LOCAL & FREE!)
             elif provider == "ollama":
