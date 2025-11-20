@@ -48,7 +48,12 @@ async def setup_hook():
     print("="*60 + "\n")
     
     try:
-        # Load the main extension first
+        # Connect to database FIRST
+        print("[BOT.PY] 🗄️ Connecting to database...")
+        await database.connect()
+        print("[BOT.PY] ✅ Database connected!")
+        
+        # Load the main extension
         print("[BOT.PY] 📦 Loading main.py extension...")
         await bot.load_extension('main')
         print("[BOT.PY] ✅ main.py loaded successfully!")

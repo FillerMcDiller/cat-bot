@@ -17044,14 +17044,28 @@ async def reward_vote(user_id: int):
     print(f"\n{'='*60}", flush=True)
     print(f"[REWARD_VOTE] Starting reward_vote for user {user_id}", flush=True)
     print(f"[REWARD_VOTE] Bot has {len(bot.guilds)} guilds", flush=True)
+    
+    # Check database connection
     try:
+        from database import pool
+        if pool is None:
+            print(f"[REWARD_VOTE ERROR] Database pool is None - database not connected!", flush=True)
+            return
+        print(f"[REWARD_VOTE] Database pool status: {pool}", flush=True)
+    except Exception as e:
+        print(f"[REWARD_VOTE ERROR] Failed to check database pool: {e}", flush=True)
+    
+    try:
+        print(f"[REWARD_VOTE] Attempting User.get_or_create for user_id={user_id}", flush=True)
         global_user = await User.get_or_create(user_id=user_id)
-        print(f"[REWARD_VOTE] Got global user, processing {len(bot.guilds)} guilds", flush=True)
+        print(f"[REWARD_VOTE] ✅ Got global user object: {global_user}", flush=True)
         print(f"[REWARD_VOTE] User vote_time_topgg: {getattr(global_user, 'vote_time_topgg', 'N/A')}", flush=True)
         print(f"[REWARD_VOTE] User vote_streak: {getattr(global_user, 'vote_streak', 'N/A')}", flush=True)
     except Exception as e:
-        print(f"[REWARD_VOTE ERROR] Failed to get user {user_id}: {e}", flush=True)
+        print(f"[REWARD_VOTE ERROR] Failed to get user {user_id}: {type(e).__name__}: {e}", flush=True)
         logging.exception(f"Failed to get user {user_id}")
+        import traceback
+        traceback.print_exc()
         return
 
     rewards_given = 0
