@@ -68,9 +68,9 @@ CONFIG_PATH = os.path.join(BASE_PATH, "config")
 CHATBOT_CONFIG = {
     "enabled": True, 
     
-    "provider": "openrouter", 
+    "provider": "ollama",  # Using local Ollama - NO RATE LIMITS!
     
-    "model": "google/gemma-2-9b-it:free",  # FREE MODEL!
+    "model": "llama3.2",  # Local model name
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
