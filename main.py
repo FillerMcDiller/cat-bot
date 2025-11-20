@@ -635,6 +635,12 @@ cat_names = [
     "Ginger",
     "Poppy",
     "Toby",
+    "Jeremy",
+    "Ben",
+    "john",
+    "Muffin",
+    "Earth Destroyer",
+    "Goose",
 ]
 
 # Persistent per-user cat instances storage (simple JSON file to avoid DB migrations)
