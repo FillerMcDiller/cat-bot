@@ -70,7 +70,7 @@ CHATBOT_CONFIG = {
     
     "provider": "ollama",  # Using local Ollama - NO RATE LIMITS!
     
-    "model": "llama3.2",  # Local model name
+    "model": "llama3.2:1b",  # Smaller/faster model for slower CPUs
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
@@ -261,26 +261,40 @@ async def handle_dm_chat(message: discord.Message):
             
             # OLLAMA PROVIDER (LOCAL & FREE!)
             elif provider == "ollama":
+                print(f"[CHATBOT] Sending request to Ollama at {CHATBOT_CONFIG['ollama_base_url']}")
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{CHATBOT_CONFIG['ollama_base_url']}/api/chat",
-                        json={
-                            "model": CHATBOT_CONFIG["model"],
-                            "messages": messages,
-                            "stream": False,
-                            "options": {
-                                "temperature": CHATBOT_CONFIG["temperature"],
-                                "num_predict": CHATBOT_CONFIG["max_tokens"]
-                            }
-                        }
-                    ) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            print(f"[CHATBOT ERROR] Ollama returned {resp.status}: {error_text}")
-                            await message.channel.send("uh oh ollama isnt running :( (need to start ollama server)")
-                            return
-                        data = await resp.json()
-                        response = data["message"]["content"]
+                    try:
+                        async with session.post(
+                            f"{CHATBOT_CONFIG['ollama_base_url']}/api/chat",
+                            json={
+                                "model": CHATBOT_CONFIG["model"],
+                                "messages": messages,
+                                "stream": False,
+                                "options": {
+                                    "temperature": CHATBOT_CONFIG["temperature"],
+                                    "num_predict": CHATBOT_CONFIG["max_tokens"]
+                                }
+                            },
+                            timeout=aiohttp.ClientTimeout(total=60)  # 60 second timeout
+                        ) as resp:
+                            print(f"[CHATBOT] Ollama responded with status {resp.status}")
+                            if resp.status != 200:
+                                error_text = await resp.text()
+                                print(f"[CHATBOT ERROR] Ollama returned {resp.status}: {error_text}")
+                                await message.channel.send("uh oh ollama isnt running :( (need to start ollama server)")
+                                return
+                            data = await resp.json()
+                            print(f"[CHATBOT] Ollama response data: {data}")
+                            response = data["message"]["content"]
+                            print(f"[CHATBOT] Successfully got response: {response[:100]}...")
+                    except asyncio.TimeoutError:
+                        print(f"[CHATBOT ERROR] Ollama request timed out after 60 seconds")
+                        await message.channel.send("uh oh ollama is taking forever 😿 your cpu might be too slow or model isnt loaded")
+                        return
+                    except aiohttp.ClientError as e:
+                        print(f"[CHATBOT ERROR] Ollama connection error: {e}")
+                        await message.channel.send("uh oh couldnt connect to ollama 😿")
+                        return
             
             else:
                 await message.channel.send(f"unknown provider '{provider}' lol")
