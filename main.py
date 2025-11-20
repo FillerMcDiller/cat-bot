@@ -7720,13 +7720,10 @@ async def news(message: discord.Interaction):
                 # Check if user already claimed this reward
                 reward_key = f"news_{idx}"
                 profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
-                claimed_rewards = getattr(profile, "claimed_news_rewards", None)
-                if claimed_rewards:
-                    try:
-                        claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
-                    except:
-                        claimed_list = []
-                else:
+                try:
+                    claimed_rewards = profile.claimed_news_rewards
+                    claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else (claimed_rewards or [])
+                except (AttributeError, KeyError):
                     claimed_list = []
                 
                 if reward_key in claimed_list:
@@ -7740,13 +7737,10 @@ async def news(message: discord.Interaction):
             if art.get("reward"):
                 reward_key = f"news_{idx}"
                 profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
-                claimed_rewards = getattr(profile, "claimed_news_rewards", None)
-                if claimed_rewards:
-                    try:
-                        claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
-                    except:
-                        claimed_list = []
-                else:
+                try:
+                    claimed_rewards = profile.claimed_news_rewards
+                    claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else (claimed_rewards or [])
+                except (AttributeError, KeyError):
                     claimed_list = []
                 
                 if reward_key not in claimed_list:
@@ -7779,13 +7773,10 @@ async def news(message: discord.Interaction):
             # Check if already claimed
             reward_key = f"news_{article_idx}"
             profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
-            claimed_rewards = getattr(profile, "claimed_news_rewards", None)
-            if claimed_rewards:
-                try:
-                    claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
-                except:
-                    claimed_list = []
-            else:
+            try:
+                claimed_rewards = profile.claimed_news_rewards
+                claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else (claimed_rewards or [])
+            except (AttributeError, KeyError):
                 claimed_list = []
             
             if reward_key in claimed_list:
