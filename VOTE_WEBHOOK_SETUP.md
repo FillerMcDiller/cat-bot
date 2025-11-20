@@ -143,9 +143,7 @@ curl -X POST http://localhost:3001/webhook \
 ### Test bot receiver:
 
 ```bash
-curl -X POST http://localhost:3002/vote \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":YOUR_DISCORD_ID}'
+curl -X POST http://127.0.0.1:3002/vote -H "Content-Type: application/json" -d "{\"user_id\": 123456789}"
 ```
 
 Then open `/battlepass` in any server to see your rewards!
