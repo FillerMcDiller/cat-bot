@@ -4626,6 +4626,7 @@ news_list = [
     {"title": "100,000 SERVERS WHAT", "emoji": "🎉"},
     {"title": "Regarding recent instabilities", "emoji": "🗒️"},
     {"title": "NEW CATS, KIBBLE, AND.. ITEMS??? WOWOWOWOOWO!!!", "emoji": "🔥"},
+    {"title": "BIG APOLOGIES FOR LAST NIGHT!", "emoji": "😭"},
 ]
 
 
@@ -7658,91 +7659,6 @@ async def news(message: discord.Interaction):
     # Restore full news articles. These bodies preserve the original long-form content.
     news_list = [
         {
-            "title": "KITTAYYYYYYY Wrapped 2024",
-            "emoji": "🎁",
-            "desc": "Yearly stats and highlights",
-            "body": (
-                "⚡ **KITTAYYYYYYY Wrapped 2024**\n"
-                "In 2024 KITTAYYYYYYY got...\n"
-                "- 🖥️ *45777* new servers!\n"
-                "- 👋 *286607* new profiles!\n"
-                f"- {get_emoji('staring_cat')} a few crazy statistics and lots of memorable moments!\n"
-                "See the full Wrapped message in the official server for more details."
-            ),
-        },
-        {
-            "title": "☃️ KITTAYYYYYYY Christmas",
-            "emoji": "☃️",
-            "desc": "Holiday events, sales and giveaways",
-            "body": (
-                "⚡ **KITTAYYYYYYY Wrapped 2024**\n"
-                "Holiday events are live: special packs, extra drops, and limited rewards.\n"
-                "Don't miss the seasonal shop and the community giveaways."
-            ),
-        },
-        {
-            "title": "Battlepass is getting an update!",
-            "emoji": "🎟️",
-            "desc": "Major Battlepass changes",
-            "body": (
-                "## Battlepass Update\n"
-                "- Battlepass will now reset monthly.\n"
-                "- You will have 3 daily quests including voting.\n"
-                "- Quests refresh 12 hours after completing.\n"
-                "- 30 battlepass levels with better rewards (including Ultimate cats).\n"
-                "We aim to make progress meaningful while keeping daily play light."
-            ),
-        },
-        {
-            "title": "Packs!",
-            "emoji": get_emoji("goldpack"),
-            "desc": "New packs gambling system",
-            "body": (
-                "You want more gambling? We heard you!\n"
-                "Packs replace deterministic rewards: each pack has rarities and upgrade chances.\n"
-                "Rarities include Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond and Celestial.\n"
-                "Opening packs can upgrade rarity with diminishing chance on each step — even common packs can become rare!"
-            ),
-        },
-        {
-            "title": "Important Message from CEO (April Fools)",
-            "emoji": "📢",
-            "desc": "April Fools announcement",
-            "body": (
-                "(April Fools 2025)\n\n"
-                "Dear KITTAYYYYYYY users,\n\n"
-                "This year's April Fools includes a tongue-in-cheek announcement about advertising and emoji changes.\n"
-                "No permanent changes will be made — enjoy the joke!"
-            ),
-        },
-        {
-            "title": "KITTAYYYYYYY Turns 3",
-            "emoji": "🥳",
-            "desc": "Birthday event and puzzle pieces",
-            "body": (
-                "April 21st is KITTAYYYYYYY's birthday! We ran a puzzle-piece event with collectible pieces hidden in cats.\n"
-                "Thanks for joining the festivities and the art contests."
-            ),
-        },
-        {
-            "title": "🎉 100,000 Servers What",
-            "emoji": "🎉",
-            "desc": "Huge milestone celebration",
-            "body": (
-                "KITTAYYYYYYY has reached 100,000 servers — thank you everyone!\n"
-                "We ran giveaways, art contests, and special event rewards to celebrate. Check the official server for winners and past events."
-            ),
-        },
-        {
-            "title": "Regarding recent instabilities",
-            "emoji": "⚠️",
-            "desc": "Stability update and compensation",
-            "body": (
-                "Services were unstable recently; the issue has been addressed.\n"
-                "As compensation, voters received free gold packs for a brief window. Sorry for the inconvenience."
-            ),
-        },
-        {
             "title": "NEW CATS, KIBBLE, AND.. ITEMS???",
             "emoji": "🐾",
             "desc": "New cat types and Kibble currency",
@@ -7751,6 +7667,29 @@ async def news(message: discord.Interaction):
                 "Kibble can be earned from activities and spent on new items — check /shop to see what's available.\n"
                 "More content is incoming; stay tuned!"
             ),
+            "reward": {
+                "type": "kibble",  # Can be: "kibble", "pack", "cat", "xp", "rain"
+                "amount": 500,
+                "name": "500 Kibble"
+            }
+        },
+        {
+            "title": "BIG APOLOGIES FOR LAST NIGHT",
+            "emoji": "😭",
+            "desc": "kittay had an oopsie!",
+            "body": (
+                "so yeah.. the bot kinda exploded yesterday.. oopsa!\n"
+                "it was the internet service provider's fault, mb. but do not worry! I have used my magic (waiting patiently) to fix it!\n"
+                "also, voting should work now (/vote), it gives xp and sometimes a pack WOOHOOO\n"
+                "as a sorry, you can claim a gold pack from this message. thanks for being patient with me!"
+                "**Filler <3**"
+            ),
+            "reward": {
+                "type": "pack",
+                "amount": 1,
+                "pack_name": "Gold",  # Used when type is "pack"
+                "name": "1 Gold Pack"
+            }
         },
     ]
 
@@ -7764,19 +7703,147 @@ async def news(message: discord.Interaction):
             self.select = discord.ui.Select(placeholder="Choose an article", min_values=1, max_values=1, options=options)
             self.select.callback = self.on_select
             self.add_item(self.select)
+            self.current_article_idx = None
 
         async def on_select(self, interaction2: discord.Interaction):
             idx = int(self.select.values[0])
+            self.current_article_idx = idx
             art = news_list[idx]
+            
+            # Build embed
             embed = discord.Embed(title=f"{art['emoji']} {art['title']}", description=art['body'], color=Colors.brown)
             embed.set_footer(text=f"Article {idx + 1}/{len(news_list)}")
+            
+            # Check if article has a reward
+            if art.get("reward"):
+                reward = art["reward"]
+                # Check if user already claimed this reward
+                reward_key = f"news_{idx}"
+                profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
+                claimed_rewards = getattr(profile, "claimed_news_rewards", None)
+                if claimed_rewards:
+                    try:
+                        claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
+                    except:
+                        claimed_list = []
+                else:
+                    claimed_list = []
+                
+                if reward_key in claimed_list:
+                    embed.add_field(name="📦 Reward", value=f"~~{reward['name']}~~ (Already claimed)", inline=False)
+                else:
+                    embed.add_field(name="📦 Reward", value=f"**{reward['name']}** - Click button below to claim!", inline=False)
+            
+            # Create new view with claim button if reward exists and not claimed
+            new_view = NewsView()
+            new_view.current_article_idx = idx
+            if art.get("reward"):
+                reward_key = f"news_{idx}"
+                profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
+                claimed_rewards = getattr(profile, "claimed_news_rewards", None)
+                if claimed_rewards:
+                    try:
+                        claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
+                    except:
+                        claimed_list = []
+                else:
+                    claimed_list = []
+                
+                if reward_key not in claimed_list:
+                    # Add claim button
+                    claim_btn = discord.ui.Button(label=f"Claim {art['reward']['name']}", style=discord.ButtonStyle.green, emoji="🎁")
+                    
+                    async def claim_callback(btn_interaction: discord.Interaction):
+                        await self.claim_reward(btn_interaction, idx)
+                    
+                    claim_btn.callback = claim_callback
+                    new_view.add_item(claim_btn)
+            
             try:
-                await interaction2.response.edit_message(embed=embed, view=self)
+                await interaction2.response.edit_message(embed=embed, view=new_view)
             except Exception:
                 try:
-                    await interaction2.followup.send(embed=embed, ephemeral=True)
+                    await interaction2.followup.send(embed=embed, view=new_view, ephemeral=True)
                 except Exception:
                     pass
+        
+        async def claim_reward(self, interaction: discord.Interaction, article_idx: int):
+            """Handle reward claiming for a news article"""
+            art = news_list[article_idx]
+            reward = art.get("reward")
+            
+            if not reward:
+                await interaction.response.send_message("❌ This article has no reward!", ephemeral=True)
+                return
+            
+            # Check if already claimed
+            reward_key = f"news_{article_idx}"
+            profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+            claimed_rewards = getattr(profile, "claimed_news_rewards", None)
+            if claimed_rewards:
+                try:
+                    claimed_list = json.loads(claimed_rewards) if isinstance(claimed_rewards, str) else claimed_rewards
+                except:
+                    claimed_list = []
+            else:
+                claimed_list = []
+            
+            if reward_key in claimed_list:
+                await interaction.response.send_message("❌ You've already claimed this reward!", ephemeral=True)
+                return
+            
+            # Give the reward
+            reward_text = ""
+            try:
+                if reward["type"] == "kibble":
+                    profile.kibble = (profile.kibble or 0) + reward["amount"]
+                    reward_text = f"🪙 {reward['amount']} Kibble"
+                elif reward["type"] == "pack":
+                    pack_name = reward.get("pack_name", "Wooden").lower()
+                    profile[f"pack_{pack_name}"] += reward["amount"]
+                    reward_text = f"📦 {reward['amount']}x {reward.get('pack_name', 'Wooden')} Pack"
+                elif reward["type"] == "cat":
+                    cat_type = reward.get("cat_type", "Fine")
+                    profile[f"cat_{cat_type}"] += reward["amount"]
+                    await auto_sync_cat_instances(profile, cat_type)
+                    reward_text = f"🐱 {reward['amount']}x {cat_type} Cat"
+                elif reward["type"] == "xp":
+                    profile.progress = (profile.progress or 0) + reward["amount"]
+                    reward_text = f"✨ {reward['amount']} Battlepass XP"
+                elif reward["type"] == "rain":
+                    profile.rain_minutes = (profile.rain_minutes or 0) + reward["amount"]
+                    reward_text = f"🌧️ {reward['amount']} Rain Minutes"
+                
+                # Mark as claimed
+                claimed_list.append(reward_key)
+                profile.claimed_news_rewards = json.dumps(claimed_list)
+                await profile.save()
+                
+                # Send success message
+                embed = discord.Embed(
+                    title="🎁 Reward Claimed!",
+                    description=f"You received: **{reward_text}**",
+                    color=discord.Color.green()
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+                # Update the original message to show reward is claimed
+                art = news_list[article_idx]
+                main_embed = discord.Embed(title=f"{art['emoji']} {art['title']}", description=art['body'], color=Colors.brown)
+                main_embed.set_footer(text=f"Article {article_idx + 1}/{len(news_list)}")
+                main_embed.add_field(name="📦 Reward", value=f"~~{reward['name']}~~ (Claimed by you!)", inline=False)
+                
+                # Remove claim button
+                new_view = NewsView()
+                new_view.current_article_idx = article_idx
+                try:
+                    await interaction.message.edit(embed=main_embed, view=new_view)
+                except:
+                    pass
+                
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to give reward: {e}", ephemeral=True)
+                logging.exception("Failed to give news reward")
 
     embed = discord.Embed(title="KITTAYYYYYYY Times", description="Choose an article from the dropdown below.", color=Colors.brown)
     view = NewsView()
@@ -17069,28 +17136,25 @@ async def reward_vote(user_id: int):
         return
 
     rewards_given = 0
+    guilds_processed = []
+    total_xp_given = 0
+    packs_given = []
+    
     # iterate servers the bot is in and apply to each Profile for this user
     for guild in list(bot.guilds):
         try:
             profile = await Profile.get_or_create(guild_id=guild.id, user_id=user_id)
-            # only apply if a vote quest is currently available
-            if getattr(profile, "vote_cooldown", 0) != 0:
-                continue
+            print(f"[REWARD_VOTE] Processing guild: {guild.name} (ID: {guild.id})", flush=True)
 
-            # ensure there's a vote_reward; if not, generate a sensible one
+            # Generate vote reward (300 base XP, doubled on Fri/Sat/Sun)
+            base_xp = 300
             try:
                 qdata = battle.get("quests", {}).get("third", {}).get("third", {})
-                if not getattr(profile, "vote_reward", 0):
-                    profile.vote_reward = random.randint(qdata.get("xp_min", 250) // 10, qdata.get("xp_max", 350) // 10) * 10
+                base_xp = random.randint(qdata.get("xp_min", 250) // 10, qdata.get("xp_max", 350) // 10) * 10
             except Exception:
-                if not getattr(profile, "vote_reward", 0):
-                    profile.vote_reward = 300
-
-            # set cooldown to user's recorded vote time
-            try:
-                profile.vote_cooldown = int(global_user.vote_time_topgg or int(time.time()))
-            except Exception:
-                profile.vote_cooldown = int(time.time())
+                base_xp = 300
+            
+            profile.vote_reward = base_xp
 
             # double on Fri/Sat/Sun per progress()
             try:
@@ -17116,7 +17180,17 @@ async def reward_vote(user_id: int):
 
             profile.quests_completed = (profile.quests_completed or 0) + 1
             rewards_given += 1
+            total_xp_given += profile.vote_reward
+            guilds_processed.append(guild.name)
             print(f"[REWARD_VOTE] Giving {profile.vote_reward} XP to user {user_id} in guild {guild.name} (ID: {guild.id})", flush=True)
+            
+            # Track streak pack rewards for DM
+            try:
+                streak_data = get_streak_reward(global_user.vote_streak)
+                if streak_data.get("reward") and streak_data["reward"] not in packs_given:
+                    packs_given.append(streak_data["reward"])
+            except Exception:
+                pass
 
             # determine level data loop
             try:
@@ -17169,14 +17243,62 @@ async def reward_vote(user_id: int):
                     await profile.save()
                 except Exception:
                     pass
+            
+            # Set cooldown AFTER giving rewards (for tracking, not blocking)
+            try:
+                profile.vote_cooldown = int(global_user.vote_time_topgg or int(time.time()))
+                await profile.save()
+            except Exception:
+                pass
 
         except Exception as e:
             # per-guild failure shouldn't stop others
             print(f"[REWARD_VOTE ERROR] Failed to process guild {guild.id}: {e}", flush=True)
+            logging.exception(f"Failed to process guild {guild.id}")
             continue
     
     print(f"[REWARD_VOTE] ✅ Completed! Gave rewards to {rewards_given} servers for user {user_id}", flush=True)
+    print(f"[REWARD_VOTE] Total XP given: {total_xp_given}", flush=True)
     print(f"{'='*60}\n", flush=True)
+    
+    # Send DM to user with reward details
+    if rewards_given > 0:
+        try:
+            discord_user = await bot.fetch_user(user_id)
+            if discord_user:
+                # Check if weekend bonus applied
+                is_weekend = datetime.datetime.now().weekday() >= 4  # Fri/Sat/Sun
+                weekend_text = " (Weekend Bonus! 🎉)" if is_weekend else ""
+                
+                # Build reward message
+                xp_per_server = total_xp_given // rewards_given if rewards_given > 0 else 0
+                dm_message = f"🎉 **Thank you for voting!**{weekend_text}\n\n"
+                dm_message += f"**Rewards Given:**\n"
+                dm_message += f"✨ {xp_per_server} Battlepass XP per server ({rewards_given} server{'s' if rewards_given > 1 else ''})\n"
+                dm_message += f"📊 Total: {total_xp_given} XP\n"
+                
+                # Add pack rewards if any
+                if packs_given:
+                    dm_message += f"📦 Pack{'s' if len(packs_given) > 1 else ''}: {', '.join(packs_given)}\n"
+                
+                # Add streak info
+                try:
+                    streak = getattr(global_user, 'vote_streak', 0)
+                    if streak:
+                        dm_message += f"\n🔥 **Vote Streak:** {streak}\n"
+                        next_reward = ((streak // 7) + 1) * 7
+                        dm_message += f"Next streak reward at {next_reward} votes!\n"
+                except Exception:
+                    pass
+                
+                dm_message += f"\nYou can vote again <t:{int(time.time()) + 43200}:R>."
+                
+                await discord_user.send(dm_message)
+                print(f"[REWARD_VOTE] ✅ Sent DM to user {user_id}", flush=True)
+        except discord.Forbidden:
+            print(f"[REWARD_VOTE] ⚠️ Cannot DM user {user_id} (DMs closed)", flush=True)
+        except Exception as e:
+            print(f"[REWARD_VOTE ERROR] Failed to DM user {user_id}: {e}", flush=True)
     
     # Log to the channel after completing rewards
     try:
