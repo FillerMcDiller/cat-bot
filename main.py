@@ -131,6 +131,16 @@ async def handle_dm_chat(message: discord.Message):
         await message.channel.send("chatbot is disabled rn sorry :3")
         return
     
+    # Debug command to reset cooldown
+    if message.content.lower() == "reset":
+        user_id = message.author.id
+        if user_id in dm_last_message_time:
+            del dm_last_message_time[user_id]
+            await message.channel.send("cooldown reset 😼")
+        else:
+            await message.channel.send("no cooldown to reset bro")
+        return
+    
     # Check cooldown to prevent rate limiting
     user_id = message.author.id
     current_time = time.time()
@@ -144,6 +154,8 @@ async def handle_dm_chat(message: discord.Message):
             print(f"[CHATBOT] User {user_id} on cooldown, {remaining}s remaining")
             await message.channel.send(f"woah slow down bro wait like {remaining} more seconds 😼")
             return
+    else:
+        print(f"[CHATBOT] User {user_id} has no cooldown history, proceeding")
     
     # Don't set timestamp yet - wait until we successfully get a response
     
