@@ -260,12 +260,14 @@ async def handle_dm_chat(message: discord.Message):
                                     if attempt < max_retries - 1:
                                         wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s, 16s, 32s
                                         print(f"[CHATBOT] Rate limited, waiting {wait_time}s before retry...")
-                                        await message.channel.send(f"hold on getting rate limited gimme like {wait_time} seconds 😼")
+                                        # Only show message on first rate limit
+                                        if attempt == 0:
+                                            await message.channel.send("hold on getting rate limited, retrying... 😼")
                                         await asyncio.sleep(wait_time)
                                         continue
                                     else:
                                         print(f"[CHATBOT ERROR] Rate limited after {max_retries} attempts")
-                                        await message.channel.send("uh oh still getting rate limited 😿 the free tier is getting hammered rn, try way later or increase cooldown to like 30 seconds")
+                                        await message.channel.send("uh oh still getting rate limited 😿 the free tier is getting hammered rn, try way later")
                                         return
                                 
                                 if resp.status != 200:
