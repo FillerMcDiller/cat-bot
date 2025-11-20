@@ -68,9 +68,9 @@ CONFIG_PATH = os.path.join(BASE_PATH, "config")
 CHATBOT_CONFIG = {
     "enabled": True, 
     
-    "provider": "ollama",  # Using local Ollama - NO RATE LIMITS!
+    "provider": "openrouter",  # Cloud-based FREE models - way faster!
     
-    "model": "llama3.2:1b",  # Smaller/faster model for slower CPUs
+    "model": "google/gemma-2-9b-it:free",  # FREE model
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
@@ -110,6 +110,9 @@ You are here to vibe with users who DM you.""",
     "max_history": 10,  # How many messages to remember per user
     "timeout_minutes": 30,  # Clear conversation after this many minutes of inactivity
     
+    # Rate limit prevention
+    "cooldown_seconds": 8,  # Minimum seconds between messages per user (prevents rate limits)
+    
     # Ollama settings (only if provider is "ollama")
     "ollama_base_url": "http://localhost:11434",  # Ollama server URL
 }
@@ -117,12 +120,31 @@ You are here to vibe with users who DM you.""",
 # Store conversation history per user
 dm_conversation_history = {}
 
+# Store last message time per user (for cooldown)
+dm_last_message_time = {}
+
 async def handle_dm_chat(message: discord.Message):
     """Handle DM conversations using AI chatbot (supports multiple FREE providers!)"""
     print(f"[CHATBOT] Received DM from {message.author.id}: {message.content[:100]}")
     
     if not CHATBOT_CONFIG["enabled"]:
         await message.channel.send("chatbot is disabled rn sorry :3")
+        return
+    
+    # Check cooldown to prevent rate limiting
+    user_id = message.author.id
+    current_time = time.time()
+    cooldown = CHATBOT_CONFIG.get("cooldown_seconds", 8)
+    
+    if user_id in dm_last_message_time:
+        time_since_last = current_time - dm_last_message_time[user_id]
+        if time_since_last < cooldown:
+            remaining = int(cooldown - time_since_last)
+            print(f"[CHATBOT] User {user_id} on cooldown, {remaining}s remaining")
+            await message.channel.send(f"woah slow down bro wait like {remaining} more seconds 😼")
+            return
+    
+    dm_last_message_time[user_id] = current_time
         return
     
     provider = CHATBOT_CONFIG["provider"]
