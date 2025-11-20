@@ -65,7 +65,7 @@ class Profile(catpg.Model):
         "last_steal",  # Added for stealing cooldown
         "kibble",
     ]
-    _json_fields = ["cat_instances"]  # Store cat instances as JSONB
+    _json_fields = ["cat_instances", "claimed_news_rewards"]  # Store cat instances and claimed news rewards as JSONB
 
 
 class User(catpg.Model):
