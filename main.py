@@ -145,7 +145,6 @@ async def handle_dm_chat(message: discord.Message):
             return
     
     dm_last_message_time[user_id] = current_time
-        return
     
     provider = CHATBOT_CONFIG["provider"]
     print(f"[CHATBOT] Using provider: {provider}, model: {CHATBOT_CONFIG['model']}")
