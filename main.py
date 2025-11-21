@@ -146,14 +146,15 @@ async def handle_dm_chat(message: discord.Message):
     current_time = time.time()
     cooldown = CHATBOT_CONFIG.get("cooldown_seconds", 8)
     
+    # If user is on cooldown, wait silently with typing indicator
     if user_id in dm_last_message_time:
         time_since_last = current_time - dm_last_message_time[user_id]
         print(f"[CHATBOT] User {user_id} last message was {time_since_last:.1f}s ago (cooldown: {cooldown}s)")
         if time_since_last < cooldown:
-            remaining = int(cooldown - time_since_last) + 1
-            print(f"[CHATBOT] User {user_id} on cooldown, {remaining}s remaining")
-            await message.channel.send(f"woah slow down bro wait like {remaining} more seconds 😼")
-            return
+            remaining = cooldown - time_since_last
+            print(f"[CHATBOT] User {user_id} on cooldown, waiting {remaining:.1f}s silently...")
+            async with message.channel.typing():
+                await asyncio.sleep(remaining)
     else:
         print(f"[CHATBOT] User {user_id} has no cooldown history, proceeding")
     
@@ -256,13 +257,10 @@ async def handle_dm_chat(message: discord.Message):
                                 print(f"[CHATBOT] OpenRouter response status: {resp.status} (attempt {attempt + 1}/{max_retries})")
                                 
                                 if resp.status == 429:
-                                    # Rate limited - wait and retry
+                                    # Rate limited - wait and retry silently with typing indicator
                                     if attempt < max_retries - 1:
                                         wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s, 16s, 32s
-                                        print(f"[CHATBOT] Rate limited, waiting {wait_time}s before retry...")
-                                        # Only show message on first rate limit
-                                        if attempt == 0:
-                                            await message.channel.send("hold on getting rate limited, retrying... 😼")
+                                        print(f"[CHATBOT] Rate limited, waiting {wait_time}s before retry (silent)...")
                                         await asyncio.sleep(wait_time)
                                         continue
                                     else:
@@ -12598,11 +12596,11 @@ async def battlepass(message: discord.Interaction):
         
         if user.vote_reward > 0:
             # Has unclaimed vote reward
-            description += f"✅ ~~Vote for Cat Bot~~\n- Reward: {user.vote_reward} XP (claimed on refresh)\n\n"
+            description += f"✅ ~~Vote for KITTAYYYYYYY~~\n- Reward: {user.vote_reward} XP (claimed on refresh)\n\n"
         else:
             # Show vote quest with link
             vote_xp = random.randint(vote_quest.get("xp_min", 250) // 10, vote_quest.get("xp_max", 350) // 10) * 10
-            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/1387305159264309399/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
+            description += f"🗳️ [Vote for KITTAYYYYYYY](https://top.gg/bot/1387305159264309399/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
 
         # catch
         catch_quest = battle["quests"]["catch"][user.catch_quest]
