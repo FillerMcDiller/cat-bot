@@ -1,8 +1,6 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
-# ![Cat Bot PFP](https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png&h=25) [![Discord Bots](https://top.gg/api/widget/servers/1387305159264309399.svg)(https://top.gg//bot/1387305159264309399) [![Wiki](https://img.shields.io/badge/Wiki-blue?label=Cat%20Bot&logo=wiki.js)](https://wiki.minkos.lol)
-
-Discord Cat Bot Source Code
+# ![Cat Bot PFP](https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png&h=25) ![Discord Bots](https://top.gg/api/widget/servers/1387305159264309399.svg) [![Wiki](https://img.shields.io/badge/Wiki-blue?label=Cat%20Bot&logo=wiki.js)](https://wiki.minkos.lol)
 
 # Development
 
@@ -34,7 +32,7 @@ Please note that self-hosting is hacky and isn't supported; instructions below a
 
    If they aren't found there, they will be replaced with a placeholder.
 
-   All emojis can be downloaded [here](https://github.com/staring-cat/emojis/releases/latest/download/emojis.zip).
+   All emojis can be downloaded [here](https://github.com/staring-cat/emojis/releases/latest/download/emojis.zip). (I don't update these)
 
 5. Go inside of the `config.py` file and configure everything to your liking.
 
