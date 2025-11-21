@@ -12602,7 +12602,7 @@ async def battlepass(message: discord.Interaction):
         else:
             # Show vote quest with link
             vote_xp = random.randint(vote_quest.get("xp_min", 250) // 10, vote_quest.get("xp_max", 350) // 10) * 10
-            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/966695034340663367/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
+            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/1387305159264309399/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
 
         # catch
         catch_quest = battle["quests"]["catch"][user.catch_quest]
