@@ -10606,18 +10606,10 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                     try:
                         if key_local == 'rains':
                             minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
-                            print(f"[BOTTLE RAINS] User {parent_inter.user.id} using bottle for {minutes} minutes")
-                            
-                            # Award to Profile (per-server) so it works in the current server
-                            profile_obj = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
-                            print(f"[BOTTLE RAINS] Current profile rain_minutes: {profile_obj.rain_minutes}")
-                            
-                            if not profile_obj.rain_minutes:
-                                profile_obj.rain_minutes = 0
-                            profile_obj.rain_minutes += int(minutes)
-                            await profile_obj.save()
-                            
-                            print(f"[BOTTLE RAINS] New profile rain_minutes: {profile_obj.rain_minutes}")
+                            # Use EXACT same logic as admin panel "Give Rains"
+                            user = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
+                            user.rain_minutes += int(minutes)
+                            await user.save()
                             await sel_inter.response.send_message(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
                             return
 
@@ -11449,18 +11441,10 @@ __Highlighted Stat__
                             try:
                                 if key_local == 'rains':
                                     minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
-                                    print(f"[BOTTLE RAINS /inventory] User {message.user.id} using bottle for {minutes} minutes")
-                                    
-                                    # Award to Profile (per-server) to match /play behavior
-                                    profile_obj = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-                                    print(f"[BOTTLE RAINS /inventory] Current profile rain_minutes: {profile_obj.rain_minutes}")
-                                    
-                                    if not profile_obj.rain_minutes:
-                                        profile_obj.rain_minutes = 0
-                                    profile_obj.rain_minutes += int(minutes)
-                                    await profile_obj.save()
-                                    
-                                    print(f"[BOTTLE RAINS /inventory] New profile rain_minutes: {profile_obj.rain_minutes}")
+                                    # Use EXACT same logic as admin panel "Give Rains"
+                                    user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                                    user.rain_minutes += int(minutes)
+                                    await user.save()
                                     await sel_inter.response.send_message(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
                                     return
 
