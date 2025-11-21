@@ -3324,6 +3324,33 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                     except Exception:
                                         pass
                                     return
+                            
+                            # Track that this player has moved
+                            if not hasattr(s2, 'moved_this_round'):
+                                s2.moved_this_round = set()
+                            s2.moved_this_round.add(attacker_id)
+                            
+                            # Check if both players have moved this round - auto charge power
+                            if len(s2.moved_this_round) >= 2:
+                                s2.round += 1
+                                s2.moved_this_round.clear()
+                                
+                                # Charge power +1 for both active cats
+                                try:
+                                    cidx = s2.active_idx[s2.challenger.id]
+                                    caid = s2.challenger_team[cidx].get('id')
+                                    s2.power_by_cat[caid] = s2.power_by_cat.get(caid, 0) + 1
+                                except Exception:
+                                    pass
+                                try:
+                                    oidx = s2.active_idx[s2.opponent.id]
+                                    obid = s2.opponent_team[oidx].get('id')
+                                    s2.power_by_cat[obid] = s2.power_by_cat.get(obid, 0) + 1
+                                except Exception:
+                                    pass
+                                
+                                s2.last_action = f"🔄 Round {s2.round} — Both fighters charged +1 power!"
+                            
                             s2.turn = defender_id
                             # Update buttons for new turn
                             if hasattr(self.parent_view, 'update_buttons'):
@@ -3590,6 +3617,286 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
 
 
 # Legacy battles wrapper removed. The `fights` extension registers `/fight` now.
+
+
+# --- TOURNAMENT SYSTEM ---
+
+# Global tournament state
+ACTIVE_TOURNAMENTS = {}  # guild_id -> tournament_data
+
+async def show_tournament_hub(interaction: discord.Interaction):
+    """Show tournament hub with options to create or join tournaments"""
+    guild_id = interaction.guild.id
+    user_id = interaction.user.id
+    
+    # Check if there's an active tournament
+    tournament = ACTIVE_TOURNAMENTS.get(guild_id)
+    
+    if tournament:
+        # Show tournament status
+        status = tournament.get('status', 'signup')  # signup, ongoing, finished
+        participants = tournament.get('participants', [])
+        bracket = tournament.get('bracket', [])
+        
+        if status == 'signup':
+            embed = discord.Embed(
+                title="🏆 Tournament Sign-Up Open",
+                description=f"**Format:** Single Elimination Bracket\n"
+                           f"**Entry Fee:** Free\n"
+                           f"**Prize Pool:** Bragging rights!\n\n"
+                           f"**Participants ({len(participants)}/16):**\n" + 
+                           "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants[:16])]),
+                color=Colors.brown
+            )
+            
+            class TournamentSignupView(View):
+                def __init__(self):
+                    super().__init__(timeout=600)
+                
+                @discord.ui.button(label="✅ Join Tournament", style=ButtonStyle.success)
+                async def join_btn(self, btn_it: discord.Interaction, button: Button):
+                    if btn_it.user.id in participants:
+                        await btn_it.response.send_message("You're already registered!", ephemeral=True)
+                        return
+                    
+                    if len(participants) >= 16:
+                        await btn_it.response.send_message("Tournament is full (16/16)!", ephemeral=True)
+                        return
+                    
+                    # Check if user has cats
+                    user_cats = await get_user_cats(guild_id, btn_it.user.id)
+                    if not user_cats or len(user_cats) < 3:
+                        await btn_it.response.send_message("You need at least 3 cats to participate!", ephemeral=True)
+                        return
+                    
+                    participants.append(btn_it.user.id)
+                    await btn_it.response.send_message(f"✅ You're registered! ({len(participants)}/16)", ephemeral=True)
+                    
+                    # Update embed
+                    embed.description = f"**Format:** Single Elimination Bracket\n" \
+                                      f"**Entry Fee:** Free\n" \
+                                      f"**Prize Pool:** Bragging rights!\n\n" \
+                                      f"**Participants ({len(participants)}/16):**\n" + \
+                                      "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants)])
+                    
+                    try:
+                        await btn_it.edit_original_response(embed=embed)
+                    except:
+                        pass
+                
+                @discord.ui.button(label="❌ Leave Tournament", style=ButtonStyle.danger)
+                async def leave_btn(self, btn_it: discord.Interaction, button: Button):
+                    if btn_it.user.id not in participants:
+                        await btn_it.response.send_message("You're not registered!", ephemeral=True)
+                        return
+                    
+                    participants.remove(btn_it.user.id)
+                    await btn_it.response.send_message("You've left the tournament.", ephemeral=True)
+                    
+                    # Update embed
+                    embed.description = f"**Format:** Single Elimination Bracket\n" \
+                                      f"**Entry Fee:** Free\n" \
+                                      f"**Prize Pool:** Bragging rights!\n\n" \
+                                      f"**Participants ({len(participants)}/16):**\n" + \
+                                      "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants)])
+                    
+                    try:
+                        await btn_it.edit_original_response(embed=embed)
+                    except:
+                        pass
+                
+                @discord.ui.button(label="🚀 Start Tournament", style=ButtonStyle.primary)
+                async def start_btn(self, btn_it: discord.Interaction, button: Button):
+                    # Only organizer or admin can start
+                    if btn_it.user.id != tournament['organizer'] and not btn_it.user.guild_permissions.administrator:
+                        await btn_it.response.send_message("Only the organizer or an admin can start the tournament!", ephemeral=True)
+                        return
+                    
+                    if len(participants) < 2:
+                        await btn_it.response.send_message("Need at least 2 participants to start!", ephemeral=True)
+                        return
+                    
+                    await btn_it.response.defer()
+                    
+                    # Generate bracket
+                    import random
+                    random.shuffle(participants)
+                    
+                    # Create first round matches
+                    matches = []
+                    for i in range(0, len(participants), 2):
+                        if i + 1 < len(participants):
+                            matches.append({
+                                'player1': participants[i],
+                                'player2': participants[i+1],
+                                'winner': None,
+                                'round': 1
+                            })
+                        else:
+                            # Bye - player advances automatically
+                            matches.append({
+                                'player1': participants[i],
+                                'player2': None,
+                                'winner': participants[i],
+                                'round': 1
+                            })
+                    
+                    tournament['bracket'] = matches
+                    tournament['status'] = 'ongoing'
+                    tournament['current_round'] = 1
+                    
+                    # Show bracket
+                    bracket_text = "**Round 1 Matches:**\n"
+                    for idx, match in enumerate(matches, 1):
+                        if match['player2']:
+                            bracket_text += f"{idx}. <@{match['player1']}> vs <@{match['player2']}>\n"
+                        else:
+                            bracket_text += f"{idx}. <@{match['player1']}> (Bye - advances)\n"
+                    
+                    embed = discord.Embed(
+                        title="🏆 Tournament Started!",
+                        description=bracket_text + "\n\nPlayers: Challenge your opponent using `/fight @opponent`!\nReport your match result here after completion.",
+                        color=Colors.green
+                    )
+                    
+                    await btn_it.followup.send(embed=embed)
+                    await btn_it.edit_original_response(view=None)
+            
+            await interaction.followup.send(embed=embed, view=TournamentSignupView(), ephemeral=True)
+        
+        elif status == 'ongoing':
+            # Show current bracket status
+            current_round = tournament.get('current_round', 1)
+            matches = [m for m in bracket if m['round'] == current_round]
+            
+            bracket_text = f"**Round {current_round} Matches:**\n"
+            for idx, match in enumerate(matches, 1):
+                if match['winner']:
+                    bracket_text += f"{idx}. ~~<@{match['player1']}> vs <@{match['player2']}>~~ → **<@{match['winner']}>** won!\n"
+                elif match['player2']:
+                    bracket_text += f"{idx}. <@{match['player1']}> vs <@{match['player2']}> (Pending)\n"
+                else:
+                    bracket_text += f"{idx}. <@{match['player1']}> (Bye)\n"
+            
+            embed = discord.Embed(
+                title="🏆 Tournament In Progress",
+                description=bracket_text + "\n\nPlayers: Challenge your opponent using `/fight @opponent`!",
+                color=Colors.brown
+            )
+            
+            class TournamentOngoingView(View):
+                def __init__(self):
+                    super().__init__(timeout=600)
+                
+                @discord.ui.button(label="✅ Report Win", style=ButtonStyle.success)
+                async def report_win(self, btn_it: discord.Interaction, button: Button):
+                    # Find user's match
+                    user_match = None
+                    for match in matches:
+                        if match['player1'] == btn_it.user.id or match['player2'] == btn_it.user.id:
+                            if not match['winner']:
+                                user_match = match
+                                break
+                    
+                    if not user_match:
+                        await btn_it.response.send_message("You don't have a pending match in this round!", ephemeral=True)
+                        return
+                    
+                    # Mark as winner
+                    user_match['winner'] = btn_it.user.id
+                    
+                    await btn_it.response.send_message(f"✅ Victory reported! Waiting for tournament organizer to advance the bracket.", ephemeral=True)
+                    
+                    # Check if round is complete
+                    if all(m['winner'] for m in matches):
+                        # Advance to next round
+                        winners = [m['winner'] for m in matches]
+                        
+                        if len(winners) == 1:
+                            # Tournament complete!
+                            tournament['status'] = 'finished'
+                            tournament['winner'] = winners[0]
+                            await btn_it.channel.send(f"🏆 **TOURNAMENT COMPLETE!** 🏆\n\n<@{winners[0]}> is the champion!")
+                        else:
+                            # Create next round
+                            next_round = current_round + 1
+                            next_matches = []
+                            for i in range(0, len(winners), 2):
+                                if i + 1 < len(winners):
+                                    next_matches.append({
+                                        'player1': winners[i],
+                                        'player2': winners[i+1],
+                                        'winner': None,
+                                        'round': next_round
+                                    })
+                                else:
+                                    next_matches.append({
+                                        'player1': winners[i],
+                                        'player2': None,
+                                        'winner': winners[i],
+                                        'round': next_round
+                                    })
+                            
+                            bracket.extend(next_matches)
+                            tournament['current_round'] = next_round
+                            
+                            await btn_it.channel.send(f"✅ Round {current_round} complete! Round {next_round} starting...")
+                
+                @discord.ui.button(label="🗑️ Cancel Tournament", style=ButtonStyle.danger)
+                async def cancel_tournament(self, btn_it: discord.Interaction, button: Button):
+                    if btn_it.user.id != tournament['organizer'] and not btn_it.user.guild_permissions.administrator:
+                        await btn_it.response.send_message("Only the organizer or an admin can cancel!", ephemeral=True)
+                        return
+                    
+                    del ACTIVE_TOURNAMENTS[guild_id]
+                    await btn_it.response.send_message("Tournament cancelled.", ephemeral=True)
+            
+            await interaction.followup.send(embed=embed, view=TournamentOngoingView(), ephemeral=True)
+        
+        else:  # finished
+            winner = tournament.get('winner')
+            embed = discord.Embed(
+                title="🏆 Tournament Complete!",
+                description=f"**Champion:** <@{winner}>\n\nCongratulations! 🎉",
+                color=Colors.gold
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+            # Clean up old tournament
+            del ACTIVE_TOURNAMENTS[guild_id]
+    
+    else:
+        # No active tournament - show create option
+        embed = discord.Embed(
+            title="🏆 Tournament Hub",
+            description="No active tournament in this server.\n\nCreate a tournament to compete with other players!",
+            color=Colors.brown
+        )
+        
+        class CreateTournamentView(View):
+            def __init__(self):
+                super().__init__(timeout=300)
+            
+            @discord.ui.button(label="🎮 Create Tournament", style=ButtonStyle.primary)
+            async def create_tournament(self, btn_it: discord.Interaction, button: Button):
+                # Create new tournament
+                ACTIVE_TOURNAMENTS[guild_id] = {
+                    'organizer': btn_it.user.id,
+                    'status': 'signup',
+                    'participants': [btn_it.user.id],
+                    'bracket': [],
+                    'created_at': time.time()
+                }
+                
+                await btn_it.response.send_message("✅ Tournament created! Sign-ups are now open.", ephemeral=True)
+                
+                # Show signup view
+                await show_tournament_hub(btn_it)
+        
+        await interaction.followup.send(embed=embed, view=CreateTournamentView(), ephemeral=True)
+
+
+# --- END TOURNAMENT SYSTEM ---
 
 
 @bot.tree.command(name="battles", description="Battle hub - manage your deck and view battle stats")
@@ -4013,13 +4320,15 @@ async def battles_command(interaction: discord.Interaction):
             view = DeckSelector()
             await it.followup.send(embed=embed, view=view, ephemeral=True)
         
-        @discord.ui.button(label="🏆 Tournaments", style=discord.ButtonStyle.secondary, row=0, disabled=True)
+        @discord.ui.button(label="🏆 Tournaments", style=discord.ButtonStyle.secondary, row=0)
         async def tournaments_button(self, it: discord.Interaction, btn: discord.ui.Button):
             if it.user.id != interaction.user.id:
                 await it.response.send_message("This is not your battles hub.", ephemeral=True)
                 return
             
-            await it.response.send_message("Tournaments coming soon! 🎮", ephemeral=True)
+            # Open tournament hub
+            await it.response.defer(ephemeral=True)
+            await show_tournament_hub(it)
         
         @discord.ui.button(label="📊 View Stats", style=discord.ButtonStyle.secondary, row=1)
         async def stats_button(self, it: discord.Interaction, btn: discord.ui.Button):
@@ -10152,12 +10461,13 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                     try:
                         if key_local == 'rains':
                             minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
-                            user_obj = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
-                            if not user_obj.rain_minutes:
-                                user_obj.rain_minutes = 0
-                            user_obj.rain_minutes += int(minutes)
-                            await user_obj.save()
-                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes to your account.", ephemeral=True)
+                            # Award to Profile (per-server) so it works in the current server
+                            profile_obj = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
+                            if not profile_obj.rain_minutes:
+                                profile_obj.rain_minutes = 0
+                            profile_obj.rain_minutes += int(minutes)
+                            await profile_obj.save()
+                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes to your account in this server.", ephemeral=True)
                             return
 
                         if key_local in ('luck', 'xp'):
@@ -12209,6 +12519,16 @@ async def battlepass(message: discord.Interaction):
                 progress_string = f" ({user.misc_progress}/{misc_quest.get('progress',1)})"
             description += f"{get_emoji(misc_quest.get('emoji','mystery'))} {misc_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {user.misc_reward} XP\n\n"
 
+        # vote quest
+        vote_quest = battle.get("quests", {}).get("third", {}).get("third", {})
+        if user.vote_reward > 0:
+            # Has unclaimed vote reward
+            description += f"✅ ~~Vote for Cat Bot~~\n- Reward: {user.vote_reward} XP (claimed on refresh)\n\n"
+        else:
+            # Show vote quest with link
+            vote_xp = random.randint(vote_quest.get("xp_min", 250) // 10, vote_quest.get("xp_max", 350) // 10) * 10
+            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/966695034340663367/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
+
         # extra
         extra_quest = battle.get("quests", {}).get("extra", {}).get(user.extra_quest)
         if not extra_quest:
@@ -13128,9 +13448,11 @@ async def cosmetics(message: discord.Interaction):
                 else:
                     display_name = item_data['name']
                 
+                # Handle colors which use 'name' instead of 'description'
+                item_desc = item_data.get('description', item_data.get('name', 'No description'))
                 embed.add_field(
                     name=f"{display_name}",
-                    value=f"{item_data['description']}\n{owned_status}{req_text}",
+                    value=f"{item_desc}\n{owned_status}{req_text}",
                     inline=False
                 )
             
@@ -14486,7 +14808,8 @@ async def atm(message: discord.Interaction):
         color=Colors.brown,
     )
     
-    selected_cats = []  # Track selected cat IDs for bulk conversion
+    # Use a dict to hold the list so it's properly mutable across async callbacks
+    selection_state = {"cats": []}
     
     async def cat_selected(interaction: discord.Interaction, selected_cat: dict):
         """Callback when a cat is selected - adds to bulk selection"""
@@ -14500,18 +14823,18 @@ async def atm(message: discord.Interaction):
             return
         
         # Toggle selection
-        if cat_id in selected_cats:
-            selected_cats.remove(cat_id)
+        if cat_id in selection_state["cats"]:
+            selection_state["cats"].remove(cat_id)
             await interaction.response.send_message(
-                f"❌ Removed **{cat_name}** from selection.\n\n**Selected: {len(selected_cats)} cats**",
+                f"❌ Removed **{cat_name}** from selection.\n\n**Selected: {len(selection_state['cats'])} cats**",
                 ephemeral=True
             )
             return
         
         # Add to selection
-        selected_cats.append(cat_id)
+        selection_state["cats"].append(cat_id)
         await interaction.response.send_message(
-            f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selected_cats)} cats**\n\n"
+            f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selection_state['cats'])} cats**\n\n"
             f"💡 Keep selecting cats, or go back to the main ATM message to convert all selected cats.",
             ephemeral=True
         )
@@ -14524,12 +14847,12 @@ async def atm(message: discord.Interaction):
         def update_buttons(self):
             self.clear_items()
             
-            select_btn = Button(label=f"📋 Select Cats ({len(selected_cats)})", style=ButtonStyle.primary, row=0)
+            select_btn = Button(label=f"📋 Select Cats ({len(selection_state['cats'])})", style=ButtonStyle.primary, row=0)
             select_btn.callback = self.open_selector
             self.add_item(select_btn)
             
-            if selected_cats:
-                convert_btn = Button(label=f"💰 Convert {len(selected_cats)} Cats", style=ButtonStyle.danger, row=0)
+            if selection_state["cats"]:
+                convert_btn = Button(label=f"💰 Convert {len(selection_state['cats'])} Cats", style=ButtonStyle.danger, row=0)
                 convert_btn.callback = self.convert_selected
                 self.add_item(convert_btn)
                 
@@ -14548,7 +14871,7 @@ async def atm(message: discord.Interaction):
                 user_id=owner_id,
                 all_cats=convertible_cats,
                 callback_func=cat_selected,
-                title=f"🏧 CatATM - Select cats ({len(selected_cats)} selected)"
+                title=f"🏧 CatATM - Select cats ({len(selection_state['cats'])} selected)"
             )
             
             # Default sort by bond (ascending)
@@ -14564,7 +14887,7 @@ async def atm(message: discord.Interaction):
                 await do_funny(btn_it)
                 return
             
-            if not selected_cats:
+            if not selection_state["cats"]:
                 await btn_it.response.send_message("No cats selected!", ephemeral=True)
                 return
             
@@ -14572,7 +14895,7 @@ async def atm(message: discord.Interaction):
             
             # Get latest cat data
             cats_now = await get_user_cats(guild_id, owner_id)
-            cats_to_convert = [c for c in cats_now if c.get('id') in selected_cats]
+            cats_to_convert = [c for c in cats_now if c.get('id') in selection_state["cats"]]
             
             if not cats_to_convert:
                 await btn_it.followup.send("Selected cats no longer available.", ephemeral=True)
@@ -14639,7 +14962,7 @@ async def atm(message: discord.Interaction):
                     await message.channel.send(f"{message.user.mention} converted {len(cats_to_convert)} cats for {total_kibble:,} Kibbles at the CatATM!")
                     
                     # Clear selection
-                    selected_cats.clear()
+                    selection_state["cats"].clear()
                     self.update_buttons()
                     await message.edit_original_response(embed=embed, view=self)
                 
@@ -14657,7 +14980,7 @@ async def atm(message: discord.Interaction):
                 await do_funny(btn_it)
                 return
             
-            selected_cats.clear()
+            selection_state["cats"].clear()
             self.update_buttons()
             await btn_it.response.edit_message(embed=embed, view=self)
     
@@ -14669,6 +14992,341 @@ async def atm(message: discord.Interaction):
 async def coffee(message: discord.Interaction):
     await message.response.send_message("HTTP 418: I'm a teapot. <https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/418>")
     await achemb(message, "coffee", "send")
+
+
+@bot.tree.command(name="batchrename", description="Rename multiple cats at once")
+async def batch_rename_cmd(message: discord.Interaction):
+    """Rename multiple cats in bulk"""
+    await message.response.defer()
+    
+    user_id = message.user.id
+    guild_id = message.guild.id
+    
+    cats_list = await get_user_cats(guild_id, user_id)
+    
+    if not cats_list:
+        await message.followup.send("You don't have any cats to rename!", ephemeral=True)
+        return
+    
+    # State to track renames
+    rename_queue = []  # List of (cat_instance, new_name)
+    
+    async def on_cat_selected(interaction: discord.Interaction, selected_cat: dict):
+        """Callback when a cat is selected for renaming"""
+        cat_id = selected_cat.get('id')
+        cat_name = selected_cat.get('name') or 'Unnamed'
+        cat_type = selected_cat.get('type')
+        
+        # Show modal to get new name
+        class RenameModal(discord.ui.Modal, title=f"Rename {cat_name}"):
+            new_name_input = discord.ui.TextInput(
+                label="New Name",
+                placeholder=f"Enter new name for {cat_name}",
+                required=True,
+                max_length=32,
+                default=cat_name
+            )
+            
+            async def on_submit(modal_self, modal_inter: discord.Interaction):
+                new_name = str(modal_self.new_name_input.value).strip()
+                
+                # Add to rename queue
+                rename_queue.append((cat_id, new_name, cat_name, cat_type))
+                
+                await modal_inter.response.send_message(
+                    f"✅ Queued: **{cat_name}** → **{new_name}**\n\n"
+                    f"Total queued: **{len(rename_queue)}** cats\n\n"
+                    f"Select more cats to rename, or go back to the main message to apply all renames.",
+                    ephemeral=True
+                )
+        
+        await interaction.response.send_modal(RenameModal())
+    
+    class BatchRenameView(View):
+        def __init__(self):
+            super().__init__(timeout=300)
+            self.update_buttons()
+        
+        def update_buttons(self):
+            self.clear_items()
+            
+            select_btn = Button(label=f"📝 Select Cats ({len(rename_queue)})", style=ButtonStyle.primary, row=0)
+            select_btn.callback = self.open_selector
+            self.add_item(select_btn)
+            
+            if rename_queue:
+                apply_btn = Button(label=f"✅ Apply {len(rename_queue)} Renames", style=ButtonStyle.success, row=0)
+                apply_btn.callback = self.apply_renames
+                self.add_item(apply_btn)
+                
+                clear_btn = Button(label="🗑️ Clear Queue", style=ButtonStyle.secondary, row=1)
+                clear_btn.callback = self.clear_queue
+                self.add_item(clear_btn)
+        
+        async def open_selector(self, btn_it: discord.Interaction):
+            if btn_it.user.id != user_id:
+                await do_funny(btn_it)
+                return
+            
+            selector = AdvancedCatSelector(
+                author_id=user_id,
+                guild_id=guild_id,
+                user_id=user_id,
+                all_cats=cats_list,
+                callback_func=on_cat_selected,
+                title=f"Select cats to rename ({len(rename_queue)} queued)"
+            )
+            
+            await btn_it.response.send_message("Click cats to rename them:", view=selector, ephemeral=True)
+        
+        async def apply_renames(self, btn_it: discord.Interaction):
+            if btn_it.user.id != user_id:
+                await do_funny(btn_it)
+                return
+            
+            if not rename_queue:
+                await btn_it.response.send_message("No renames queued!", ephemeral=True)
+                return
+            
+            await btn_it.response.defer()
+            
+            # Get fresh cat data
+            fresh_cats = await get_user_cats(guild_id, user_id)
+            
+            # Apply all renames
+            renamed_count = 0
+            for cat_id, new_name, old_name, cat_type in rename_queue:
+                for cat in fresh_cats:
+                    if cat.get('id') == cat_id:
+                        cat['name'] = new_name
+                        renamed_count += 1
+                        break
+            
+            # Save
+            await save_user_cats(guild_id, user_id, fresh_cats)
+            
+            # Build summary
+            summary_lines = [f"• {old_name} → **{new_name}**" for _, new_name, old_name, _ in rename_queue[:10]]
+            if len(rename_queue) > 10:
+                summary_lines.append(f"... and {len(rename_queue) - 10} more")
+            summary = "\n".join(summary_lines)
+            
+            await btn_it.followup.send(
+                f"✅ **Renamed {renamed_count} cats!**\n\n{summary}",
+                ephemeral=False
+            )
+            
+            # Clear queue and update buttons
+            rename_queue.clear()
+            self.update_buttons()
+            await btn_it.edit_original_response(view=self)
+        
+        async def clear_queue(self, btn_it: discord.Interaction):
+            if btn_it.user.id != user_id:
+                await do_funny(btn_it)
+                return
+            
+            rename_queue.clear()
+            self.update_buttons()
+            await btn_it.response.edit_message(view=self)
+    
+    embed = discord.Embed(
+        title="📝 Batch Rename Cats",
+        description="Select multiple cats and rename them all at once!\n\n"
+                   "1. Click **Select Cats** to choose cats\n"
+                   "2. Enter new names for each cat\n"
+                   "3. Click **Apply Renames** when ready",
+        color=Colors.brown
+    )
+    
+    view = BatchRenameView()
+    await message.followup.send(embed=embed, view=view)
+
+
+@bot.tree.command(name="sortinventory", description="Sort and filter your cat inventory")
+async def sort_inventory_cmd(message: discord.Interaction):
+    """Advanced inventory sorting and filtering"""
+    await message.response.defer()
+    
+    cats_list = await get_user_cats(message.guild.id, message.user.id)
+    
+    if not cats_list:
+        await message.followup.send("You don't have any cats yet!", ephemeral=True)
+        return
+    
+    # Get current stats for summary
+    total_cats = len(cats_list)
+    unique_types = len(set(c.get('type') for c in cats_list))
+    avg_bond = sum(c.get('bond', 0) for c in cats_list) / len(cats_list) if cats_list else 0
+    
+    class InventorySortView(View):
+        def __init__(self):
+            super().__init__(timeout=300)
+            self.sort_by = "type"  # type, bond, hp, dmg, acquired
+            self.reverse = False
+            self.filter_type = None
+            self.filter_min_bond = 0
+            self.page = 0
+            self.update_display()
+        
+        def get_sorted_cats(self):
+            """Get sorted and filtered cat list"""
+            filtered = cats_list
+            
+            # Apply type filter
+            if self.filter_type:
+                filtered = [c for c in filtered if c.get('type') == self.filter_type]
+            
+            # Apply bond filter
+            if self.filter_min_bond > 0:
+                filtered = [c for c in filtered if c.get('bond', 0) >= self.filter_min_bond]
+            
+            # Sort
+            if self.sort_by == "type":
+                filtered = sorted(filtered, key=lambda x: x.get('type', ''), reverse=self.reverse)
+            elif self.sort_by == "bond":
+                filtered = sorted(filtered, key=lambda x: x.get('bond', 0), reverse=self.reverse)
+            elif self.sort_by == "hp":
+                filtered = sorted(filtered, key=lambda x: x.get('hp', 0), reverse=self.reverse)
+            elif self.sort_by == "dmg":
+                filtered = sorted(filtered, key=lambda x: x.get('dmg', 0), reverse=self.reverse)
+            elif self.sort_by == "acquired":
+                filtered = sorted(filtered, key=lambda x: x.get('acquired_at', 0), reverse=self.reverse)
+            elif self.sort_by == "name":
+                filtered = sorted(filtered, key=lambda x: (x.get('name') or 'Unnamed').lower(), reverse=self.reverse)
+            
+            return filtered
+        
+        def update_display(self):
+            """Update embed and buttons"""
+            sorted_cats = self.get_sorted_cats()
+            
+            # Pagination
+            per_page = 15
+            total_pages = (len(sorted_cats) - 1) // per_page + 1 if sorted_cats else 1
+            start_idx = self.page * per_page
+            end_idx = min(start_idx + per_page, len(sorted_cats))
+            page_cats = sorted_cats[start_idx:end_idx]
+            
+            # Build embed
+            sort_icon = "🔽" if self.reverse else "🔼"
+            filter_text = ""
+            if self.filter_type:
+                filter_text += f"\nType: **{self.filter_type}**"
+            if self.filter_min_bond > 0:
+                filter_text += f"\nMin Bond: **{self.filter_min_bond}**"
+            
+            description = f"**Total:** {total_cats} cats ({unique_types} types)\n**Average Bond:** {avg_bond:.1f}\n"
+            description += f"**Sorting:** {sort_icon} {self.sort_by.title()}"
+            if filter_text:
+                description += f"\n**Filters:**{filter_text}"
+            description += f"\n\n**Showing {len(sorted_cats)} cats** (Page {self.page + 1}/{total_pages})\n\n"
+            
+            # List cats
+            for i, cat in enumerate(page_cats, start=start_idx + 1):
+                cat_emoji = get_emoji(cat.get('type', 'fine').lower() + 'cat')
+                cat_name = cat.get('name') or 'Unnamed'
+                cat_bond = cat.get('bond', 0)
+                cat_hp = cat.get('hp', 0)
+                cat_dmg = cat.get('dmg', 0)
+                description += f"`{i}.` {cat_emoji} **{cat_name}** ({cat.get('type')})\n"
+                description += f"     Bond: {cat_bond} | HP: {cat_hp} | DMG: {cat_dmg}\n"
+            
+            self.embed = discord.Embed(
+                title="📊 Sorted Inventory",
+                description=description,
+                color=Colors.brown
+            )
+            
+            self.clear_items()
+            
+            # Sort options (row 0)
+            sort_options = [
+                discord.SelectOption(label="Type", value="type", emoji="🏷️", default=self.sort_by=="type"),
+                discord.SelectOption(label="Bond", value="bond", emoji="💕", default=self.sort_by=="bond"),
+                discord.SelectOption(label="HP", value="hp", emoji="❤️", default=self.sort_by=="hp"),
+                discord.SelectOption(label="DMG", value="dmg", emoji="⚔️", default=self.sort_by=="dmg"),
+                discord.SelectOption(label="Name", value="name", emoji="📛", default=self.sort_by=="name"),
+                discord.SelectOption(label="Acquired", value="acquired", emoji="📅", default=self.sort_by=="acquired"),
+            ]
+            
+            sort_select = discord.ui.Select(placeholder="Sort by...", options=sort_options, row=0)
+            
+            async def sort_callback(interaction: discord.Interaction):
+                if interaction.user.id != message.user.id:
+                    await do_funny(interaction)
+                    return
+                self.sort_by = sort_select.values[0]
+                self.page = 0
+                self.update_display()
+                await interaction.response.edit_message(embed=self.embed, view=self)
+            
+            sort_select.callback = sort_callback
+            self.add_item(sort_select)
+            
+            # Direction toggle (row 1)
+            direction_btn = Button(label="🔄 Reverse Order", style=ButtonStyle.secondary, row=1)
+            
+            async def direction_callback(interaction: discord.Interaction):
+                if interaction.user.id != message.user.id:
+                    await do_funny(interaction)
+                    return
+                self.reverse = not self.reverse
+                self.page = 0
+                self.update_display()
+                await interaction.response.edit_message(embed=self.embed, view=self)
+            
+            direction_btn.callback = direction_callback
+            self.add_item(direction_btn)
+            
+            # Clear filters (row 1)
+            if self.filter_type or self.filter_min_bond > 0:
+                clear_btn = Button(label="🗑️ Clear Filters", style=ButtonStyle.danger, row=1)
+                
+                async def clear_callback(interaction: discord.Interaction):
+                    if interaction.user.id != message.user.id:
+                        await do_funny(interaction)
+                        return
+                    self.filter_type = None
+                    self.filter_min_bond = 0
+                    self.page = 0
+                    self.update_display()
+                    await interaction.response.edit_message(embed=self.embed, view=self)
+                
+                clear_btn.callback = clear_callback
+                self.add_item(clear_btn)
+            
+            # Pagination (row 2)
+            if self.page > 0:
+                prev_btn = Button(label="◀️ Previous", style=ButtonStyle.secondary, row=2)
+                
+                async def prev_callback(interaction: discord.Interaction):
+                    if interaction.user.id != message.user.id:
+                        await do_funny(interaction)
+                        return
+                    self.page -= 1
+                    self.update_display()
+                    await interaction.response.edit_message(embed=self.embed, view=self)
+                
+                prev_btn.callback = prev_callback
+                self.add_item(prev_btn)
+            
+            if self.page < total_pages - 1:
+                next_btn = Button(label="Next ▶️", style=ButtonStyle.secondary, row=2)
+                
+                async def next_callback(interaction: discord.Interaction):
+                    if interaction.user.id != message.user.id:
+                        await do_funny(interaction)
+                        return
+                    self.page += 1
+                    self.update_display()
+                    await interaction.response.edit_message(embed=self.embed, view=self)
+                
+                next_btn.callback = next_callback
+                self.add_item(next_btn)
+    
+    view = InventorySortView()
+    await message.followup.send(embed=view.embed, view=view)
 
 
 @bot.tree.command(description="Gamble your life savings away in our totally-not-rigged catsino!")
