@@ -11449,12 +11449,19 @@ __Highlighted Stat__
                             try:
                                 if key_local == 'rains':
                                     minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
-                                    user_obj = await User.get_or_create(user_id=message.user.id)
-                                    if not user_obj.rain_minutes:
-                                        user_obj.rain_minutes = 0
-                                    user_obj.rain_minutes += int(minutes)
-                                    await user_obj.save()
-                                    await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes to your account.", ephemeral=True)
+                                    print(f"[BOTTLE RAINS /inventory] User {message.user.id} using bottle for {minutes} minutes")
+                                    
+                                    # Award to Profile (per-server) to match /play behavior
+                                    profile_obj = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                                    print(f"[BOTTLE RAINS /inventory] Current profile rain_minutes: {profile_obj.rain_minutes}")
+                                    
+                                    if not profile_obj.rain_minutes:
+                                        profile_obj.rain_minutes = 0
+                                    profile_obj.rain_minutes += int(minutes)
+                                    await profile_obj.save()
+                                    
+                                    print(f"[BOTTLE RAINS /inventory] New profile rain_minutes: {profile_obj.rain_minutes}")
+                                    await sel_inter.response.send_message(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
                                     return
 
                                 if key_local in ('luck', 'xp'):
@@ -15100,7 +15107,7 @@ async def atm(message: discord.Interaction):
                     self.parent_view = parent_view
                 
                 @discord.ui.button(label="✅ CONFIRM", style=ButtonStyle.danger)
-                async def confirm(self2, conf_it: discord.Interaction):
+                async def confirm(self2, conf_it: discord.Interaction, button: Button):
                     if conf_it.user.id != owner_id:
                         await do_funny(conf_it)
                         return
@@ -15142,7 +15149,7 @@ async def atm(message: discord.Interaction):
                         print(f"[ATM] Failed to update main message: {e}")
                 
                 @discord.ui.button(label="❌ Cancel", style=ButtonStyle.secondary)
-                async def cancel(self2, conf_it: discord.Interaction):
+                async def cancel(self2, conf_it: discord.Interaction, button: Button):
                     if conf_it.user.id != owner_id:
                         await do_funny(conf_it)
                         return
