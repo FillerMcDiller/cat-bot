@@ -68,9 +68,13 @@ CONFIG_PATH = os.path.join(BASE_PATH, "config")
 CHATBOT_CONFIG = {
     "enabled": True, 
     
-    "provider": "openrouter",  # Cloud-based FREE models - way faster!
+    "provider": "azure",  # Azure OpenAI - best for GitHub Students ($100 free credits!)
     
-    "model": "microsoft/phi-3-mini-128k-instruct:free",  # FREE model - Microsoft, stable and less popular
+    "model": "gpt-35-turbo",  # Azure deployment name (you'll set this up)
+    
+    # Azure-specific settings (you'll get these from Azure portal)
+    "azure_endpoint": "https://YOUR-RESOURCE-NAME.openai.azure.com/",  # Replace with your endpoint
+    "azure_api_version": "2024-02-15-preview",  # API version
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
@@ -164,6 +168,9 @@ async def handle_dm_chat(message: discord.Message):
     print(f"[CHATBOT] Using provider: {provider}, model: {CHATBOT_CONFIG['model']}")
     
     # Check if API key is configured for non-local providers
+    if provider == "azure" and not getattr(config, "AZURE_OPENAI_KEY", None):
+        await message.channel.send("azure not configured meow 😿 (need AZURE_OPENAI_KEY in .env)")
+        return
     if provider == "openai" and not getattr(config, "OPENAI_API_KEY", None):
         await message.channel.send("openai not configured meow 😿 (need OPENAI_API_KEY in .env)")
         return
@@ -205,8 +212,43 @@ async def handle_dm_chat(message: discord.Message):
             
             response = None
             
+            # AZURE OPENAI PROVIDER
+            if provider == "azure":
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        azure_url = f"{CHATBOT_CONFIG['azure_endpoint']}openai/deployments/{CHATBOT_CONFIG['model']}/chat/completions?api-version={CHATBOT_CONFIG['azure_api_version']}"
+                        async with session.post(
+                            azure_url,
+                            headers={
+                                "api-key": config.AZURE_OPENAI_KEY,
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "messages": messages,
+                                "max_tokens": CHATBOT_CONFIG["max_tokens"],
+                                "temperature": CHATBOT_CONFIG["temperature"]
+                            },
+                            timeout=aiohttp.ClientTimeout(total=30)
+                        ) as resp:
+                            if resp.status != 200:
+                                error_text = await resp.text()
+                                print(f"[CHATBOT ERROR] Azure returned {resp.status}: {error_text}")
+                                await message.channel.send(f"uh oh my brain broke :( (azure error {resp.status})")
+                                return
+                            data = await resp.json()
+                            response = data["choices"][0]["message"]["content"]
+                            print(f"[CHATBOT] Azure response: {response[:100]}...")
+                    except asyncio.TimeoutError:
+                        print(f"[CHATBOT ERROR] Azure request timed out")
+                        await message.channel.send("uh oh azure took too long to respond 😾")
+                        return
+                    except aiohttp.ClientError as e:
+                        print(f"[CHATBOT ERROR] Azure connection error: {e}")
+                        await message.channel.send("uh oh couldnt connect to azure 😿")
+                        return
+            
             # OPENAI PROVIDER
-            if provider == "openai":
+            elif provider == "openai":
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
                         "https://api.openai.com/v1/chat/completions",
@@ -255,6 +297,13 @@ async def handle_dm_chat(message: discord.Message):
                             ) as resp:
                                 error_text = await resp.text()
                                 print(f"[CHATBOT] OpenRouter response status: {resp.status} (attempt {attempt + 1}/{max_retries})")
+                                
+                                if resp.status == 404:
+                                    # Model not found
+                                    print(f"[CHATBOT ERROR] Model not found (404): {CHATBOT_CONFIG['model']}")
+                                    print(f"[CHATBOT ERROR] Full response: {error_text}")
+                                    await message.channel.send(f"uh oh the ai model isnt available rn 😿 (404 - model might be removed)")
+                                    return
                                 
                                 if resp.status == 429:
                                     # Rate limited - wait and retry silently with typing indicator
@@ -10557,13 +10606,19 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                     try:
                         if key_local == 'rains':
                             minutes = SHOP_ITEMS[key_local]['tiers'][tier_local].get('minutes', 0)
+                            print(f"[BOTTLE RAINS] User {parent_inter.user.id} using bottle for {minutes} minutes")
+                            
                             # Award to Profile (per-server) so it works in the current server
                             profile_obj = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
+                            print(f"[BOTTLE RAINS] Current profile rain_minutes: {profile_obj.rain_minutes}")
+                            
                             if not profile_obj.rain_minutes:
                                 profile_obj.rain_minutes = 0
                             profile_obj.rain_minutes += int(minutes)
                             await profile_obj.save()
-                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes to your account in this server.", ephemeral=True)
+                            
+                            print(f"[BOTTLE RAINS] New profile rain_minutes: {profile_obj.rain_minutes}")
+                            await sel_inter.response.send_message(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
                             return
 
                         if key_local in ('luck', 'xp'):
@@ -10581,8 +10636,14 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             return
 
                         await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}.", ephemeral=True)
-                    except Exception:
-                        await sel_inter.response.send_message("Failed to apply item effect.", ephemeral=True)
+                    except Exception as e:
+                        print(f"[USE ITEM ERROR] {e}")
+                        import traceback
+                        traceback.print_exc()
+                        try:
+                            await sel_inter.response.send_message("Failed to apply item effect.", ephemeral=True)
+                        except:
+                            await sel_inter.followup.send("Failed to apply item effect.", ephemeral=True)
 
             sel_view = View(timeout=120)
             sel_view.add_item(UseSelect(opts))
@@ -15034,8 +15095,9 @@ async def atm(message: discord.Interaction):
             )
             
             class ConfirmView(View):
-                def __init__(self):
+                def __init__(self, parent_view):
                     super().__init__(timeout=60)
+                    self.parent_view = parent_view
                 
                 @discord.ui.button(label="✅ CONFIRM", style=ButtonStyle.danger)
                 async def confirm(self2, conf_it: discord.Interaction):
@@ -15071,10 +15133,13 @@ async def atm(message: discord.Interaction):
                     
                     await message.channel.send(f"{message.user.mention} converted {len(cats_to_convert)} cats for {total_kibble:,} Kibbles at the CatATM!")
                     
-                    # Clear selection
+                    # Clear selection and update main view
                     selection_state["cats"].clear()
-                    self.update_buttons()
-                    await message.edit_original_response(embed=embed, view=self)
+                    self2.parent_view.update_buttons()
+                    try:
+                        await message.edit_original_response(embed=embed, view=self2.parent_view)
+                    except Exception as e:
+                        print(f"[ATM] Failed to update main message: {e}")
                 
                 @discord.ui.button(label="❌ Cancel", style=ButtonStyle.secondary)
                 async def cancel(self2, conf_it: discord.Interaction):
@@ -15083,7 +15148,7 @@ async def atm(message: discord.Interaction):
                         return
                     await conf_it.response.send_message("Conversion cancelled.", ephemeral=True)
             
-            await btn_it.followup.send(embed=confirm_embed, view=ConfirmView(), ephemeral=True)
+            await btn_it.followup.send(embed=confirm_embed, view=ConfirmView(self), ephemeral=True)
         
         async def clear_selection(self, btn_it: discord.Interaction):
             if btn_it.user.id != owner_id:
