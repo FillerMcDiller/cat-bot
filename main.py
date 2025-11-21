@@ -70,7 +70,7 @@ CHATBOT_CONFIG = {
     
     "provider": "openrouter",  # Cloud-based FREE models - way faster!
     
-    "model": "meta-llama/llama-3.2-3b-instruct:free",  # FREE model
+    "model": "undi95/toppy-m-7b:free",  # FREE model
     
     "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
 
