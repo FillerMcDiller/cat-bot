@@ -3639,11 +3639,19 @@ async def show_tournament_hub(interaction: discord.Interaction):
         bracket = tournament.get('bracket', [])
         
         if status == 'signup':
+            # Get tournament details with defaults
+            tournament_name = tournament.get('name', f"{interaction.guild.name}'s Tournament")
+            entry_fee = tournament.get('entry_fee', 0)
+            prizes = tournament.get('prizes', {'1st': '🥇 Champion Title', '2nd': '🥈 Runner-up', '3rd': '🥉 Third Place'})
+            
             embed = discord.Embed(
-                title="🏆 Tournament Sign-Up Open",
+                title=f"🏆 {tournament_name}",
                 description=f"**Format:** Single Elimination Bracket\n"
-                           f"**Entry Fee:** Free\n"
-                           f"**Prize Pool:** Bragging rights!\n\n"
+                           f"**Entry Fee:** {entry_fee:,} Kibble\n"
+                           f"**Prizes:**\n"
+                           f"  🥇 1st Place: {prizes.get('1st', 'TBD')}\n"
+                           f"  🥈 2nd Place: {prizes.get('2nd', 'TBD')}\n"
+                           f"  🥉 3rd Place: {prizes.get('3rd', 'TBD')}\n\n"
                            f"**Participants ({len(participants)}/16):**\n" + 
                            "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants[:16])]),
                 color=Colors.brown
@@ -3674,8 +3682,11 @@ async def show_tournament_hub(interaction: discord.Interaction):
                     
                     # Update embed
                     embed.description = f"**Format:** Single Elimination Bracket\n" \
-                                      f"**Entry Fee:** Free\n" \
-                                      f"**Prize Pool:** Bragging rights!\n\n" \
+                                      f"**Entry Fee:** {tournament.get('entry_fee', 0):,} Kibble\n" \
+                                      f"**Prizes:**\n" \
+                                      f"  🥇 1st Place: {tournament.get('prizes', {}).get('1st', 'TBD')}\n" \
+                                      f"  🥈 2nd Place: {tournament.get('prizes', {}).get('2nd', 'TBD')}\n" \
+                                      f"  🥉 3rd Place: {tournament.get('prizes', {}).get('3rd', 'TBD')}\n\n" \
                                       f"**Participants ({len(participants)}/16):**\n" + \
                                       "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants)])
                     
@@ -3684,7 +3695,83 @@ async def show_tournament_hub(interaction: discord.Interaction):
                     except:
                         pass
                 
-                @discord.ui.button(label="❌ Leave Tournament", style=ButtonStyle.danger)
+                @discord.ui.button(label="✏️ Edit Tournament", style=ButtonStyle.secondary, row=1)
+                async def edit_btn(self, btn_it: discord.Interaction, button: Button):
+                    # Only organizer or admin can edit
+                    if btn_it.user.id != tournament['organizer'] and not btn_it.user.guild_permissions.administrator:
+                        await btn_it.response.send_message("Only the organizer or an admin can edit the tournament!", ephemeral=True)
+                        return
+                    
+                    # Show edit modal
+                    class EditTournamentModal(discord.ui.Modal, title="Edit Tournament Details"):
+                        tournament_name = discord.ui.TextInput(
+                            label="Tournament Name",
+                            placeholder="Enter tournament name...",
+                            default=tournament.get('name', f"{btn_it.guild.name}'s Tournament"),
+                            max_length=100
+                        )
+                        entry_fee_input = discord.ui.TextInput(
+                            label="Entry Fee (Kibble)",
+                            placeholder="0 for free",
+                            default=str(tournament.get('entry_fee', 0)),
+                            max_length=10
+                        )
+                        prize_1st = discord.ui.TextInput(
+                            label="1st Place Prize",
+                            placeholder="e.g., 10000 Kibble + Champion Title",
+                            default=tournament.get('prizes', {}).get('1st', '🥇 Champion Title'),
+                            max_length=100
+                        )
+                        prize_2nd = discord.ui.TextInput(
+                            label="2nd Place Prize",
+                            placeholder="e.g., 5000 Kibble",
+                            default=tournament.get('prizes', {}).get('2nd', '🥈 Runner-up'),
+                            max_length=100
+                        )
+                        prize_3rd = discord.ui.TextInput(
+                            label="3rd Place Prize",
+                            placeholder="e.g., 2500 Kibble",
+                            default=tournament.get('prizes', {}).get('3rd', '🥉 Third Place'),
+                            max_length=100
+                        )
+                        
+                        async def on_submit(self, modal_it: discord.Interaction):
+                            try:
+                                entry_fee = int(self.entry_fee_input.value)
+                                if entry_fee < 0:
+                                    entry_fee = 0
+                            except ValueError:
+                                entry_fee = 0
+                            
+                            tournament['name'] = self.tournament_name.value
+                            tournament['entry_fee'] = entry_fee
+                            tournament['prizes'] = {
+                                '1st': self.prize_1st.value,
+                                '2nd': self.prize_2nd.value,
+                                '3rd': self.prize_3rd.value
+                            }
+                            
+                            await modal_it.response.send_message("✅ Tournament details updated!", ephemeral=True)
+                            
+                            # Update the embed
+                            embed.title = f"🏆 {tournament['name']}"
+                            embed.description = f"**Format:** Single Elimination Bracket\n" \
+                                              f"**Entry Fee:** {tournament['entry_fee']:,} Kibble\n" \
+                                              f"**Prizes:**\n" \
+                                              f"  🥇 1st Place: {tournament['prizes']['1st']}\n" \
+                                              f"  🥈 2nd Place: {tournament['prizes']['2nd']}\n" \
+                                              f"  🥉 3rd Place: {tournament['prizes']['3rd']}\n\n" \
+                                              f"**Participants ({len(participants)}/16):**\n" + \
+                                              "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants)])
+                            
+                            try:
+                                await btn_it.edit_original_response(embed=embed)
+                            except:
+                                pass
+                    
+                    await btn_it.response.send_modal(EditTournamentModal())
+                
+                @discord.ui.button(label="❌ Leave Tournament", style=ButtonStyle.danger, row=1)
                 async def leave_btn(self, btn_it: discord.Interaction, button: Button):
                     if btn_it.user.id not in participants:
                         await btn_it.response.send_message("You're not registered!", ephemeral=True)
@@ -3695,8 +3782,11 @@ async def show_tournament_hub(interaction: discord.Interaction):
                     
                     # Update embed
                     embed.description = f"**Format:** Single Elimination Bracket\n" \
-                                      f"**Entry Fee:** Free\n" \
-                                      f"**Prize Pool:** Bragging rights!\n\n" \
+                                      f"**Entry Fee:** {tournament.get('entry_fee', 0):,} Kibble\n" \
+                                      f"**Prizes:**\n" \
+                                      f"  🥇 1st Place: {tournament.get('prizes', {}).get('1st', 'TBD')}\n" \
+                                      f"  🥈 2nd Place: {tournament.get('prizes', {}).get('2nd', 'TBD')}\n" \
+                                      f"  🥉 3rd Place: {tournament.get('prizes', {}).get('3rd', 'TBD')}\n\n" \
                                       f"**Participants ({len(participants)}/16):**\n" + \
                                       "\n".join([f"{i+1}. <@{p}>" for i, p in enumerate(participants)])
                     
@@ -3879,16 +3969,24 @@ async def show_tournament_hub(interaction: discord.Interaction):
             
             @discord.ui.button(label="🎮 Create Tournament", style=ButtonStyle.primary)
             async def create_tournament(self, btn_it: discord.Interaction, button: Button):
-                # Create new tournament
+                # Check if user is admin
+                if not btn_it.user.guild_permissions.administrator:
+                    await btn_it.response.send_message("❌ Only server administrators can create tournaments.", ephemeral=True)
+                    return
+                
+                # Create new tournament with editable details
                 ACTIVE_TOURNAMENTS[guild_id] = {
                     'organizer': btn_it.user.id,
                     'status': 'signup',
                     'participants': [btn_it.user.id],
                     'bracket': [],
-                    'created_at': time.time()
+                    'created_at': time.time(),
+                    'name': f"{btn_it.guild.name}'s Tournament",
+                    'entry_fee': 0,
+                    'prizes': {'1st': '🥇 Champion Title', '2nd': '🥈 Runner-up', '3rd': '🥉 Third Place'}
                 }
                 
-                await btn_it.response.send_message("✅ Tournament created! Sign-ups are now open.", ephemeral=True)
+                await btn_it.response.send_message("✅ Tournament created! Sign-ups are now open. Use 'Edit Tournament' to customize details.", ephemeral=True)
                 
                 # Show signup view
                 await show_tournament_hub(btn_it)
@@ -12489,6 +12587,23 @@ async def battlepass(message: discord.Interaction):
 
         description = f"Season ends <t:{timestamp}:R>\n\n"
 
+        # vote quest (moved to top and resets when cooldown expires)
+        vote_quest = battle.get("quests", {}).get("third", {}).get("third", {})
+        # Check if vote cooldown has expired - if so, reset the quest
+        if user.vote_cooldown != 0 and time.time() > user.vote_cooldown + 12 * 3600:
+            # Vote cooldown expired - reset the quest
+            user.vote_reward = 0
+            user.vote_cooldown = 0
+            await user.save()
+        
+        if user.vote_reward > 0:
+            # Has unclaimed vote reward
+            description += f"✅ ~~Vote for Cat Bot~~\n- Reward: {user.vote_reward} XP (claimed on refresh)\n\n"
+        else:
+            # Show vote quest with link
+            vote_xp = random.randint(vote_quest.get("xp_min", 250) // 10, vote_quest.get("xp_max", 350) // 10) * 10
+            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/966695034340663367/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
+
         # catch
         catch_quest = battle["quests"]["catch"][user.catch_quest]
         if user.catch_cooldown != 0:
@@ -12518,16 +12633,6 @@ async def battlepass(message: discord.Interaction):
             if misc_quest.get("progress", 1) != 1:
                 progress_string = f" ({user.misc_progress}/{misc_quest.get('progress',1)})"
             description += f"{get_emoji(misc_quest.get('emoji','mystery'))} {misc_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {user.misc_reward} XP\n\n"
-
-        # vote quest
-        vote_quest = battle.get("quests", {}).get("third", {}).get("third", {})
-        if user.vote_reward > 0:
-            # Has unclaimed vote reward
-            description += f"✅ ~~Vote for Cat Bot~~\n- Reward: {user.vote_reward} XP (claimed on refresh)\n\n"
-        else:
-            # Show vote quest with link
-            vote_xp = random.randint(vote_quest.get("xp_min", 250) // 10, vote_quest.get("xp_max", 350) // 10) * 10
-            description += f"🗳️ [Vote for Cat Bot](https://top.gg/bot/966695034340663367/vote)\n- Reward: {vote_xp} XP (2x on Fri/Sat/Sun)\n\n"
 
         # extra
         extra_quest = battle.get("quests", {}).get("extra", {}).get(user.extra_quest)
@@ -14809,7 +14914,7 @@ async def atm(message: discord.Interaction):
     )
     
     # Use a dict to hold the list so it's properly mutable across async callbacks
-    selection_state = {"cats": []}
+    selection_state = {"cats": [], "main_message": None, "main_view": None}
     
     async def cat_selected(interaction: discord.Interaction, selected_cat: dict):
         """Callback when a cat is selected - adds to bulk selection"""
@@ -14829,15 +14934,22 @@ async def atm(message: discord.Interaction):
                 f"❌ Removed **{cat_name}** from selection.\n\n**Selected: {len(selection_state['cats'])} cats**",
                 ephemeral=True
             )
-            return
+        else:
+            # Add to selection
+            selection_state["cats"].append(cat_id)
+            await interaction.response.send_message(
+                f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selection_state['cats'])} cats**\n\n"
+                f"💡 Keep selecting cats, or go back to the main ATM message to convert all selected cats.",
+                ephemeral=True
+            )
         
-        # Add to selection
-        selection_state["cats"].append(cat_id)
-        await interaction.response.send_message(
-            f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selection_state['cats'])} cats**\n\n"
-            f"💡 Keep selecting cats, or go back to the main ATM message to convert all selected cats.",
-            ephemeral=True
-        )
+        # Update the main ATM message buttons
+        try:
+            if selection_state["main_view"] and selection_state["main_message"]:
+                selection_state["main_view"].update_buttons()
+                await selection_state["main_message"].edit(embed=embed, view=selection_state["main_view"])
+        except Exception:
+            pass
     
     class ATMView(View):
         def __init__(self):
@@ -14985,7 +15097,11 @@ async def atm(message: discord.Interaction):
             await btn_it.response.edit_message(embed=embed, view=self)
     
     view = ATMView()
-    await message.followup.send(embed=embed, view=view)
+    main_msg = await message.followup.send(embed=embed, view=view)
+    
+    # Store references for updating
+    selection_state["main_message"] = main_msg
+    selection_state["main_view"] = view
 
 
 @bot.tree.command(description="Brew some coffee to catch cats more efficiently")
