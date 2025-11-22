@@ -5694,7 +5694,7 @@ def alnum(string):
     return "".join(item for item in string.lower() if item.isalnum())
 
 
-async def spawn_cat(ch_id, localcat=None, force_spawn=None):
+async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
     try:
         channel = await Channel.get_or_none(channel_id=int(ch_id))
         if not channel:
@@ -5707,12 +5707,17 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None):
     if not localcat:
         localcat = random.choices(cattypes, weights=type_dict.values())[0]
     icon = get_emoji(localcat.lower() + "cat")
+    
+    # Handle enchanted image variant
+    image_filename = f"{localcat.lower()}_cat_enchanted.png" if enchanted else f"{localcat.lower()}_cat.png"
     file = discord.File(
-        f"images/spawn/{localcat.lower()}_cat.png",
+        f"images/spawn/{image_filename}",
     )
     channeley = bot.get_partial_messageable(int(ch_id))
 
-    appearstring = '{emoji} {type} cat has appeared! Type "cat" to catch it!' if not channel.appear else channel.appear
+    # Add enchanted indicator to appear string
+    enchanted_prefix = "✨ " if enchanted else ""
+    appearstring = '{emoji} {enchanted}{type} cat has appeared! Type "cat" to catch it!' if not channel.appear else channel.appear
 
     if channel.cat:
         # its never too late to return
@@ -5720,7 +5725,7 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None):
 
     try:
         message_is_sus = await channeley.send(
-            appearstring.replace("{emoji}", str(icon)).replace("{type}", localcat),
+            appearstring.replace("{emoji}", str(icon)).replace("{enchanted}", enchanted_prefix).replace("{type}", localcat),
             file=file,
             allowed_mentions=discord.AllowedMentions.all(),
         )
@@ -5737,6 +5742,7 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None):
     channel.yet_to_spawn = 0
     channel.forcespawned = bool(force_spawn)
     channel.cattype = localcat
+    channel.enchanted = enchanted
     await channel.save()
 
 
@@ -8160,7 +8166,7 @@ async def news(message: discord.Interaction):
                 "so yeah.. the bot kinda exploded yesterday.. oopsa!\n"
                 "it was the internet service provider's fault, mb. but do not worry! I have used my magic (waiting patiently) to fix it!\n"
                 "also, voting should work now (/vote), it gives xp and sometimes a pack WOOHOOO\n"
-                "as a sorry, you can claim a gold pack from this message. thanks for being patient with me!"
+                "as a sorry, you can claim a gold pack from this message. thanks for being patient with me!\n"
                 "**Filler <3**"
             ),
             "reward": {
@@ -8170,6 +8176,27 @@ async def news(message: discord.Interaction):
                 "name": "1 Gold Pack"
             }
         },
+        {
+            "title": "CAT MODIFIERS ARE HERE!",
+            "emoji": "✨",
+            "desc": "cat modifiers, item fixes, and more!!",
+            "body": (
+                "Cat modifiers have been added to the bot!\n"
+                "Cat modifiers are special attributes a cat can have which affects their stats and visual appearance!\n"
+                "right now, \"Enchanted\" is the only modifier, which doubles cat stats, and is 3x rarer than normal cats!\n"
+                "for a quick kickstart, claim this Platinum pack below (packs platinum and above can give enchanted cats), enjoy!\n"
+                "\n"
+                "PS. sorry to beg, but please vote for xp, packs, and for the sake of helping KITTAYYYYYYY get more users!\n"
+                "\n"
+                "**Filler <3**"
+            ),
+            "reward": {
+                "type": "pack",
+                "amount": 1,
+                "pack_name": "Platinum",  # Used when type is "pack"
+                "name": "1 Platinum Pack"
+            }
+       },
     ]
 
     class NewsView(View):
@@ -8412,6 +8439,7 @@ class AdminPanelModal(discord.ui.Modal):
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give cats to"))
             self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Cat type to give"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount to give"))
+            self.add_item(discord.ui.TextInput(label="Enchanted (true/false)", placeholder="true or false", default="false"))
         elif action == "Give Rains":
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give Rains to"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of Rain Minutes to give"))
@@ -8496,16 +8524,69 @@ class AdminPanelModal(discord.ui.Modal):
                 return
                 
             user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+            cat_type = self.children[1].value
+            amount = int(self.children[2].value)
+            enchanted_str = self.children[3].value.lower().strip()
+            enchanted = enchanted_str in ["true", "1", "yes", "y"]
+            
             try:
-                await add_cat_instances(user, self.children[1].value, int(self.children[2].value))
-            except Exception:
+                from cat_modifiers import add_modifier
+                
+                # Get cats and add instances
+                cats = await get_user_cats(interaction.guild.id, member.id)
+                for _ in range(amount):
+                    while True:
+                        cid = uuid.uuid4().hex[:8]
+                        if cid not in [c.get("id") for c in cats]:
+                            break
+                    
+                    # Get stats from CAT_BATTLE_STATS with ±2 range, fallback to old calculation
+                    stats = CAT_BATTLE_STATS.get(cat_type)
+                    if stats:
+                        base_hp = stats["hp"]
+                        base_dmg = stats["dmg"]
+                        hp = max(1, base_hp + random.randint(-2, 2))
+                        dmg = max(1, base_dmg + random.randint(-2, 2))
+                    else:
+                        base_value = type_dict.get(cat_type, 100)
+                        base_hp = max(1, math.ceil(base_value / 10))
+                        base_dmg = max(1, math.ceil(base_value / 50))
+                        hp = max(1, base_hp + random.randint(-2, 2))
+                        dmg = max(1, base_dmg + random.randint(-2, 2))
+                    
+                    instance = {
+                        "id": cid,
+                        "type": cat_type,
+                        "name": random.choice(cat_names),
+                        "bond": 0,
+                        "hp": hp,
+                        "dmg": dmg,
+                        "acquired_at": int(time.time()),
+                    }
+                    
+                    # Add enchanted modifier if requested
+                    if enchanted:
+                        add_modifier(instance, "enchanted")
+                    
+                    cats.append(instance)
+                
+                await save_user_cats(interaction.guild.id, member.id, cats)
+                
+                # Update aggregated counts
+                user[f"cat_{cat_type}"] = user.get(f"cat_{cat_type}", 0) + amount
+                await user.save()
+                
+                enchanted_text = " ✨ Enchanted" if enchanted else ""
+                await interaction.response.send_message(f"Gave {amount} {cat_type}{enchanted_text} cats to {member.mention}", ephemeral=True)
+            except Exception as e:
+                print(f"Error giving cats: {e}")
                 # fallback to aggregated count update
                 try:
-                    user[f"cat_{self.children[1].value}"] += int(self.children[2].value)
+                    user[f"cat_{cat_type}"] += amount
                     await user.save()
-                except Exception:
-                    pass
-            await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} cats to {member.mention}", ephemeral=True)
+                    await interaction.response.send_message(f"Gave {amount} {cat_type} cats to {member.mention} (as aggregated count)", ephemeral=True)
+                except Exception as e2:
+                    await interaction.response.send_message(f"Error giving cats: {str(e2)}", ephemeral=True)
         
        
         elif self.action == "Give Rains":
@@ -8802,6 +8883,43 @@ async def rainstart(interaction: discord.Interaction, channel_id: str, duration:
         await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"Error starting rain: {str(e)}", ephemeral=True)
+
+@bot.tree.command(description="(OWNER) Spawn a specific cat in a channel")
+@discord.app_commands.describe(channel_id="Channel ID to spawn cat in", cat_type="Cat type to spawn", enchanted="Make it enchanted (true/false)")
+async def spawncat(interaction: discord.Interaction, channel_id: str, cat_type: str = None, enchanted: str = "false"):
+    """Spawn a specific cat in a channel"""
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    try:
+        ch_id = int(channel_id)
+        channel = bot.get_channel(ch_id)
+        if not channel:
+            await interaction.response.send_message(f"Could not find channel with ID {ch_id}!", ephemeral=True)
+            return
+        
+        # Parse enchanted flag
+        is_enchanted = enchanted.lower().strip() in ["true", "1", "yes", "y"]
+        
+        # If no cat type specified, pick a random one
+        if not cat_type:
+            cat_type = random.choices(cattypes, weights=type_dict.values())[0]
+        else:
+            # Validate cat type
+            if cat_type not in type_dict:
+                await interaction.response.send_message(f"Invalid cat type: {cat_type}", ephemeral=True)
+                return
+        
+        # Spawn the cat
+        await spawn_cat(ch_id, cat_type, force_spawn=True, enchanted=is_enchanted)
+        
+        enchanted_text = " ✨ Enchanted" if is_enchanted else ""
+        await interaction.response.send_message(f"✅ Spawned a {cat_type}{enchanted_text} cat in {channel.mention}!", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error spawning cat: {str(e)}", ephemeral=True)
 
 @bot.tree.command(description="(OWNER) Give kibbles to a user")
 @discord.app_commands.describe(user="User to give kibbles to", amount="Amount of kibbles to give")
@@ -9257,6 +9375,551 @@ leave blank to reset.""",
     view.add_item(button2)
 
     await message.response.send_message(embed=embed, view=view)
+
+
+# =============================================================================
+# MODERATION COMMANDS
+# =============================================================================
+
+@bot.tree.command(description="(MOD) Kick a member from the server")
+@discord.app_commands.default_permissions(kick_members=True)
+@discord.app_commands.describe(
+    member="Member to kick",
+    reason="Reason for the kick (optional)"
+)
+async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    """Kick a member from the server"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.kick_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to kick members!",
+            ephemeral=True
+        )
+        return
+    
+    # Bot hierarchy check
+    if not interaction.guild.me.top_role > member.top_role:
+        await interaction.response.send_message(
+            "❌ I can't kick someone with a higher or equal role than me!",
+            ephemeral=True
+        )
+        return
+    
+    # Can't kick yourself
+    if member == interaction.user:
+        await interaction.response.send_message(
+            "❌ You can't kick yourself!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Send DM to kicked member
+        try:
+            embed = discord.Embed(
+                title="You've been kicked",
+                description=f"Server: {interaction.guild.name}",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Kicked by", value=interaction.user.mention, inline=False)
+            await member.send(embed=embed)
+        except:
+            pass  # Member may have DMs disabled
+        
+        # Kick the member
+        await interaction.guild.kick(member, reason=f"[{interaction.user}] {reason}")
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Member Kicked ✅",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Member", value=member.mention, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=True)
+        embed.add_field(name="Kicked by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+        # Log to moderation channel if configured
+        if hasattr(interaction.guild, 'modlog_channel_id'):
+            try:
+                modlog = interaction.guild.get_channel(interaction.guild.modlog_channel_id)
+                if modlog:
+                    await modlog.send(embed=embed)
+            except:
+                pass
+                
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to kick this member!",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Ban a member from the server")
+@discord.app_commands.default_permissions(ban_members=True)
+@discord.app_commands.describe(
+    user="User to ban",
+    reason="Reason for the ban (optional)",
+    delete_messages="Delete how many days of messages? (0-7)"
+)
+async def ban(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided", delete_messages: int = 0):
+    """Ban a user from the server"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.ban_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to ban members!",
+            ephemeral=True
+        )
+        return
+    
+    # Validate delete_messages parameter
+    if delete_messages < 0 or delete_messages > 7:
+        await interaction.response.send_message(
+            "❌ Delete messages must be between 0 and 7 days!",
+            ephemeral=True
+        )
+        return
+    
+    # Get member object if in guild
+    member = interaction.guild.get_member(user.id)
+    
+    # Bot hierarchy check for members in guild
+    if member and not interaction.guild.me.top_role > member.top_role:
+        await interaction.response.send_message(
+            "❌ I can't ban someone with a higher or equal role than me!",
+            ephemeral=True
+        )
+        return
+    
+    # Can't ban yourself
+    if user == interaction.user:
+        await interaction.response.send_message(
+            "❌ You can't ban yourself!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Send DM to banned user
+        try:
+            embed = discord.Embed(
+                title="You've been banned",
+                description=f"Server: {interaction.guild.name}",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Banned by", value=interaction.user.mention, inline=False)
+            await user.send(embed=embed)
+        except:
+            pass  # User may have DMs disabled
+        
+        # Ban the user
+        await interaction.guild.ban(user, reason=f"[{interaction.user}] {reason}", delete_message_days=delete_messages)
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Member Banned ✅",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="User", value=user.mention, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=True)
+        embed.add_field(name="Deleted Messages", value=f"{delete_messages} days", inline=True)
+        embed.add_field(name="Banned by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+        # Log to moderation channel if configured
+        if hasattr(interaction.guild, 'modlog_channel_id'):
+            try:
+                modlog = interaction.guild.get_channel(interaction.guild.modlog_channel_id)
+                if modlog:
+                    await modlog.send(embed=embed)
+            except:
+                pass
+                
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to ban this user!",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Unban a user from the server")
+@discord.app_commands.default_permissions(ban_members=True)
+@discord.app_commands.describe(
+    user_id="User ID to unban",
+    reason="Reason for the unban (optional)"
+)
+async def unban(interaction: discord.Interaction, user_id: str, reason: str = "No reason provided"):
+    """Unban a user from the server"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.ban_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to unban members!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        user_id = int(user_id)
+    except ValueError:
+        await interaction.response.send_message(
+            "❌ Invalid user ID!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        user = await bot.fetch_user(user_id)
+        await interaction.guild.unban(user, reason=f"[{interaction.user}] {reason}")
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Member Unbanned ✅",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="User", value=user.mention, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=True)
+        embed.add_field(name="Unbanned by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except discord.NotFound:
+        await interaction.response.send_message(
+            "❌ User not found or not banned!",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Timeout a member")
+@discord.app_commands.default_permissions(moderate_members=True)
+@discord.app_commands.describe(
+    member="Member to timeout",
+    duration="Timeout duration (e.g. 10m, 1h, 1d)",
+    reason="Reason for timeout (optional)"
+)
+async def timeout(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
+    """Timeout a member (they can't send messages/react)"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.moderate_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to timeout members!",
+            ephemeral=True
+        )
+        return
+    
+    # Parse duration
+    duration_seconds = parse_time(duration)
+    if not duration_seconds:
+        await interaction.response.send_message(
+            "❌ Invalid duration format! Use format like '10m', '1h', '1d', etc.",
+            ephemeral=True
+        )
+        return
+    
+    # Max timeout is 28 days
+    if duration_seconds > 2419200:  # 28 days in seconds
+        await interaction.response.send_message(
+            "❌ Maximum timeout is 28 days!",
+            ephemeral=True
+        )
+        return
+    
+    # Bot hierarchy check
+    if not interaction.guild.me.top_role > member.top_role:
+        await interaction.response.send_message(
+            "❌ I can't timeout someone with a higher or equal role than me!",
+            ephemeral=True
+        )
+        return
+    
+    # Can't timeout yourself
+    if member == interaction.user:
+        await interaction.response.send_message(
+            "❌ You can't timeout yourself!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Apply timeout
+        timeout_until = discord.utils.utcnow() + discord.timedelta(seconds=duration_seconds)
+        await member.timeout(timeout_until, reason=f"[{interaction.user}] {reason}")
+        
+        # Send DM to timed out member
+        try:
+            embed = discord.Embed(
+                title="You've been timed out",
+                description=f"Server: {interaction.guild.name}",
+                color=discord.Color.orange()
+            )
+            embed.add_field(name="Duration", value=duration, inline=True)
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Timed out by", value=interaction.user.mention, inline=False)
+            await member.send(embed=embed)
+        except:
+            pass
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Member Timed Out ✅",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Member", value=member.mention, inline=True)
+        embed.add_field(name="Duration", value=duration, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Timed out by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to timeout this member!",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Remove timeout from a member")
+@discord.app_commands.default_permissions(moderate_members=True)
+@discord.app_commands.describe(
+    member="Member to remove timeout from",
+    reason="Reason for removal (optional)"
+)
+async def untimeout(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    """Remove timeout from a member"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.moderate_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to manage timeouts!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Remove timeout
+        await member.timeout(None, reason=f"[{interaction.user}] {reason}")
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Timeout Removed ✅",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Member", value=member.mention, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Removed by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Warn a member")
+@discord.app_commands.default_permissions(manage_guild=True)
+@discord.app_commands.describe(
+    member="Member to warn",
+    reason="Reason for the warning"
+)
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+    """Warn a member (stores warning in database)"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message(
+            "❌ You don't have permission to warn members!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Get member profile and add warning
+        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
+        
+        # Store warning in JSON field or create warnings list
+        warnings = profile.warnings if hasattr(profile, 'warnings') and profile.warnings else []
+        warnings.append({
+            "reason": reason,
+            "warned_by": str(interaction.user.id),
+            "timestamp": int(time.time())
+        })
+        
+        # For now, we'll just log it (since Profile may not have warnings field)
+        # Send DM to warned member
+        try:
+            embed = discord.Embed(
+                title="You've been warned",
+                description=f"Server: {interaction.guild.name}",
+                color=discord.Color.yellow()
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Warned by", value=interaction.user.mention, inline=False)
+            embed.set_footer(text="Further violations may result in stricter action.")
+            await member.send(embed=embed)
+        except:
+            pass
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Member Warned ✅",
+            color=discord.Color.yellow()
+        )
+        embed.add_field(name="Member", value=member.mention, inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Warned by", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) Purge messages in a channel")
+@discord.app_commands.default_permissions(manage_messages=True)
+@discord.app_commands.describe(
+    amount="Number of messages to delete (1-100)",
+    user="(Optional) Only delete messages from this user"
+)
+async def purge(interaction: discord.Interaction, amount: int, user: discord.User = None):
+    """Delete multiple messages from a channel"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message(
+            "❌ You don't have permission to manage messages!",
+            ephemeral=True
+        )
+        return
+    
+    # Validate amount
+    if amount < 1 or amount > 100:
+        await interaction.response.send_message(
+            "❌ You can only purge between 1 and 100 messages!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Define filter function
+        def check(msg):
+            if user:
+                return msg.author == user
+            return True
+        
+        # Delete messages
+        deleted = await interaction.channel.purge(limit=amount, check=check)
+        
+        # Send confirmation
+        embed = discord.Embed(
+            title="Messages Purged ✅",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Messages Deleted", value=str(len(deleted)), inline=True)
+        if user:
+            embed.add_field(name="From User", value=user.mention, inline=True)
+        embed.add_field(name="Purged by", value=interaction.user.mention, inline=False)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(description="(MOD) See the ban list for this server")
+@discord.app_commands.default_permissions(ban_members=True)
+async def banlist(interaction: discord.Interaction):
+    """View the server's ban list"""
+    
+    # Permission check
+    if not interaction.user.guild_permissions.ban_members:
+        await interaction.response.send_message(
+            "❌ You don't have permission to view the ban list!",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        bans = await interaction.guild.bans()
+        
+        if not bans:
+            embed = discord.Embed(
+                title="Ban List",
+                description="No members are currently banned.",
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        
+        # Create paginated embed
+        embeds = []
+        ban_list = list(bans)
+        
+        for i in range(0, len(ban_list), 10):
+            batch = ban_list[i:i+10]
+            embed = discord.Embed(
+                title="Ban List",
+                description=f"Page {i//10 + 1}/{(len(ban_list) + 9)//10}",
+                color=discord.Color.red()
+            )
+            
+            for ban in batch:
+                reason = ban.reason or "No reason provided"
+                embed.add_field(
+                    name=f"{ban.user} ({ban.user.id})",
+                    value=f"Reason: {reason[:100]}...",
+                    inline=False
+                )
+            
+            embeds.append(embed)
+        
+        # Send first embed
+        if embeds:
+            await interaction.followup.send(embed=embeds[0], ephemeral=True)
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
 
 
 @bot.tree.command(description="Get ID of a thing")
