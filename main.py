@@ -17372,7 +17372,7 @@ def _pick_breed_result(parent_a: str, parent_b: str) -> Optional[str]:
 
 
 @bot.tree.command(description="Breed two cats to get an offspring (chances are based on parents' averaged rarity)")
-@app_commands.describe(
+@discord.app_commands.describe(
     first_cat="Optional: Type of first parent cat for instant breeding (e.g. Fine)",
     second_cat="Optional: Type of second parent cat for instant breeding (e.g. Fine)"
 )
