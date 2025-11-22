@@ -17,7 +17,7 @@ SET default_tablespace = '';
 
 SET default_table_access_method = heap;
 
-CREATE TABLE public.channel (
+CREATE TABLE IF NOT EXISTS public.channel (
     channel_id bigint NOT NULL,
     cat bigint DEFAULT 0,
     spawn_times_min bigint DEFAULT 120,
@@ -36,7 +36,7 @@ CREATE TABLE public.channel (
 ALTER TABLE public.channel OWNER TO cat_bot;
 
 
-CREATE TABLE public.prism (
+CREATE TABLE IF NOT EXISTS public.prism (
     id integer NOT NULL,
     user_id bigint NOT NULL,
     guild_id bigint NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE public.prism (
 
 ALTER TABLE public.prism OWNER TO cat_bot;
 
-CREATE SEQUENCE public.prism_id_seq
+CREATE SEQUENCE IF NOT EXISTS public.prism_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -64,7 +64,7 @@ ALTER TABLE public.prism_id_seq OWNER TO cat_bot;
 ALTER SEQUENCE public.prism_id_seq OWNED BY public.prism.id;
 
 
-CREATE TABLE public.profile (
+CREATE TABLE IF NOT EXISTS public.profile (
     id integer NOT NULL,
     user_id bigint NOT NULL,
     guild_id bigint NOT NULL,
@@ -261,13 +261,32 @@ CREATE TABLE public.profile (
     best_pig_score integer DEFAULT 0,
     pig50 boolean default false,
     pig100 boolean default false,
-    last_steal bigint DEFAULT 0
+    last_steal bigint DEFAULT 0,
+    showcase_slots INTEGER DEFAULT 2,
+    huzzful boolean DEFAULT false,
+    freak boolean DEFAULT false,
+    full_stack boolean DEFAULT false,
+    unfunny boolean DEFAULT false,
+    genetically_gifted boolean DEFAULT false,
+    you_failure boolean DEFAULT false,
+    grinder boolean DEFAULT false,
+    owned_cosmetics TEXT DEFAULT '',
+    equipped_badge TEXT DEFAULT '',
+    equipped_title TEXT DEFAULT '',
+    equipped_color TEXT DEFAULT '',
+    equipped_effect TEXT DEFAULT '',
+    claimed_news_rewards JSONB DEFAULT '[]'::jsonb,
+    cat_instances JSONB DEFAULT '[]'::jsonb,
+    breeds_total integer DEFAULT 0,
+    battles_won integer DEFAULT 0,
+    last_daily_claim BIGINT DEFAULT 0,
+    daily_streak INTEGER DEFAULT 0
 );
 
 
 ALTER TABLE public.profile OWNER TO cat_bot;
 
-CREATE SEQUENCE public.profile_id_seq
+CREATE SEQUENCE IF NOT EXISTS public.profile_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -280,7 +299,7 @@ ALTER TABLE public.profile_id_seq OWNER TO cat_bot;
 
 ALTER SEQUENCE public.profile_id_seq OWNED BY public.profile.id;
 
-CREATE TABLE public.reminder (
+CREATE TABLE IF NOT EXISTS public.reminder (
     id integer NOT NULL,
     user_id bigint NOT NULL,
     "time" bigint NOT NULL,
@@ -290,7 +309,7 @@ CREATE TABLE public.reminder (
 
 ALTER TABLE public.reminder OWNER TO cat_bot;
 
-CREATE SEQUENCE public.reminder_id_seq
+CREATE SEQUENCE IF NOT EXISTS public.reminder_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -303,7 +322,53 @@ ALTER TABLE public.reminder_id_seq OWNER TO cat_bot;
 
 ALTER SEQUENCE public.reminder_id_seq OWNED BY public.reminder.id;
 
-CREATE TABLE public."user" (
+CREATE TABLE IF NOT EXISTS public.adventure (
+    id integer NOT NULL,
+    user_id bigint NOT NULL,
+    guild_id bigint NOT NULL,
+    cat_type character varying(50) NOT NULL,
+    cat_id character varying(255),
+    start_time bigint NOT NULL,
+    end_time bigint NOT NULL,
+    adventure_type character varying(50) NOT NULL
+);
+
+ALTER TABLE public.adventure OWNER TO cat_bot;
+
+CREATE SEQUENCE IF NOT EXISTS public.adventure_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER TABLE public.adventure_id_seq OWNER TO cat_bot;
+
+ALTER SEQUENCE public.adventure_id_seq OWNED BY public.adventure.id;
+
+CREATE TABLE IF NOT EXISTS public.deck (
+    id integer NOT NULL,
+    guild_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    deck_data JSONB NOT NULL
+);
+
+ALTER TABLE public.deck OWNER TO cat_bot;
+
+CREATE SEQUENCE IF NOT EXISTS public.deck_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER TABLE public.deck_id_seq OWNER TO cat_bot;
+
+ALTER SEQUENCE public.deck_id_seq OWNED BY public.deck.id;
+
+CREATE TABLE IF NOT EXISTS public."user" (
     user_id bigint NOT NULL,
     vote_time_topgg bigint DEFAULT 0,
     custom character varying(255) DEFAULT ''::character varying,
@@ -322,7 +387,8 @@ CREATE TABLE public."user" (
     streak_freezes integer DEFAULT 0,
     cats_blessed bigint DEFAULT 0,
     blessings_enabled boolean DEFAULT false,
-    blessings_anonymous boolean DEFAULT false
+    blessings_anonymous boolean DEFAULT false,
+    dm_ach_sent INTEGER DEFAULT 0
 );
 
 
@@ -334,48 +400,95 @@ ALTER TABLE ONLY public.profile ALTER COLUMN id SET DEFAULT nextval('public.prof
 
 ALTER TABLE ONLY public.reminder ALTER COLUMN id SET DEFAULT nextval('public.reminder_id_seq'::regclass);
 
+ALTER TABLE ONLY public.adventure ALTER COLUMN id SET DEFAULT nextval('public.adventure_id_seq'::regclass);
 
-ALTER TABLE ONLY public.channel
-    ADD CONSTRAINT channel_pkey PRIMARY KEY (channel_id);
+ALTER TABLE ONLY public.deck ALTER COLUMN id SET DEFAULT nextval('public.deck_id_seq'::regclass);
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'channel_pkey') THEN
+        ALTER TABLE ONLY public.channel ADD CONSTRAINT channel_pkey PRIMARY KEY (channel_id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'prism_pkey') THEN
+        ALTER TABLE ONLY public.prism ADD CONSTRAINT prism_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profile_pkey') THEN
+        ALTER TABLE ONLY public.profile ADD CONSTRAINT profile_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reminder_pkey') THEN
+        ALTER TABLE ONLY public.reminder ADD CONSTRAINT reminder_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'adventure_pkey') THEN
+        ALTER TABLE ONLY public.adventure ADD CONSTRAINT adventure_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'deck_pkey') THEN
+        ALTER TABLE ONLY public.deck ADD CONSTRAINT deck_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_pkey') THEN
+        ALTER TABLE ONLY public."user" ADD CONSTRAINT user_pkey PRIMARY KEY (user_id);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_guild_id ON public.profile USING btree (guild_id);
+
+CREATE INDEX IF NOT EXISTS idx_prism_guild_i_2a2071 ON public.prism USING btree (guild_id);
 
 
-ALTER TABLE ONLY public.prism
-    ADD CONSTRAINT prism_pkey PRIMARY KEY (id);
+CREATE INDEX IF NOT EXISTS idx_prism_user_id_bfacf7 ON public.prism USING btree (user_id, guild_id);
 
 
-ALTER TABLE ONLY public.profile
-    ADD CONSTRAINT profile_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY public.reminder
-    ADD CONSTRAINT reminder_pkey PRIMARY KEY (id);
+CREATE INDEX IF NOT EXISTS idx_profile_guild_i_ae5642 ON public.profile USING btree (guild_id);
 
 
-ALTER TABLE ONLY public."user"
-    ADD CONSTRAINT user_pkey PRIMARY KEY (user_id);
-
-CREATE INDEX idx_guild_id ON public.profile USING btree (guild_id);
-
-CREATE INDEX idx_prism_guild_i_2a2071 ON public.prism USING btree (guild_id);
+CREATE INDEX IF NOT EXISTS idx_profile_user_id_c9cc1c ON public.profile USING btree (user_id, guild_id);
 
 
-CREATE INDEX idx_prism_user_id_bfacf7 ON public.prism USING btree (user_id, guild_id);
+CREATE INDEX IF NOT EXISTS idx_reminder_time_b3a9a4 ON public.reminder USING btree ("time");
 
 
-CREATE INDEX idx_profile_guild_i_ae5642 ON public.profile USING btree (guild_id);
+CREATE INDEX IF NOT EXISTS prism_guild_id ON public.prism USING btree (guild_id);
 
+CREATE INDEX IF NOT EXISTS prism_user_id_guild_id ON public.prism USING btree (user_id, guild_id);
 
-CREATE INDEX idx_profile_user_id_c9cc1c ON public.profile USING btree (user_id, guild_id);
+CREATE UNIQUE INDEX IF NOT EXISTS profile_user_id_guild_id ON public.profile USING btree (user_id, guild_id);
 
+CREATE INDEX IF NOT EXISTS reminder_time ON public.reminder USING btree ("time");
 
-CREATE INDEX idx_reminder_time_b3a9a4 ON public.reminder USING btree ("time");
+CREATE INDEX IF NOT EXISTS idx_user_dm_ach_sent ON public."user" (dm_ach_sent);
 
+CREATE INDEX IF NOT EXISTS idx_profile_showcase_slots ON public.profile USING btree (showcase_slots);
 
-CREATE INDEX prism_guild_id ON public.prism USING btree (guild_id);
+CREATE INDEX IF NOT EXISTS idx_profile_claimed_news_rewards ON public.profile USING GIN (claimed_news_rewards);
 
-CREATE INDEX prism_user_id_guild_id ON public.prism USING btree (user_id, guild_id);
+CREATE INDEX IF NOT EXISTS idx_profile_cat_instances ON public.profile USING gin (cat_instances);
 
-CREATE UNIQUE INDEX profile_user_id_guild_id ON public.profile USING btree (user_id, guild_id);
+CREATE INDEX IF NOT EXISTS idx_profile_breeds_total ON public.profile USING btree (breeds_total);
 
-CREATE INDEX reminder_time ON public.reminder USING btree ("time");
+CREATE INDEX IF NOT EXISTS idx_profile_battles_won ON public.profile USING btree (battles_won);
+
+CREATE INDEX IF NOT EXISTS idx_profile_last_daily ON public.profile USING btree (last_daily_claim);
+
+CREATE INDEX IF NOT EXISTS idx_adventure_user_id ON public.adventure USING btree (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_adventure_end_time ON public.adventure USING btree (end_time);
+
+CREATE UNIQUE INDEX IF NOT EXISTS deck_guild_user ON public.deck USING btree (guild_id, user_id);
 
 REVOKE USAGE ON SCHEMA public FROM PUBLIC;

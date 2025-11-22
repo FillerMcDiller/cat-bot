@@ -83,3 +83,11 @@ class Prism(catpg.Model):
 
 class Reminder(catpg.Model):
     pass
+
+
+class Adventure(catpg.Model):
+    pass
+
+
+class Deck(catpg.Model):
+    _json_fields = ["deck_data"]  # Store deck as JSONB

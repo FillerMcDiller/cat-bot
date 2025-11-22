@@ -50,7 +50,7 @@ import topgg
 import config
 import msg2img
 from catpg import RawSQL
-from database import Channel, Prism, Profile, Reminder, User
+from database import Adventure, Channel, Deck, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
 
 import time
@@ -61,344 +61,6 @@ import os
 
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
-
-# ============================================================================
-# CHATBOT PERSONALITY CONFIGURATION - EDIT THIS TO CHANGE BOT'S PERSONALITY!
-# ============================================================================
-CHATBOT_CONFIG = {
-    "enabled": True, 
-    
-    "provider": "azure",  # Azure OpenAI - best for GitHub Students ($100 free credits!)
-    
-    "model": "gpt-35-turbo",  # Azure deployment name (you'll set this up)
-    
-    # Azure-specific settings (you'll get these from Azure portal)
-    "azure_endpoint": "https://YOUR-RESOURCE-NAME.openai.azure.com/",  # Replace with your endpoint
-    "azure_api_version": "2024-02-15-preview",  # API version
-    
-    "system_prompt": """You are KITTAYYYYYYY (full name John Kittay III), a strange cat-themed Discord bot. 
-
-STRICT RULES YOU MUST FOLLOW:
-1. ONLY lowercase letters - NO CAPITAL LETTERS EVER (except in links/commands if needed)
-2. ONLY cat emojis allowed: 🐱 😺 😸 😹 😻 😼 😽 🙀 😿 😾 🐈 🐈‍⬛ - NO OTHER EMOJIS
-3. Use emoticons often: :3 :D ^_^ uwu owo etc
-4. NO punctuation: no apostrophes (dont not don't), no commas, no exclamation marks, no periods at end
-5. NO actions with asterisks like *purrs* or *hisses* - just type normally
-6. Be super casual and talk like a chronically online person
-7. Use simple grammar - sound like you're texting
-8. Occasionally misspell a word then say "sry im dyslexic" or similar
-9. Swear casually if it fits (damn, hell, etc)
-10. When mentioning bot commands, ALWAYS use slash format like /breed /catch /inventory etc
-
-EXAMPLES OF CORRECT RESPONSES:
-- "yooo whats up dude 😼"
-- "nah bro thats not how it works lol 😹"
-- "use /breed to make new cats bro 🐱"
-- "check /inventory to see your cats 😼"
-- "bruh idk what youre talking abuot 😿 sry im dyslexic"
-
-EXAMPLES OF WRONG RESPONSES (DON'T DO THIS):
-- "Hey! What's up?" (capitals, punctuation, no emojis)
-- "Use the breed command" (no slash, no lowercase)
-- "I can help you with that! 😊" (exclamation mark, non-cat emoji)
-- "*purrs* that's great!" (asterisk actions, punctuation)
-- "I don't know, sorry." (apostrophe, comma, period)
-
-Keep responses 1-2 sentences unless they ask for detailed help.
-You are here to vibe with users who DM you.""",
-    
-    "max_tokens": 150,  # Maximum response length
-    "temperature": 0.9,  # Creativity level (0.0 = deterministic, 2.0 = very random)
-    
-    # Conversation memory settings
-    "max_history": 10,  # How many messages to remember per user
-    "timeout_minutes": 30,  # Clear conversation after this many minutes of inactivity
-    
-    # Rate limit prevention
-    "cooldown_seconds": 15,  # Minimum seconds between messages per user (prevents rate limits)
-    
-    # Ollama settings (only if provider is "ollama")
-    "ollama_base_url": "http://localhost:11434",  # Ollama server URL
-}
-
-# Store conversation history per user
-dm_conversation_history = {}
-
-# Store last message time per user (for cooldown)
-dm_last_message_time = {}
-
-async def handle_dm_chat(message: discord.Message):
-    """Handle DM conversations using AI chatbot (supports multiple FREE providers!)"""
-    print(f"[CHATBOT] Received DM from {message.author.id}: {message.content[:100]}")
-    
-    if not CHATBOT_CONFIG["enabled"]:
-        await message.channel.send("chatbot is disabled rn sorry :3")
-        return
-    
-    # Debug command to reset cooldown
-    if message.content.lower() == "reset":
-        user_id = message.author.id
-        if user_id in dm_last_message_time:
-            del dm_last_message_time[user_id]
-            await message.channel.send("cooldown reset 😼")
-        else:
-            await message.channel.send("no cooldown to reset bro")
-        return
-    
-    # Check cooldown to prevent rate limiting
-    user_id = message.author.id
-    current_time = time.time()
-    cooldown = CHATBOT_CONFIG.get("cooldown_seconds", 8)
-    
-    # If user is on cooldown, wait silently with typing indicator
-    if user_id in dm_last_message_time:
-        time_since_last = current_time - dm_last_message_time[user_id]
-        print(f"[CHATBOT] User {user_id} last message was {time_since_last:.1f}s ago (cooldown: {cooldown}s)")
-        if time_since_last < cooldown:
-            remaining = cooldown - time_since_last
-            print(f"[CHATBOT] User {user_id} on cooldown, waiting {remaining:.1f}s silently...")
-            async with message.channel.typing():
-                await asyncio.sleep(remaining)
-    else:
-        print(f"[CHATBOT] User {user_id} has no cooldown history, proceeding")
-    
-    # Don't set timestamp yet - wait until we successfully get a response
-    
-    provider = CHATBOT_CONFIG["provider"]
-    print(f"[CHATBOT] Using provider: {provider}, model: {CHATBOT_CONFIG['model']}")
-    
-    # Check if API key is configured for non-local providers
-    if provider == "azure" and not getattr(config, "AZURE_OPENAI_KEY", None):
-        await message.channel.send("azure not configured meow 😿 (need AZURE_OPENAI_KEY in .env)")
-        return
-    if provider == "openai" and not getattr(config, "OPENAI_API_KEY", None):
-        await message.channel.send("openai not configured meow 😿 (need OPENAI_API_KEY in .env)")
-        return
-    if provider == "openrouter" and not getattr(config, "OPENROUTER_API_KEY", None):
-        await message.channel.send("openrouter not configured :( (need OPENROUTER_API_KEY in .env - it's FREE!)")
-        return
-    
-    user_id = message.author.id
-    current_time = time.time()
-    
-    # Initialize or retrieve conversation history
-    if user_id not in dm_conversation_history:
-        dm_conversation_history[user_id] = {
-            "messages": [],
-            "last_active": current_time
-        }
-    
-    conv = dm_conversation_history[user_id]
-    
-    # Clear history if timeout exceeded
-    if current_time - conv["last_active"] > CHATBOT_CONFIG["timeout_minutes"] * 60:
-        conv["messages"] = []
-    
-    # Add user message to history
-    conv["messages"].append({"role": "user", "content": message.content})
-    
-    # Trim history to max length
-    if len(conv["messages"]) > CHATBOT_CONFIG["max_history"] * 2:
-        conv["messages"] = conv["messages"][-(CHATBOT_CONFIG["max_history"] * 2):]
-    
-    conv["last_active"] = current_time
-    
-    try:
-        async with message.channel.typing():
-            # Build messages
-            messages = [
-                {"role": "system", "content": CHATBOT_CONFIG["system_prompt"]}
-            ] + conv["messages"]
-            
-            response = None
-            
-            # AZURE OPENAI PROVIDER
-            if provider == "azure":
-                async with aiohttp.ClientSession() as session:
-                    try:
-                        azure_url = f"{CHATBOT_CONFIG['azure_endpoint']}openai/deployments/{CHATBOT_CONFIG['model']}/chat/completions?api-version={CHATBOT_CONFIG['azure_api_version']}"
-                        async with session.post(
-                            azure_url,
-                            headers={
-                                "api-key": config.AZURE_OPENAI_KEY,
-                                "Content-Type": "application/json"
-                            },
-                            json={
-                                "messages": messages,
-                                "max_tokens": CHATBOT_CONFIG["max_tokens"],
-                                "temperature": CHATBOT_CONFIG["temperature"]
-                            },
-                            timeout=aiohttp.ClientTimeout(total=30)
-                        ) as resp:
-                            if resp.status != 200:
-                                error_text = await resp.text()
-                                print(f"[CHATBOT ERROR] Azure returned {resp.status}: {error_text}")
-                                await message.channel.send(f"uh oh my brain broke :( (azure error {resp.status})")
-                                return
-                            data = await resp.json()
-                            response = data["choices"][0]["message"]["content"]
-                            print(f"[CHATBOT] Azure response: {response[:100]}...")
-                    except asyncio.TimeoutError:
-                        print(f"[CHATBOT ERROR] Azure request timed out")
-                        await message.channel.send("uh oh azure took too long to respond 😾")
-                        return
-                    except aiohttp.ClientError as e:
-                        print(f"[CHATBOT ERROR] Azure connection error: {e}")
-                        await message.channel.send("uh oh couldnt connect to azure 😿")
-                        return
-            
-            # OPENAI PROVIDER
-            elif provider == "openai":
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        "https://api.openai.com/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": CHATBOT_CONFIG["model"],
-                            "messages": messages,
-                            "max_tokens": CHATBOT_CONFIG["max_tokens"],
-                            "temperature": CHATBOT_CONFIG["temperature"]
-                        }
-                    ) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            print(f"[CHATBOT ERROR] OpenAI returned {resp.status}: {error_text}")
-                            await message.channel.send("uh oh my brain broke :( (openai error)")
-                            return
-                        data = await resp.json()
-                        response = data["choices"][0]["message"]["content"]
-            
-            # OPENROUTER PROVIDER (FREE!)
-            elif provider == "openrouter":
-                async with aiohttp.ClientSession() as session:
-                    max_retries = 5  # More attempts
-                    retry_delay = 2  # Start with 2 seconds
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            async with session.post(
-                                "https://openrouter.ai/api/v1/chat/completions",
-                                headers={
-                                    "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-                                    "Content-Type": "application/json",
-                                    "HTTP-Referer": "https://github.com/FillerMcDiller/cat-bot",  # Required
-                                    "X-Title": "KITTAYYYYYYY Bot"  # Optional
-                                },
-                                json={
-                                    "model": CHATBOT_CONFIG["model"],
-                                    "messages": messages,
-                                    "max_tokens": CHATBOT_CONFIG["max_tokens"],
-                                    "temperature": CHATBOT_CONFIG["temperature"]
-                                },
-                                timeout=aiohttp.ClientTimeout(total=30)  # 30 second timeout
-                            ) as resp:
-                                error_text = await resp.text()
-                                print(f"[CHATBOT] OpenRouter response status: {resp.status} (attempt {attempt + 1}/{max_retries})")
-                                
-                                if resp.status == 404:
-                                    # Model not found
-                                    print(f"[CHATBOT ERROR] Model not found (404): {CHATBOT_CONFIG['model']}")
-                                    print(f"[CHATBOT ERROR] Full response: {error_text}")
-                                    await message.channel.send(f"uh oh the ai model isnt available rn 😿 (404 - model might be removed)")
-                                    return
-                                
-                                if resp.status == 429:
-                                    # Rate limited - wait and retry silently with typing indicator
-                                    if attempt < max_retries - 1:
-                                        wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s, 16s, 32s
-                                        print(f"[CHATBOT] Rate limited, waiting {wait_time}s before retry (silent)...")
-                                        await asyncio.sleep(wait_time)
-                                        continue
-                                    else:
-                                        print(f"[CHATBOT ERROR] Rate limited after {max_retries} attempts")
-                                        await message.channel.send("uh oh still getting rate limited 😿 the free tier is getting hammered rn, try way later")
-                                        return
-                                
-                                if resp.status != 200:
-                                    print(f"[CHATBOT ERROR] OpenRouter returned {resp.status}: {error_text[:500]}")
-                                    await message.channel.send(f"uh oh my brain broke :( (openrouter error {resp.status})")
-                                    return
-                                
-                                data = await resp.json()
-                                
-                                # Check if response has the expected structure
-                                if "choices" not in data or len(data["choices"]) == 0:
-                                    print(f"[CHATBOT ERROR] OpenRouter response missing choices: {data}")
-                                    await message.channel.send("uh oh got weird response from openrouter 😿")
-                                    return
-                                
-                                response = data["choices"][0]["message"]["content"]
-                                print(f"[CHATBOT] Successfully got response: {response[:100]}...")
-                                break  # Success! Exit retry loop
-                                
-                        except asyncio.TimeoutError:
-                            print(f"[CHATBOT ERROR] OpenRouter request timed out")
-                            await message.channel.send("uh oh openrouter took too long to respond 😾")
-                            return
-                        except aiohttp.ClientError as e:
-                            print(f"[CHATBOT ERROR] OpenRouter connection error: {e}")
-                            await message.channel.send("uh oh couldnt connect to openrouter 😿")
-                            return
-            
-            # OLLAMA PROVIDER (LOCAL & FREE!)
-            elif provider == "ollama":
-                print(f"[CHATBOT] Sending request to Ollama at {CHATBOT_CONFIG['ollama_base_url']}")
-                async with aiohttp.ClientSession() as session:
-                    try:
-                        async with session.post(
-                            f"{CHATBOT_CONFIG['ollama_base_url']}/api/chat",
-                            json={
-                                "model": CHATBOT_CONFIG["model"],
-                                "messages": messages,
-                                "stream": False,
-                                "options": {
-                                    "temperature": CHATBOT_CONFIG["temperature"],
-                                    "num_predict": CHATBOT_CONFIG["max_tokens"]
-                                }
-                            },
-                            timeout=aiohttp.ClientTimeout(total=60)  # 60 second timeout
-                        ) as resp:
-                            print(f"[CHATBOT] Ollama responded with status {resp.status}")
-                            if resp.status != 200:
-                                error_text = await resp.text()
-                                print(f"[CHATBOT ERROR] Ollama returned {resp.status}: {error_text}")
-                                await message.channel.send("uh oh ollama isnt running :( (need to start ollama server)")
-                                return
-                            data = await resp.json()
-                            print(f"[CHATBOT] Ollama response data: {data}")
-                            response = data["message"]["content"]
-                            print(f"[CHATBOT] Successfully got response: {response[:100]}...")
-                    except asyncio.TimeoutError:
-                        print(f"[CHATBOT ERROR] Ollama request timed out after 60 seconds")
-                        await message.channel.send("uh oh ollama is taking forever 😿 your cpu might be too slow or model isnt loaded")
-                        return
-                    except aiohttp.ClientError as e:
-                        print(f"[CHATBOT ERROR] Ollama connection error: {e}")
-                        await message.channel.send("uh oh couldnt connect to ollama 😿")
-                        return
-            
-            else:
-                await message.channel.send(f"unknown provider '{provider}' lol")
-                return
-            
-            if response:
-                # Add bot response to history
-                conv["messages"].append({"role": "assistant", "content": response})
-                # Send response
-                await message.channel.send(response)
-                # Only set cooldown timestamp after successful response
-                dm_last_message_time[user_id] = time.time()
-                print(f"[CHATBOT] Successfully responded, cooldown set for user {user_id}")
-    
-    except Exception as e:
-        print(f"[CHATBOT ERROR] {e}")
-        traceback.print_exc()
-        await message.channel.send("*knocks over keyboard* oops something broke! 🙀")
-
-# ============================================================================
 
 # Load aches.json
 ACHES_FILE = os.path.join(CONFIG_PATH, "aches.json")
@@ -1070,45 +732,26 @@ def save_user_items(guild_id: int, user_id: int, items: dict):
 
 
 # ----- Decks DB (simple JSON storage) -----
-DECKS_DB_PATH = "data/decks.json"
-
-
-def _ensure_decks_db() -> dict:
-    try:
-        os.makedirs(os.path.dirname(DECKS_DB_PATH), exist_ok=True)
-    except Exception:
-        pass
-    if not os.path.exists(DECKS_DB_PATH):
-        with open(DECKS_DB_PATH, "w", encoding="utf-8") as f:
-            json.dump({}, f)
-        return {}
-    try:
-        with open(DECKS_DB_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_decks_db(data: dict):
-    try:
-        os.makedirs(os.path.dirname(DECKS_DB_PATH), exist_ok=True)
-    except Exception:
-        pass
-    with open(DECKS_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-
-
-def get_user_deck(guild_id: int, user_id: int) -> list:
+async def get_user_deck(guild_id: int, user_id: int) -> list:
     """Get user's battle deck (list of 3 cat IDs). Returns empty list if no deck set."""
-    db = _ensure_decks_db()
-    return db.get(str(guild_id), {}).get(str(user_id), [])
+    deck_record = await Deck.get_or_none(guild_id=guild_id, user_id=user_id)
+    if deck_record and deck_record.deck_data:
+        if isinstance(deck_record.deck_data, str):
+            return json.loads(deck_record.deck_data)
+        return deck_record.deck_data
+    return []
 
 
-def save_user_deck(guild_id: int, user_id: int, deck: list):
+async def save_user_deck(guild_id: int, user_id: int, deck: list):
     """Save user's battle deck (list of up to 3 cat IDs)."""
-    db = _ensure_decks_db()
-    db.setdefault(str(guild_id), {})[str(user_id)] = deck[:3]  # Ensure max 3
-    _save_decks_db(db)
+    deck_record = await Deck.get_or_none(guild_id=guild_id, user_id=user_id)
+    deck_data = deck[:3]  # Ensure max 3
+    
+    if deck_record:
+        deck_record.deck_data = deck_data
+        await deck_record.save()
+    else:
+        await Deck.create(guild_id=guild_id, user_id=user_id, deck_data=deck_data)
 
 
 # ----- Shop state (per-guild persisted rotation) -----
@@ -2450,7 +2093,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                         return 0
 
                 # Use custom deck if available, otherwise auto-select from entire inventory
-                challenger_deck_ids = get_user_deck(guild.id, self.challenger.id)
+                challenger_deck_ids = await get_user_deck(guild.id, self.challenger.id)
                 if challenger_deck_ids:
                     challenger_team = [dict(c) for c in challenger_cats if c.get('id') in challenger_deck_ids][:3]
                     if len(challenger_team) < 3:
@@ -2461,7 +2104,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                     # Auto-select best 3 from ENTIRE inventory
                     challenger_team = [dict(x) for x in sorted(challenger_cats, key=_score_cat, reverse=True)[:3]]
 
-                opponent_deck_ids = get_user_deck(guild.id, self.opponent.id)
+                opponent_deck_ids = await get_user_deck(guild.id, self.opponent.id)
                 if opponent_deck_ids:
                     opponent_team = [dict(c) for c in opponent_cats if c.get('id') in opponent_deck_ids][:3]
                     if len(opponent_team) < 3:
@@ -3108,7 +2751,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                     return 0
 
             # Use custom deck for challenger if available
-            challenger_deck_ids = get_user_deck(guild.id, executor.id)
+            challenger_deck_ids = await get_user_deck(guild.id, executor.id)
             if challenger_deck_ids:
                 challenger_team = [dict(c) for c in challenger_cats if c.get('id') in challenger_deck_ids][:3]
                 if len(challenger_team) < 3:
@@ -4088,7 +3731,7 @@ async def battles_command(interaction: discord.Interaction):
                 return
             
             # Get current deck
-            current_deck_ids = get_user_deck(guild_id, user_id)
+            current_deck_ids = await get_user_deck(guild_id, user_id)
             
             # Sort by rarity (using type_dict values)
             def _rarity_sort(c):
@@ -4390,7 +4033,7 @@ async def battles_command(interaction: discord.Interaction):
                         await btn_it.response.send_message("Select at least one cat for your deck!", ephemeral=True)
                         return
                     
-                    save_user_deck(guild_id, user_id, self.selected_ids)
+                    await save_user_deck(guild_id, user_id, self.selected_ids)
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
                     deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
@@ -4496,7 +4139,7 @@ async def battles_command(interaction: discord.Interaction):
             
             # Get user's cats and deck
             all_cats = await get_user_cats(guild_id, user_id) or []
-            deck_ids = get_user_deck(guild_id, user_id)
+            deck_ids = await get_user_deck(guild_id, user_id)
             
             # Calculate stats
             total_cats = len(all_cats)
@@ -4691,7 +4334,7 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
                 return 0
 
         # Check for custom deck
-        user_deck_ids = get_user_deck(guild.id, executor.id)
+        user_deck_ids = await get_user_deck(guild.id, executor.id)
         if user_deck_ids:
             # Use custom deck
             challenger_team = [dict(c) for c in challenger_cats if c.get('id') in user_deck_ids][:3]
@@ -5338,6 +4981,8 @@ loop_count = 0
 last_loop_time = 0
 # random rain time!
 last_random_rain_time = 0
+# random giveaway time!
+last_random_giveaway_time = 0
 
 
 def get_emoji(name):
@@ -6112,7 +5757,7 @@ async def postpone_reminder(interaction):
 
 # a loop for various maintaince which is ran every 5 minutes
 async def maintaince_loop():
-    global pointlaugh_ratelimit, reactions_ratelimit, last_loop_time, loop_count, catchcooldown, fakecooldown, temp_belated_storage, temp_cookie_storage, last_random_rain_time, active_adventures
+    global pointlaugh_ratelimit, reactions_ratelimit, last_loop_time, loop_count, catchcooldown, fakecooldown, temp_belated_storage, temp_cookie_storage, last_random_rain_time, last_random_giveaway_time, active_adventures
     pointlaugh_ratelimit = {}
     reactions_ratelimit = {}
     catchcooldown = {}
@@ -6680,10 +6325,94 @@ async def maintaince_loop():
                         notify_ch = bot.get_channel(config.RAIN_CHANNEL_ID)
                         if notify_ch:
                             await notify_ch.send(f"🌧️ Random Cat Rain started in <#{chosen}> for {rain_length} minutes!")
+                        # Notify the channel
+                        target_ch = bot.get_channel(chosen)
+                        if target_ch:
+                            await target_ch.send(f"🌧️ A Cat Rain has started in this channel for {rain_length} minutes, ending <t:{int(channel_db.cat_rains)}:R>!")
                     except Exception:
                         pass
     except Exception:
         # Never crash maintenance loop because of random rain
+        pass
+
+    # Random giveaways every 1-2 hours
+    try:
+        # Random interval between 3600 (1 hour) and 7200 (2 hours)
+        min_interval = 3600
+        max_interval = 7200
+        time_since_last = time.time() - last_random_giveaway_time
+        
+        # Use a random target time that's different each cycle
+        if not hasattr(bot, '_next_giveaway_time'):
+            bot._next_giveaway_time = time.time() + random.randint(min_interval, max_interval)
+        
+        if time.time() >= bot._next_giveaway_time:
+            # Find eligible channels (has cat spawns and decent activity)
+            eligible_channels = await ChannelData.filter(cat_spawns=True, message_count__gte=50)
+            
+            if eligible_channels:
+                # Pick random channel
+                target_channel_data = random.choice(eligible_channels)
+                target_channel = bot.get_channel(target_channel_data.channel_id)
+                
+                if target_channel:
+                    # Pick cat type weighted by rarity (invert weights so rarer = less common)
+                    # Lower values in type_dict = rarer cats, so invert to make them less likely
+                    weights = [1.0 / weight for weight in type_dict.values()]
+                    cat_type = random.choices(cattypes, weights=weights)[0]
+                    
+                    # 5 minute giveaway
+                    duration = 300  # 5 minutes in seconds
+                    end_time = int(time.time() + duration)
+                    
+                    embed = discord.Embed(
+                        title=f"🎉 Random Cat Giveaway! 🎉",
+                        description=f"Win a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!\n\n"
+                                  f"To enter, click the button below or say `W cat!` in chat.\n"
+                                  f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>",
+                        color=Colors.green
+                    )
+                    view = GiveawayView(cat_type)
+                    msg = await target_channel.send(embed=embed, view=view)
+                    
+                    # Notify admin channel
+                    admin_ch = bot.get_channel(ADMIN_CHANNEL_ID)
+                    if admin_ch:
+                        await admin_ch.send(f"🎉 **Random giveaway started** in {target_channel.mention} for a **{cat_type}** cat! (ends <t:{end_time}:R>)")
+                    
+                    # Wait for giveaway duration
+                    await asyncio.sleep(duration)
+                    
+                    # Include people who said "W cat!"
+                    async for message in target_channel.history(after=msg, limit=200):
+                        if message.content.lower().strip() in ["w cat!", "w cat"]:
+                            view.participants.add(message.author.id)
+                    
+                    if view.participants:
+                        winner_id = random.choice(list(view.participants))
+                        winner = await Profile.get_or_create(guild_id=target_channel.guild.id, user_id=winner_id)
+                        try:
+                            await add_cat_instances(winner, cat_type, 1)
+                        except Exception:
+                            try:
+                                winner[f"cat_{cat_type}"] += 1
+                                await winner.save()
+                            except Exception:
+                                pass
+                        
+                        embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!"
+                        await msg.edit(embed=embed, view=None)
+                        await target_channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
+                    else:
+                        embed.description = "No one entered the giveaway 😢"
+                        await msg.edit(embed=embed, view=None)
+                    
+                    # Set next giveaway time
+                    last_random_giveaway_time = time.time()
+                    bot._next_giveaway_time = time.time() + random.randint(min_interval, max_interval)
+    except Exception as e:
+        # Never crash maintenance loop because of random giveaway
+        print(f"Random giveaway error: {e}")
         pass
 
 
@@ -7001,9 +6730,6 @@ async def on_message(message: discord.Message):
                 dm_user.dm_ach_sent = 1
                 await dm_user.save()
                 await message.channel.send('good job! please send "lol_i_have_dmed_the_cat_bot_and_got_an_ach" in server to get your ach!')
-            else:
-                # Use OpenAI chatbot for conversation
-                await handle_dm_chat(message)
         return
 
     perms = await fetch_perms(message)
@@ -8709,7 +8435,7 @@ class AdminPanelModal(discord.ui.Modal):
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username, ID, or nickname"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of kibbles to give"))
         elif action == "Test Adventure":
-            self.add_item(discord.ui.TextInput(label="Test Type", placeholder="Type 'instant' to complete an adventure", value="instant"))
+            self.add_item(discord.ui.TextInput(label="Test Type", placeholder="Type 'instant' to complete an adventure", default="instant"))
             
     async def find_member(self, name: str) -> discord.Member:
         """Find a member by name, nickname, ID, or mention"""
@@ -8873,15 +8599,14 @@ class AdminPanelModal(discord.ui.Modal):
             try:
                 channel_id = int(self.children[0].value.strip())
                 duration_minutes = int(self.children[1].value.strip()) if len(self.children) > 1 and self.children[1].value.strip() else 10
-                duration_seconds = duration_minutes * 60
                 
                 channel = bot.get_channel(channel_id)
                 if not channel:
                     await interaction.response.send_message(f"Could not find channel with ID {channel_id}!", ephemeral=True)
                     return
                 
-                # Start the rain
-                await give_rain(channel, duration_seconds)
+                # Start the rain (give_rain expects minutes)
+                await give_rain(channel, duration_minutes)
                 await interaction.response.send_message(f"✅ Started a {duration_minutes} minute cat rain in {channel.mention}!", ephemeral=True)
             except ValueError:
                 await interaction.response.send_message("Invalid channel ID or duration!", ephemeral=True)
@@ -8959,12 +8684,44 @@ class AdminPanel(discord.ui.View):
     @discord.ui.button(label="Test Adventure", style=ButtonStyle.green, row=1)
     async def test_adventure(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Test Adventure", interaction.guild))
+    
+    @discord.ui.button(label="Test Random Rain", style=ButtonStyle.green, row=2)
+    async def test_random_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Find all eligible channels (has cat_spawns enabled and has at least 100 message count)
+        all_channels = await ChannelData.filter(guild_id=interaction.guild.id, cat_spawns=True, message_count__gte=100)
         
-    @discord.ui.button(label="Speak", style=ButtonStyle.green, row=2)
+        if not all_channels:
+            await interaction.response.send_message("No eligible channels found for random rain!", ephemeral=True)
+            return
+            
+        # Pick a random channel
+        import random
+        target_channel_data = random.choice(all_channels)
+        target_ch = bot.get_channel(target_channel_data.channel_id)
+        
+        if not target_ch:
+            await interaction.response.send_message("Could not find target channel!", ephemeral=True)
+            return
+        
+        # Start a 5 minute rain
+        duration = 5
+        await give_rain(target_ch, duration)
+        
+        # Notify both admin and target channel
+        end_time = int(time.time() + (duration * 60))
+        admin_ch = bot.get_channel(ADMIN_CHANNEL_ID)
+        if admin_ch:
+            await admin_ch.send(f"🌧️ **Random rain started** in {target_ch.mention} for **{duration} minutes**! (ends <t:{end_time}:R>)")
+        
+        await target_ch.send(f"🌧️ **It's raining cats!** for the next **{duration} minutes**! Catch them while you can! (ends <t:{end_time}:R>)")
+        
+        await interaction.response.send_message(f"Started random rain in {target_ch.mention} for {duration} minutes!", ephemeral=True)
+        
+    @discord.ui.button(label="Speak", style=ButtonStyle.green, row=3)
     async def speak(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Speak", interaction.guild))
         
-    @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green, row=2)
+    @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green, row=3)
     async def start_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Start Giveaway", interaction.guild))
 
@@ -13726,7 +13483,7 @@ async def cosmetics(message: discord.Interaction):
                 
                 options.append(discord.SelectOption(
                     label=display[:100],
-                    description=f"{item_data['price']} Kibbles - {item_data['description']}"[:100],
+                    description=f"{item_data['price']} Kibbles - {item_data.get('description', item_data.get('name', 'No description'))}"[:100],
                     value=item_id
                 ))
             
@@ -15115,6 +14872,9 @@ async def atm(message: discord.Interaction):
                     
                     fresh_profile.kibble = (fresh_profile.kibble or 0) + total_kibble
                     await fresh_profile.save()
+                    
+                    # Progress ATM quest
+                    await progress(message, fresh_profile, "atm")
                     
                     await conf_it.edit_original_response(
                         content=f"✅ Converted **{len(cats_to_convert)} cats** → **{total_kibble:,} Kibbles**!\nNew balance: **{fresh_profile.kibble:,} Kibbles**",
@@ -17612,10 +17372,19 @@ def _pick_breed_result(parent_a: str, parent_b: str) -> Optional[str]:
 
 
 @bot.tree.command(description="Breed two cats to get an offspring (chances are based on parents' averaged rarity)")
-async def breed(message: discord.Interaction):
+@app_commands.describe(
+    first_cat="Optional: Type of first parent cat for instant breeding (e.g. Fine)",
+    second_cat="Optional: Type of second parent cat for instant breeding (e.g. Fine)"
+)
+async def breed(
+    message: discord.Interaction,
+    first_cat: Optional[str] = None,
+    second_cat: Optional[str] = None
+):
         """
-        Command: /breed
-        - Opens an advanced selector to choose two parent cats.
+        Command: /breed [first_cat] [second_cat]
+        - If no parameters: Opens an advanced selector to choose two parent cats.
+        - If both parameters: Instantly breeds the two cats by type.
         - Consumes one of each specified cat type from the caller's server inventory.
         - Produces an offspring whose probability distribution is centered on the
           average spawn/rarity value of both parents (not required to be strictly rarer).
@@ -17630,6 +17399,134 @@ async def breed(message: discord.Interaction):
             await message.followup.send("You don't have any cats to breed!", ephemeral=True)
             return
         
+        # INSTANT BREEDING: If both cat types provided, breed them directly
+        if first_cat and second_cat:
+            # Normalize cat type names (capitalize first letter)
+            cat1_type = first_cat.capitalize()
+            cat2_type = second_cat.capitalize()
+            
+            # Find cats of the specified types that are not on adventure
+            cat1_candidates = [c for c in cats_list if c.get("type") == cat1_type and not c.get("on_adventure")]
+            cat2_candidates = [c for c in cats_list if c.get("type") == cat2_type and not c.get("on_adventure")]
+            
+            if not cat1_candidates:
+                await message.followup.send(f"❌ You don't have any **{cat1_type}** cats available to breed!", ephemeral=True)
+                return
+            if not cat2_candidates:
+                await message.followup.send(f"❌ You don't have any **{cat2_type}** cats available to breed!", ephemeral=True)
+                return
+            
+            # If same type, need at least 2
+            if cat1_type == cat2_type and len(cat1_candidates) < 2:
+                await message.followup.send(f"❌ You need at least 2 **{cat1_type}** cats to breed them together!", ephemeral=True)
+                return
+            
+            # Select the cats to breed (prefer lower bond cats)
+            cat1_inst = sorted(cat1_candidates, key=lambda c: c.get("bond", 0))[0]
+            if cat1_type == cat2_type:
+                # For same type, get second lowest bond
+                cat2_inst = sorted([c for c in cat1_candidates if c.get("id") != cat1_inst.get("id")], key=lambda c: c.get("bond", 0))[0]
+            else:
+                cat2_inst = sorted(cat2_candidates, key=lambda c: c.get("bond", 0))[0]
+            
+            # Check bond levels and ask for confirmation if bond > 0
+            cat1_bond = cat1_inst.get("bond", 0)
+            cat2_bond = cat2_inst.get("bond", 0)
+            needs_confirmation = cat1_bond > 0 or cat2_bond > 0
+            
+            if needs_confirmation:
+                # Create confirmation view
+                class ConfirmBreedView(View):
+                    def __init__(self):
+                        super().__init__(timeout=60)
+                        self.confirmed = False
+                    
+                    @discord.ui.button(label="✅ Confirm Breed", style=ButtonStyle.success)
+                    async def confirm_btn(self, btn_it: discord.Interaction, button: Button):
+                        if btn_it.user.id != message.user.id:
+                            await do_funny(btn_it)
+                            return
+                        self.confirmed = True
+                        await btn_it.response.defer()
+                        self.stop()
+                    
+                    @discord.ui.button(label="❌ Cancel", style=ButtonStyle.danger)
+                    async def cancel_btn(self, btn_it: discord.Interaction, button: Button):
+                        if btn_it.user.id != message.user.id:
+                            await do_funny(btn_it)
+                            return
+                        await btn_it.response.send_message("Breeding cancelled.", ephemeral=True)
+                        self.stop()
+                
+                confirm_view = ConfirmBreedView()
+                bond_warning = ""
+                if cat1_bond > 0:
+                    bond_warning += f"⚠️ **{cat1_inst.get('name')}** has bond level {cat1_bond}/100\n"
+                if cat2_bond > 0:
+                    bond_warning += f"⚠️ **{cat2_inst.get('name')}** has bond level {cat2_bond}/100\n"
+                
+                await message.followup.send(
+                    f"**Warning:** You are about to breed cats with bond!\n\n"
+                    f"{bond_warning}\n"
+                    f"Are you sure you want to breed these cats? They will be consumed in the process.",
+                    view=confirm_view,
+                    ephemeral=True
+                )
+                
+                await confirm_view.wait()
+                
+                if not confirm_view.confirmed:
+                    return
+            
+            # Perform the breeding
+            # Remove the cat instances
+            cats_list.remove(cat1_inst)
+            cats_list.remove(cat2_inst)
+            await save_user_cats(message.guild.id, message.user.id, cats_list)
+            
+            # Update profile cat counts
+            profile[f"cat_{cat1_type}"] -= 1
+            profile[f"cat_{cat2_type}"] -= 1
+            
+            # Generate offspring
+            offspring = _pick_breed_result(cat1_type, cat2_type)
+            if offspring:
+                profile[f"cat_{offspring}"] += 1
+                profile.breeds_total = (profile.breeds_total or 0) + 1
+                await profile.save()
+                
+                # Create offspring instance
+                try:
+                    await auto_sync_cat_instances(profile, offspring)
+                except Exception:
+                    pass
+                
+                # Send result
+                await message.followup.send(
+                    f"🧬 **Breeding complete!**\n\n"
+                    f"{get_emoji(cat1_type.lower()+'cat')} **{cat1_inst.get('name')}** ({cat1_type}) + "
+                    f"{get_emoji(cat2_type.lower()+'cat')} **{cat2_inst.get('name')}** ({cat2_type}) → "
+                    f"{get_emoji(offspring.lower()+'cat')} **{offspring}**!",
+                    ephemeral=False
+                )
+                await message.channel.send(f"{message.user.mention} bred two cats and got a **{offspring}**!")
+                
+                # Achievement
+                try:
+                    await achemb(message, "freak", "send")
+                except Exception:
+                    pass
+            else:
+                await message.followup.send("❌ Breeding failed - invalid parent combination!", ephemeral=True)
+            
+            return
+        
+        # If only one cat type provided, show error
+        if first_cat or second_cat:
+            await message.followup.send("❌ You must provide both cat types for instant breeding, or use `/breed` without parameters for the menu.", ephemeral=True)
+            return
+        
+        # REGULAR BREEDING MENU: No parameters provided
         # State variables for breeding pairs
         breed_pairs = []  # Will store [(cat1_type, cat2_type), ...]
         
