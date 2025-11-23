@@ -4841,7 +4841,7 @@ async def ensure_user_instances(guild_id: int, user_id: int):
         if profile:
             for ct in cattypes:
                 try:
-                    db_count = int(profile.get(f"cat_{ct}") or 0)
+                    db_count = int(getattr(profile, f"cat_{ct}", 0) or 0)
                 except Exception:
                     db_count = 0
                 inst_count = int(counter.get(ct, 0))
