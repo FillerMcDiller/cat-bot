@@ -796,7 +796,7 @@ def save_guild_shop(guild_id: int, shop_data: dict):
 
 
 
-async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int):
+async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int, enchanted: bool = False):
     """Create `amount` instances in the database WITHOUT touching aggregated DB counters.
 
     This is used to repair/sync per-instance storage when aggregated counters indicate the
@@ -804,6 +804,12 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
     """
     if amount <= 0:
         return
+    
+    try:
+        from cat_modifiers import add_modifier
+    except Exception:
+        add_modifier = None
+    
     cats = await get_user_cats(guild_id, user_id)
     for _ in range(amount):
         # ensure unique id
@@ -835,6 +841,11 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
             "dmg": dmg,
             "acquired_at": int(time.time()),
         }
+        
+        # Add enchanted modifier if applicable
+        if enchanted and add_modifier:
+            add_modifier(instance, "enchanted")
+        
         cats.append(instance)
     await save_user_cats(guild_id, user_id, cats)
 
@@ -935,7 +946,7 @@ async def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
     return updated
 
 
-async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
+async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchanted: bool = False):
     """Automatically sync cat instances with database counts.
     
     If a specific cat_type is provided, only sync that type.
@@ -985,10 +996,11 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None):
         if db_count > inst_count:
             missing = db_count - inst_count
             if missing > 0:
-                # Create missing instances
-                await _create_instances_only(guild_id, user_id, ct, missing)
+                # Create missing instances, passing the enchanted flag
+                await _create_instances_only(guild_id, user_id, ct, missing, enchanted=enchanted)
                 created_any = True
-                print(f"[AUTO-SYNC] Created {missing}x {ct} instances for user {user_id} (guild {guild_id})", flush=True)
+                enchanted_text = " (enchanted)" if enchanted else ""
+                print(f"[AUTO-SYNC] Created {missing}x {ct} instances{enchanted_text} for user {user_id} (guild {guild_id})", flush=True)
     
     return created_any
 
@@ -5017,6 +5029,7 @@ news_list = [
     {"title": "Regarding recent instabilities", "emoji": "🗒️"},
     {"title": "NEW CATS, KIBBLE, AND.. ITEMS??? WOWOWOWOOWO!!!", "emoji": "🔥"},
     {"title": "BIG APOLOGIES FOR LAST NIGHT!", "emoji": "😭"},
+    {"title": "CAT MODIFIERS ARE HERE!", "emoji": "✨"},
 ]
 
 
@@ -7533,7 +7546,9 @@ async def on_message(message: discord.Message):
                 
                 # Auto-sync cat instances immediately after catch
                 try:
-                    await auto_sync_cat_instances(user, le_emoji)
+                    # Pass enchanted flag from channel if the cat is enchanted
+                    is_enchanted = bool(getattr(channel, 'enchanted', False))
+                    await auto_sync_cat_instances(user, le_emoji, enchanted=is_enchanted)
                 except Exception as e:
                     print(f"[AUTO-SYNC] Failed to sync after catch: {e}", flush=True)
 
@@ -8883,43 +8898,6 @@ async def rainstart(interaction: discord.Interaction, channel_id: str, duration:
         await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"Error starting rain: {str(e)}", ephemeral=True)
-
-@bot.tree.command(description="(OWNER) Spawn a specific cat in a channel")
-@discord.app_commands.describe(channel_id="Channel ID to spawn cat in", cat_type="Cat type to spawn", enchanted="Make it enchanted (true/false)")
-async def spawncat(interaction: discord.Interaction, channel_id: str, cat_type: str = None, enchanted: str = "false"):
-    """Spawn a specific cat in a channel"""
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    try:
-        ch_id = int(channel_id)
-        channel = bot.get_channel(ch_id)
-        if not channel:
-            await interaction.response.send_message(f"Could not find channel with ID {ch_id}!", ephemeral=True)
-            return
-        
-        # Parse enchanted flag
-        is_enchanted = enchanted.lower().strip() in ["true", "1", "yes", "y"]
-        
-        # If no cat type specified, pick a random one
-        if not cat_type:
-            cat_type = random.choices(cattypes, weights=type_dict.values())[0]
-        else:
-            # Validate cat type
-            if cat_type not in type_dict:
-                await interaction.response.send_message(f"Invalid cat type: {cat_type}", ephemeral=True)
-                return
-        
-        # Spawn the cat
-        await spawn_cat(ch_id, cat_type, force_spawn=True, enchanted=is_enchanted)
-        
-        enchanted_text = " ✨ Enchanted" if is_enchanted else ""
-        await interaction.response.send_message(f"✅ Spawned a {cat_type}{enchanted_text} cat in {channel.mention}!", ephemeral=True)
-    except ValueError:
-        await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"Error spawning cat: {str(e)}", ephemeral=True)
 
 @bot.tree.command(description="(OWNER) Give kibbles to a user")
 @discord.app_commands.describe(user="User to give kibbles to", amount="Amount of kibbles to give")
@@ -10314,11 +10292,22 @@ def build_instance_detail_embed(cat_type: str, inst: dict) -> discord.Embed:
 
     Shows name, id, type, HP, DMG, acquired time, on_adventure, and a bond bar (0-100).
     """
-    name = inst.get("name") or "Unnamed"
+    try:
+        from cat_modifiers import get_cat_display_name, apply_stat_multipliers, get_image_path
+    except Exception:
+        get_cat_display_name = lambda c: c.get("name", "Unnamed")
+        apply_stat_multipliers = lambda c: {"hp": c.get("hp"), "dmg": c.get("dmg")}
+        get_image_path = lambda c, **kw: f"images/spawn/{c.get('type', 'Fine').lower()}_cat.png"
+    
+    name = get_cat_display_name(inst)
     cid = inst.get("id")
     bond = int(inst.get("bond", 0))
-    hp = inst.get("hp")
-    dmg = inst.get("dmg")
+    
+    # Apply stat multipliers from modifiers
+    modified_stats = apply_stat_multipliers(inst)
+    hp = modified_stats.get("hp", inst.get("hp"))
+    dmg = modified_stats.get("dmg", inst.get("dmg"))
+    
     acquired = inst.get("acquired_at")
     on_adv = inst.get("on_adventure")
 
@@ -10346,10 +10335,21 @@ def build_instance_detail_embed(cat_type: str, inst: dict) -> discord.Embed:
         embed.add_field(name="Favorite", value="Yes" if fav else "No", inline=True)
     except Exception:
         pass
+    
+    # Show modifiers if present
+    try:
+        modifiers = inst.get("modifiers", [])
+        if modifiers:
+            from cat_modifiers import CAT_MODIFIERS
+            mod_text = ", ".join([CAT_MODIFIERS[m].get("emoji", "") + " " + CAT_MODIFIERS[m].get("name", m) for m in modifiers if m in CAT_MODIFIERS])
+            if mod_text:
+                embed.add_field(name="Modifiers", value=mod_text, inline=False)
+    except Exception:
+        pass
 
     # try to include an image if available
     try:
-        img_path = f"images/spawn/{cat_type.lower()}_cat.png"
+        img_path = get_image_path(inst)
         if os.path.exists(img_path):
             file = discord.File(img_path, filename=os.path.basename(img_path))
             embed.set_image(url=f"attachment://{os.path.basename(img_path)}")
@@ -10623,13 +10623,23 @@ class AdvancedCatSelector(discord.ui.View):
                 cat_id = cat.get('id')
                 name = cat.get('name', 'Unknown')
                 cat_type = cat.get('type', 'Unknown')
-                hp = cat.get('hp', 0)
-                dmg = cat.get('dmg', 0)
                 bond = cat.get('bond', 0)
                 is_fav = "⭐ " if cat.get('favorite', False) else ""
                 
+                # Get display name with modifiers and apply stat multipliers
+                try:
+                    from cat_modifiers import get_cat_display_name, apply_stat_multipliers
+                    display_name = get_cat_display_name(cat)
+                    modified_stats = apply_stat_multipliers(cat)
+                    hp = modified_stats.get('hp', cat.get('hp', 0))
+                    dmg = modified_stats.get('dmg', cat.get('dmg', 0))
+                except Exception:
+                    display_name = name
+                    hp = cat.get('hp', 0)
+                    dmg = cat.get('dmg', 0)
+                
                 options.append(discord.SelectOption(
-                    label=f"{is_fav}{name} ({cat_type})"[:100],
+                    label=f"{is_fav}{display_name} ({cat_type})"[:100],
                     description=f"HP: {hp} | DMG: {dmg} | Bond: {bond}"[:100],
                     value=str(cat_id)
                 ))
@@ -17485,9 +17495,9 @@ async def fake(message: discord.Interaction):
 @bot.tree.command(description="(ADMIN) Force cats to appear")
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.rename(cat_type="type")
-@discord.app_commands.describe(cat_type="select a cat type ok")
+@discord.app_commands.describe(cat_type="select a cat type ok", enchanted="Make it enchanted (true/false)")
 @discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
-async def forcespawn(message: discord.Interaction, cat_type: Optional[str]):
+async def forcespawn(message: discord.Interaction, cat_type: Optional[str], enchanted: Optional[str] = None):
     if cat_type and cat_type not in cattypes:
         await message.response.send_message("bro what", ephemeral=True)
         return
@@ -17499,10 +17509,16 @@ async def forcespawn(message: discord.Interaction, cat_type: Optional[str]):
     if ch.cat:
         await message.response.send_message("there is already a cat", ephemeral=True)
         return
+    
+    # Parse enchanted flag
+    is_enchanted = enchanted and enchanted.lower().strip() in ["true", "1", "yes", "y"]
+    
     ch.yet_to_spawn = 0
     await ch.save()
-    await spawn_cat(str(message.channel.id), cat_type, True)
-    await message.response.send_message("done!\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
+    await spawn_cat(str(message.channel.id), cat_type, True, enchanted=is_enchanted)
+    
+    enchanted_text = " ✨ Enchanted" if is_enchanted else ""
+    await message.response.send_message(f"done!{enchanted_text}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
 
 
 @bot.tree.command(description="(ADMIN) Give achievements to people")
