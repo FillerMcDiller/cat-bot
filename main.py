@@ -806,8 +806,12 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
     if amount <= 0:
         return
     
+    # Check if there are pending enchanted instances for this user/cat type
+    pending_key = (guild_id, user_id, cat_type)
+    pending_enchanted_count = pending_enchanted.get(pending_key, 0)
+    
     cats = await get_user_cats(guild_id, user_id)
-    for _ in range(amount):
+    for i in range(amount):
         # ensure unique id
         while True:
             cid = uuid.uuid4().hex[:8]
@@ -838,10 +842,17 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
             "acquired_at": int(time.time()),
         }
         
-        # Add enchanted modifier if applicable
-        if enchanted:
+        # Apply enchanted modifier if explicitly requested OR if there are pending enchanted instances
+        should_enchant = enchanted or (pending_enchanted_count > 0)
+        if should_enchant:
             if add_modifier(instance, "enchanted"):
                 print(f"[ENCHANTED] Added enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
+                # Decrement pending count if we used one
+                if pending_enchanted_count > 0:
+                    pending_enchanted_count -= 1
+                    pending_enchanted[pending_key] = pending_enchanted_count
+                    if pending_enchanted_count == 0:
+                        del pending_enchanted[pending_key]
             else:
                 print(f"[ENCHANTED] Failed to add enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
         
@@ -1010,6 +1021,10 @@ active_adventures = {}  # Tracks active adventures
 active_reminders = {}  # Tracks active reminders
 # cooldown tracker for pet actions: key = (guild_id, user_id, instance_id) -> last_pet_ts
 pet_cooldowns = {}
+# Track enchanted spawns: channel_id -> (cat_type, is_enchanted)
+enchanted_spawns = {}
+# Track enchanted catches: (guild_id, user_id, cat_type) -> count of pending enchanted instances
+pending_enchanted = {}
 
 # Simple in-memory active fights mapping: channel_id -> SimpleFightSession
 FIGHT_SESSIONS: dict = {}
@@ -5756,6 +5771,10 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
     channel.cattype = localcat
     channel.enchanted = enchanted
     await channel.save()
+    
+    # Store enchanted status in memory for when cat is caught
+    if enchanted:
+        enchanted_spawns[int(ch_id)] = (localcat, True)
 
 
 async def postpone_reminder(interaction):
@@ -7542,6 +7561,13 @@ async def on_message(message: discord.Message):
                         # last resort: leave new_count as computed value
                         pass
                     new_count = new_val
+                
+                # Track enchanted catches for later application
+                if message.channel.id in enchanted_spawns:
+                    spawn_info = enchanted_spawns.pop(message.channel.id)
+                    if spawn_info[1]:  # is_enchanted
+                        key = (message.guild.id, message.author.id, le_emoji)
+                        pending_enchanted[key] = pending_enchanted.get(key, 0) + 1
 
                 async def delete_cat():
                     try:
