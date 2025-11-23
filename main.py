@@ -7252,7 +7252,6 @@ async def on_message(message: discord.Message):
                             await progress(message, user, "finenice", True)
                             await progress(message, user, "finenice", True)
         else:
-            print(f"[CATCH-START] Caught cat in channel {message.channel.id}, channel.enchanted={getattr(channel, 'enchanted', 'NOT SET')}", flush=True)
             pls_remove_me_later_k_thanks = channel.cat
             temp_catches_storage.append(channel.cat)
             times = [channel.spawn_times_min, channel.spawn_times_max]
@@ -7543,34 +7542,6 @@ async def on_message(message: discord.Message):
                         # last resort: leave new_count as computed value
                         pass
                     new_count = new_val
-                
-                # Save the counter increment to DB immediately so auto_sync can read the updated value
-                await user.save()
-                
-                # Apply enchanted modifier to the most recently caught instance if needed
-                try:
-                    is_enchanted = bool(getattr(channel, 'enchanted', False))
-                    if is_enchanted:
-                        # Get all cats and find the most recently added one of this type
-                        cats = await get_user_cats(message.guild.id, message.author.id)
-                        # Find the most recent instance of this cat type (the one we just caught)
-                        recent_cat = None
-                        for cat in reversed(cats):
-                            if cat.get("type") == le_emoji and not cat.get("modifiers"):
-                                recent_cat = cat
-                                break
-                        
-                        if recent_cat:
-                            add_modifier(recent_cat, "enchanted")
-                            await save_user_cats(message.guild.id, message.author.id, cats)
-                            print(f"[ENCHANTED] Applied enchanted modifier to caught {le_emoji} cat", flush=True)
-                    
-                    # Also sync for any missing instances
-                    await auto_sync_cat_instances(user, le_emoji, enchanted=is_enchanted)
-                except Exception as e:
-                    print(f"[CATCH-MODIFIER] Failed to apply modifier: {e}", flush=True)
-                    import traceback
-                    traceback.print_exc()
 
                 async def delete_cat():
                     try:
