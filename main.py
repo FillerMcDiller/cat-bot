@@ -17498,12 +17498,16 @@ async def forcespawn(message: discord.Interaction, cat_type: Optional[str], ench
     # Parse enchanted flag
     is_enchanted = enchanted and enchanted.lower().strip() in ["true", "1", "yes", "y"]
     
+    enchanted_text = " ✨ Enchanted" if is_enchanted else ""
+    
+    # Respond immediately to avoid 3-second timeout
+    await message.response.defer()
+    
     ch.yet_to_spawn = 0
     await ch.save()
     await spawn_cat(str(message.channel.id), cat_type, True, enchanted=is_enchanted)
     
-    enchanted_text = " ✨ Enchanted" if is_enchanted else ""
-    await message.response.send_message(f"done!{enchanted_text}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
+    await message.followup.send(f"done!{enchanted_text}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
 
 
 @bot.tree.command(description="(ADMIN) Give achievements to people")
