@@ -7563,9 +7563,11 @@ async def on_message(message: discord.Message):
                     new_count = new_val
                 
                 # Track enchanted catches for later application
+                is_enchanted = False
                 if message.channel.id in enchanted_spawns:
                     spawn_info = enchanted_spawns.pop(message.channel.id)
                     if spawn_info[1]:  # is_enchanted
+                        is_enchanted = True
                         key = (message.guild.id, message.author.id, le_emoji)
                         pending_enchanted[key] = pending_enchanted.get(key, 0) + 1
 
@@ -7582,15 +7584,25 @@ async def on_message(message: discord.Message):
                         if view:
                             kwargs["view"] = view
 
-                        await send_target.send(
-                            coughstring.replace("{username}", message.author.name.replace("_", "\\_"))
-                            .replace("{emoji}", str(icon))
-                            .replace("{type}", le_emoji)
-                            .replace("{count}", f"{new_count:,}")
-                            .replace("{time}", caught_time[:-1])
-                            + suffix_string,
-                            **kwargs,
-                        )
+                        # Build the catch message
+                        catch_message = coughstring.replace("{username}", message.author.name.replace("_", "\\_"))
+                        catch_message = catch_message.replace("{emoji}", str(icon))
+                        catch_message = catch_message.replace("{type}", le_emoji)
+                        catch_message = catch_message.replace("{count}", f"{new_count:,}")
+                        catch_message = catch_message.replace("{time}", caught_time[:-1])
+                        
+                        # Add enchanted indicator if applicable
+                        if is_enchanted:
+                            catch_message = catch_message.replace(message.author.name.replace("_", "\\_"), 
+                                                                  f"{message.author.name.replace('_', '\\_')} caught ✨***ENCHANTED***", 1)
+                        
+                        catch_message += suffix_string
+                        
+                        # Add vote link randomly
+                        if random.randint(0, 100) == 0:
+                            catch_message += "\n[Vote for us!](https://top.gg/bot/1387305159264309399/vote)"
+                        
+                        await send_target.send(catch_message, **kwargs)
                     except Exception:
                         pass
 
@@ -10987,10 +10999,13 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
             parent_inter = interaction2
 
             class UseSelect(discord.ui.Select):
-                def __init__(self, options):
+                def __init__(self, options, guild_id, owner_id, instance_id):
                     super().__init__(placeholder="Select an item to use...", min_values=1, max_values=1, options=options)
+                    self.guild_id = guild_id
+                    self.owner_id = owner_id
+                    self.instance_id = instance_id
 
-                async def callback(self4, sel_inter: discord.Interaction):
+                async def callback(self, sel_inter: discord.Interaction):
                     if sel_inter.user.id != parent_inter.user.id:
                         await do_funny(sel_inter)
                         return
@@ -11074,7 +11089,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             await sel_inter.followup.send("Failed to apply item effect.", ephemeral=True)
 
             sel_view = View(timeout=120)
-            sel_view.add_item(UseSelect(opts))
+            sel_view.add_item(UseSelect(opts, self.guild_id, self.owner_id, self.instance_id))
             try:
                 await interaction2.followup.send("Choose an item to use:", view=sel_view, ephemeral=True)
             except Exception:
@@ -11451,6 +11466,15 @@ async def gen_inventory(message, person_id):
     user_adv = active_adventures.get(str(person_id.id))
     adventuring_cat = user_adv["cat"] if user_adv else None
     
+    # Get all cats to count enchanted ones
+    all_cats = await get_user_cats(message.guild.id, person_id.id) or []
+    enchanted_counts = {}
+    for cat in all_cats:
+        cat_type = cat.get('type')
+        modifiers = cat.get('modifiers', [])
+        if cat_type and 'enchanted' in modifiers:
+            enchanted_counts[cat_type] = enchanted_counts.get(cat_type, 0) + 1
+    
     for i in cattypes:
         icon = get_emoji(i.lower() + "cat")
         cat_num = person[f"cat_{i}"]
@@ -11459,10 +11483,17 @@ async def gen_inventory(message, person_id):
         if cat_num != 0:
             total += cat_num
             valuenum += (sum(type_dict.values()) / type_dict[i]) * cat_num
+            enchanted_num = enchanted_counts.get(i, 0)
             if i == adventuring_cat:
-                cat_desc += f"{icon} **{i}** {cat_num:,} (1 On Adventure)\n"
+                if enchanted_num > 0:
+                    cat_desc += f"{icon} **{i}** {cat_num:,} (1 On Adventure, {enchanted_num}✨)\n"
+                else:
+                    cat_desc += f"{icon} **{i}** {cat_num:,} (1 On Adventure)\n"
             else:
-                cat_desc += f"{icon} **{i}** {cat_num:,}\n"
+                if enchanted_num > 0:
+                    cat_desc += f"{icon} **{i}** {cat_num:,} ({enchanted_num}✨)\n"
+                else:
+                    cat_desc += f"{icon} **{i}** {cat_num:,}\n"
         else:
             give_collector = False
 
