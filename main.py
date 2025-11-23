@@ -839,8 +839,11 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
         }
         
         # Add enchanted modifier if applicable
-        if enchanted and add_modifier:
-            add_modifier(instance, "enchanted")
+        if enchanted:
+            if add_modifier(instance, "enchanted"):
+                print(f"[ENCHANTED] Added enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
+            else:
+                print(f"[ENCHANTED] Failed to add enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
         
         cats.append(instance)
     await save_user_cats(guild_id, user_id, cats)
@@ -7547,6 +7550,7 @@ async def on_message(message: discord.Message):
                 try:
                     # Pass enchanted flag from channel if the cat is enchanted
                     is_enchanted = bool(getattr(channel, 'enchanted', False))
+                    print(f"[CATCH] Syncing {le_emoji} cat, enchanted={is_enchanted}", flush=True)
                     await auto_sync_cat_instances(user, le_emoji, enchanted=is_enchanted)
                 except Exception as e:
                     print(f"[AUTO-SYNC] Failed to sync after catch: {e}", flush=True)
