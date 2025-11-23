@@ -49,6 +49,7 @@ import topgg
 
 import config
 import msg2img
+from cat_modifiers import add_modifier, get_cat_display_name, apply_stat_multipliers, get_image_path, CAT_MODIFIERS
 from catpg import RawSQL
 from database import Adventure, Channel, Deck, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
@@ -804,11 +805,6 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
     """
     if amount <= 0:
         return
-    
-    try:
-        from cat_modifiers import add_modifier
-    except Exception:
-        add_modifier = None
     
     cats = await get_user_cats(guild_id, user_id)
     for _ in range(amount):
@@ -8545,8 +8541,6 @@ class AdminPanelModal(discord.ui.Modal):
             enchanted = enchanted_str in ["true", "1", "yes", "y"]
             
             try:
-                from cat_modifiers import add_modifier
-                
                 # Get cats and add instances
                 cats = await get_user_cats(interaction.guild.id, member.id)
                 for _ in range(amount):
@@ -10292,13 +10286,6 @@ def build_instance_detail_embed(cat_type: str, inst: dict) -> discord.Embed:
 
     Shows name, id, type, HP, DMG, acquired time, on_adventure, and a bond bar (0-100).
     """
-    try:
-        from cat_modifiers import get_cat_display_name, apply_stat_multipliers, get_image_path
-    except Exception:
-        get_cat_display_name = lambda c: c.get("name", "Unnamed")
-        apply_stat_multipliers = lambda c: {"hp": c.get("hp"), "dmg": c.get("dmg")}
-        get_image_path = lambda c, **kw: f"images/spawn/{c.get('type', 'Fine').lower()}_cat.png"
-    
     name = get_cat_display_name(inst)
     cid = inst.get("id")
     bond = int(inst.get("bond", 0))
@@ -10340,7 +10327,6 @@ def build_instance_detail_embed(cat_type: str, inst: dict) -> discord.Embed:
     try:
         modifiers = inst.get("modifiers", [])
         if modifiers:
-            from cat_modifiers import CAT_MODIFIERS
             mod_text = ", ".join([CAT_MODIFIERS[m].get("emoji", "") + " " + CAT_MODIFIERS[m].get("name", m) for m in modifiers if m in CAT_MODIFIERS])
             if mod_text:
                 embed.add_field(name="Modifiers", value=mod_text, inline=False)
@@ -10628,7 +10614,6 @@ class AdvancedCatSelector(discord.ui.View):
                 
                 # Get display name with modifiers and apply stat multipliers
                 try:
-                    from cat_modifiers import get_cat_display_name, apply_stat_multipliers
                     display_name = get_cat_display_name(cat)
                     modified_stats = apply_stat_multipliers(cat)
                     hp = modified_stats.get('hp', cat.get('hp', 0))
