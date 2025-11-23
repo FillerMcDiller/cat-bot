@@ -7540,6 +7540,9 @@ async def on_message(message: discord.Message):
                         pass
                     new_count = new_val
                 
+                # Save the counter increment to DB immediately so auto_sync can read the updated value
+                await user.save()
+                
                 # Auto-sync cat instances immediately after catch
                 try:
                     # Pass enchanted flag from channel if the cat is enchanted
