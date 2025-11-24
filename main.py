@@ -5963,7 +5963,9 @@ async def maintaince_loop():
 
     # revive dead catch loops
     async for channel in Channel.limit(["channel_id"], "yet_to_spawn < $1 AND cat = 0", time.time(), refetch=False):
-        await spawn_cat(str(channel.channel_id))
+        # 1 in 3 chance to spawn an enchanted cat
+        is_enchanted = random.randint(1, 3) == 1
+        await spawn_cat(str(channel.channel_id), enchanted=is_enchanted)
         await asyncio.sleep(0.1)
 
     # Process any completed adventures
@@ -6483,7 +6485,9 @@ async def maintaince_loop():
                     channel_db.yet_to_spawn = 0
                     await channel_db.save()
                     # spawn initial cat immediately
-                    await spawn_cat(str(chosen))
+                    # 1 in 3 chance to spawn an enchanted cat
+                    is_enchanted = random.randint(1, 3) == 1
+                    await spawn_cat(str(chosen), enchanted=is_enchanted)
                     last_random_rain_time = time.time()
                     try:
                         notify_ch = bot.get_channel(config.RAIN_CHANNEL_ID)
@@ -7848,7 +7852,9 @@ async def on_message(message: discord.Message):
                         temp_catches_storage.remove(pls_remove_me_later_k_thanks)
                     except Exception:
                         pass
-                    await spawn_cat(str(message.channel.id))
+                    # 1 in 3 chance to spawn an enchanted cat
+                    is_enchanted = random.randint(1, 3) == 1
+                    await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
                 else:
                     try:
                         temp_catches_storage.remove(pls_remove_me_later_k_thanks)
@@ -9319,7 +9325,9 @@ async def give_rain(channel, duration):
     channel_data.cat_rains = time.time() + (duration * 60)
     channel_data.yet_to_spawn = 0
     await channel_data.save()
-    await spawn_cat(str(channel.id))
+    # 1 in 3 chance to spawn an enchanted cat
+    is_enchanted = random.randint(1, 3) == 1
+    await spawn_cat(str(channel.id), enchanted=is_enchanted)
     # Notify the channel that a rain event has started
     try:
         await channel.send(f"🌧️ A Cat Rain has started in this channel for {duration} minutes, ending <t:{int(channel_data.cat_rains)}:R>!")
@@ -12417,7 +12425,9 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
         channel.cat_rains = time.time() + (rain_length * 60)
         channel.yet_to_spawn = 0
         await channel.save()
-        await spawn_cat(str(message.channel.id))
+        # 1 in 3 chance to spawn an enchanted cat
+        is_enchanted = random.randint(1, 3) == 1
+        await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
         if profile.rain_minutes:
             if rain_length > profile.rain_minutes:
                 user.rain_minutes -= rain_length - profile.rain_minutes
@@ -17902,7 +17912,9 @@ async def setup_channel(message: discord.Interaction):
         await message.response.send_message("this channel gives me bad vibes.")
         return
 
-    await spawn_cat(str(message.channel.id))
+    # 1 in 3 chance to spawn an enchanted cat
+    is_enchanted = random.randint(1, 3) == 1
+    await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
     await message.response.send_message(f"ok, now i will also send cats in <#{message.channel.id}>")
 
 
