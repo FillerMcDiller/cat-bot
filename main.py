@@ -1529,8 +1529,21 @@ RESTART_WARNING_CHANNEL_ID = 123456789012345678  # replace with your channel ID
 
 bot = commands.AutoShardedBot(
     command_prefix="!",
-    intents=discord.Intents.default()
+    intents=discord.Intents.default(),
+    heartbeat_timeout=120.0,  # Give more time for heartbeat responses during high load
+    # Gateway connection optimization
+    http_trace=None,  # Disable tracing overhead
+    proxy=None,  # No proxy (direct connection is fastest)
+    unsync_clock=False  # Sync with Discord time to avoid desync
 )
+
+# Latency monitoring for troubleshooting
+_latency_spike_threshold = 500  # ms - warn if latency exceeds this
+_last_latency_warning = 0
+
+# Track which Discord gateway we're connected to
+_connected_gateway = None
+_gateway_connect_time = None
 
 # Set an asyncio loop-level exception handler so unhandled exceptions are logged
 def _loop_exception_handler(loop, context):
@@ -1706,7 +1719,28 @@ sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
 
 @bot.event
 async def on_ready():
-    print(f"Bot ready! Logged in as {bot.user} | WS latency: {round(bot.latency*1000)}ms")
+    global _connected_gateway, _gateway_connect_time
+    
+    current_time = time.time()
+    if _connected_gateway is None:
+        _connected_gateway = getattr(bot, 'ws', None)
+        _gateway_connect_time = current_time
+    
+    # Try to log gateway URL for debugging region routing
+    try:
+        if hasattr(bot, 'ws') and bot.ws:
+            gateway_url = getattr(bot.ws, 'gateway_url', 'unknown')
+            print(f"✅ Bot ready! Logged in as {bot.user}")
+            print(f"   Gateway: {gateway_url}")
+            print(f"   WS latency: {round(bot.latency*1000)}ms")
+        else:
+            print(f"✅ Bot ready! Logged in as {bot.user} | WS latency: {round(bot.latency*1000)}ms")
+    except Exception as e:
+        print(f"Bot ready! Logged in as {bot.user} | WS latency: {round(bot.latency*1000)}ms | (gateway URL unavailable: {e})")
+    
+    # Run diagnostics to check if bot is routed to optimal gateway
+    if bot.shard_id == 0:  # Only run once (first shard)
+        await diagnose_connection()
 
 
 def ensure_bot_cogs(b):
@@ -1780,6 +1814,49 @@ async def cleanup_cooldowns():
         await asyncio.sleep(300)  # wait 5 minutes before next cleanup
 
 
+async def monitor_latency():
+    """Background task to monitor bot latency and warn on spikes."""
+    await bot.wait_until_ready()
+    
+    latency_history = []  # Keep rolling 10-sample history
+    MAX_HISTORY = 10
+    
+    while not bot.is_closed():
+        try:
+            current_latency = round(bot.latency * 1000)  # Convert to ms
+            latency_history.append(current_latency)
+            
+            # Keep only last 10 samples
+            if len(latency_history) > MAX_HISTORY:
+                latency_history.pop(0)
+            
+            # Calculate rolling average
+            avg_latency = sum(latency_history) / len(latency_history)
+            
+            # Warn on spike (2x above threshold or absolute threshold exceeded)
+            if current_latency > _latency_spike_threshold or (avg_latency > 100 and current_latency > avg_latency * 2):
+                global _last_latency_warning
+                now = time.time()
+                
+                # Only warn once per 60 seconds to avoid spam
+                if now - _last_latency_warning > 60:
+                    spike_pct = ((current_latency - avg_latency) / avg_latency * 100) if avg_latency > 0 else 0
+                    print(f"⚠️ [LATENCY SPIKE] Current: {current_latency}ms | Avg: {avg_latency:.0f}ms | Spike: +{spike_pct:.0f}%", flush=True)
+                    _last_latency_warning = now
+            
+            # Log periodically (every 60 seconds)
+            if len(latency_history) == MAX_HISTORY:
+                # Only print when history is full, avoiding excessive logging
+                if len(latency_history) % MAX_HISTORY == 0:
+                    print(f"📊 [LATENCY] Current: {current_latency}ms | 10-Sample Avg: {avg_latency:.0f}ms | History: {latency_history}")
+        
+        except Exception as e:
+            print(f"[LATENCY MONITOR ERROR] {e}")
+        
+        # Check latency every 5 seconds
+        await asyncio.sleep(5)
+
+
 # Use proper setup_hook to start background tasks safely
 async def setup_hook():
     print("[SETUP_HOOK] ========== SETUP HOOK STARTED ==========", flush=True)
@@ -1791,6 +1868,8 @@ async def setup_hook():
     bot.loop.create_task(scheduled_restart())
     print("[SETUP_HOOK] Creating cleanup_cooldowns task...", flush=True)
     bot.loop.create_task(cleanup_cooldowns())
+    print("[SETUP_HOOK] Creating latency monitor task...", flush=True)
+    bot.loop.create_task(monitor_latency())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     print("[STARTUP] Creating background_index_all_cats task...", flush=True)
     bot.loop.create_task(background_index_all_cats())
@@ -1940,6 +2019,11 @@ async def start_ffa_setup(interaction: discord.Interaction, initiator: discord.M
 # Lightweight diagnostics: report whether the fights extension and cog are present
 @bot.tree.command(name="fights", description="Check fights system status")
 async def fights_status(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await interaction.response.defer(ephemeral=True)
     mod_ok = True
     try:
@@ -1963,6 +2047,11 @@ async def fights_status(interaction: discord.Interaction):
 async def fight_placeholder(interaction: discord.Interaction, opponent: discord.Member | None = None):
     """Interactive challenge flow with battle mode selection"""
     executor = interaction.user
+
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(executor.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
 
     # Basic validation
     if not interaction.guild:
@@ -3717,6 +3806,11 @@ async def show_tournament_hub(interaction: discord.Interaction):
 async def battles_command(interaction: discord.Interaction):
     """Main battle hub with buttons for all battle-related actions."""
     
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     class BattlesHub(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=300)
@@ -4234,6 +4328,11 @@ async def battles_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatecatstats", description="Update all your cats to use the new battle stat system")
 async def update_cat_stats_command(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Update all existing cats to use the new CAT_BATTLE_STATS system."""
     await interaction.response.defer(ephemeral=True)
     
@@ -4265,6 +4364,11 @@ async def update_cat_stats_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="syncats", description="Sync your cat instances with database counts (admin/troubleshooting)")
 async def sync_cats_command(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Manually trigger cat instance sync for your account."""
     await interaction.response.defer(ephemeral=True)
     
@@ -4426,6 +4530,11 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
 
 @bot.tree.command(name="debug_battles", description="Debug the Battles cog loading and helpers")
 async def debug_battles(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await interaction.response.defer(ephemeral=True)
     import importlib, importlib.util, os, traceback, sys
 
@@ -4931,7 +5040,9 @@ message_cooldown = {}
 
 # Command cooldowns
 catchcooldown = {}
-fakecooldown = {}# KITTAYYYYYYY auto-claims in the channel user last ran /vote in
+fakecooldown = {}
+# Global command cooldown (5 seconds per user across all commands)
+command_cooldown = {}
 # this is a failsafe to store the fact they voted until they ran that atleast once
 pending_votes = []
 
@@ -5019,6 +5130,22 @@ def get_emoji(name):
         return name
     else:
         return "🔳"
+
+
+async def check_global_cooldown(user_id: int, cooldown_seconds: int = 5) -> bool:
+    """
+    Check if a user is on global command cooldown.
+    Returns True if they CAN use a command (cooldown expired).
+    Returns False if they're still on cooldown.
+    """
+    now = time.time()
+    if user_id in command_cooldown:
+        if command_cooldown[user_id] + cooldown_seconds > now:
+            return False  # Still on cooldown
+    
+    # Update the cooldown timestamp
+    command_cooldown[user_id] = now
+    return True  # Cooldown expired, can use command
 
 
 async def fetch_perms(message: discord.Message | discord.Interaction) -> discord.Permissions:
@@ -6575,6 +6702,11 @@ async def schedule_daily_rain():
 @bot.tree.command(description="Send one of your cats on an adventure for 3 hours")
 @discord.app_commands.autocomplete(cat=cat_command_autocomplete)
 async def adventure(interaction: discord.Interaction, cat: Optional[str] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Send one of the user's cats on a 3-hour adventure. Rewards are granted when it returns.
 
     Parameters
@@ -6672,6 +6804,11 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
 
 @bot.tree.command(description="Show your active adventure (if any)")
 async def adventures(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await interaction.response.defer(ephemeral=True)
     user_id = interaction.user.id
     adv = active_adventures.get(str(user_id))
@@ -6846,7 +6983,7 @@ async def on_message(message: discord.Message):
         try:
             person = await bot.fetch_user(int(things[1]))
             await person.send(
-                f"**You have recieved {things[2]} minutes of Cat Rain!** ☔\n\nThanks for your support!\nYou can start a rain with `/rain`. By buying you also get access to `/editprofile` command as well as a role in [our Discord server](<https://discord.gg/staring>), where you can also get a decorative custom cat!\n\nEnjoy your goods!"
+                f"**You have recieved {things[2]} minutes of Cat Rain!** ☔\n\nThanks for your support!\nYou can start a rain with `/rain`. By buying you also get access to `/editprofile` command as well as a role in [our Discord server](<https://discord.gg/Zx6em4AEq2>), where you can also get a decorative custom cat!\n\nEnjoy your goods!"
             )
         except Exception:
             pass
@@ -7527,18 +7664,18 @@ async def on_message(message: discord.Message):
                         url="https://top.gg/bot/1387305159264309399/vote",
                     )
                 elif random.randint(0, 20) == 0:
-                    button = Button(label="Join our Discord!", url="https://discord.gg/staring")
+                    button = Button(label="Join our Discord!", url="https://discord.gg/Zx6em4AEq2")
                 elif random.randint(0, 500) == 0:
-                    button = Button(label="John Discord 🤠", url="https://discord.gg/staring")
+                    button = Button(label="John Discord 🤠", url="https://discord.gg/Zx6em4AEq2")
                 elif random.randint(0, 50000) == 0:
                     button = Button(
                         label="DAVE DISCORD 😀💀⚠️🥺",
-                        url="https://discord.gg/staring",
+                        url="https://discord.gg/Zx6em4AEq2",
                     )
                 elif random.randint(0, 5000000) == 0:
                     button = Button(
                         label="JOHN AND DAVE HAD A SON 💀🤠😀⚠️🥺",
-                        url="https://discord.gg/staring",
+                        url="https://discord.gg/Zx6em4AEq2",
                     )
 
                 if button:
@@ -7895,6 +8032,11 @@ async def on_guild_join(guild):
 
 @bot.tree.command(description="Learn to use the bot")
 async def help(message):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     embed1 = discord.Embed(
         title="How to Setup",
         description="Server moderator (anyone with *Manage Server* permission) needs to run `/setup` in any channel. After that, cats will start to spawn in 2-20 minute intervals inside of that channel.\nYou can customize those intervals with `/changetimings` and change the spawn message with `/changemessage`.\nCat spawns can also be forced by moderators using `/forcespawn` command.\nYou can have unlimited amounts of setupped channels at once.\nYou can stop the spawning in a channel by running `/forget`.",
@@ -7920,7 +8062,7 @@ async def help(message):
         )
         .add_field(
             name="Other features",
-            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/staring).\n\n**Need help?** Use `/support` for assistance!",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/Zx6em4AEq2).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
         .set_footer(
@@ -8055,6 +8197,11 @@ async def help(message):
 
 @bot.tree.command(description="Get support and help with KITTAYYYYYYY")
 async def support(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Provides support links - adapts based on whether used in the official server or externally"""
     SUPPORT_SERVER_ID = 861745089525055508
     SUPPORT_FORUM_CHANNEL_ID = "1182425780488151090"  # Forum channel ID
@@ -8096,6 +8243,11 @@ async def support(message: discord.Interaction):
 
 @bot.tree.command(description="Roll the credits")
 async def credits(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     global gen_credits
 
     if not gen_credits:
@@ -8126,6 +8278,11 @@ def format_timedelta(start_timestamp, end_timestamp):
 
 @bot.tree.command(description="View various bot information and stats")
 async def info(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     embed = discord.Embed(title="KITTAYYYYYYY Info", color=Colors.brown)
     try:
         git_timestamp = int(subprocess.check_output(["git", "show", "-s", "--format=%ct"]).decode("utf-8"))
@@ -8160,6 +8317,11 @@ DB Channels: `{await Channel.count():,}`
 
 @bot.tree.command(description="Confused? Check out the KITTAYYYYYYY Wiki!")
 async def wiki(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
     embed.description = "\n".join(
         [
@@ -8185,6 +8347,11 @@ async def wiki(message: discord.Interaction):
 
 @bot.tree.command(description="Read The KITTAYYYYYYY Times™️")
 async def news(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     # Restore full news articles. These bodies preserve the original long-form content.
     news_list = [
         {
@@ -8398,6 +8565,11 @@ async def news(message: discord.Interaction):
 @bot.tree.command(description="Read text as TikTok's TTS woman")
 @discord.app_commands.describe(text="The text to be read! (300 characters max)")
 async def tiktok(message: discord.Interaction, text: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     perms = await fetch_perms(message)
     if not perms.attach_files:
         await message.response.send_message("i cant attach files here!", ephemeral=True)
@@ -8850,6 +9022,11 @@ class AdminPanel(discord.ui.View):
 
 @bot.tree.command(description="Open the admin control panel")
 async def admin(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
         return
@@ -8864,6 +9041,11 @@ async def admin(interaction: discord.Interaction):
 @bot.tree.command(description="Submit a suggestion to the bot owner")
 @discord.app_commands.describe(suggestion="Your suggestion for the bot")
 async def suggestion(interaction: discord.Interaction, suggestion: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Send a suggestion to the bot owner"""
     await interaction.response.defer(ephemeral=True)
     
@@ -8906,6 +9088,11 @@ async def suggestion(interaction: discord.Interaction, suggestion: str):
 @bot.tree.command(description="(OWNER) Start a cat rain in a channel")
 @discord.app_commands.describe(channel_id="Channel ID to start rain in", duration="Duration in minutes (default 10)")
 async def rainstart(interaction: discord.Interaction, channel_id: str, duration: int = 10):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Start a cat rain in specified channel"""
     if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
@@ -8929,6 +9116,11 @@ async def rainstart(interaction: discord.Interaction, channel_id: str, duration:
 @bot.tree.command(description="(OWNER) Give kibbles to a user")
 @discord.app_commands.describe(user="User to give kibbles to", amount="Amount of kibbles to give")
 async def givekibbles(interaction: discord.Interaction, user: discord.User, amount: int):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Give kibbles to a user"""
     if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
@@ -8944,6 +9136,11 @@ async def givekibbles(interaction: discord.Interaction, user: discord.User, amou
 
 @bot.tree.command(description="(OWNER) Test adventure rewards")
 async def adventuretest(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Give instant adventure rewards for testing"""
     if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
@@ -8973,6 +9170,11 @@ async def adventuretest(interaction: discord.Interaction):
 
 @bot.tree.command(description="List all servers the bot is in")
 async def servers(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
         return
@@ -9137,6 +9339,11 @@ async def give_rain(channel, duration):
 )
 @discord.app_commands.default_permissions(administrator=True)
 async def giveaway(interaction: discord.Interaction, cat_type: str, duration: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
         return
@@ -9197,6 +9404,11 @@ async def giveaway(interaction: discord.Interaction, cat_type: str, duration: st
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.describe(person="A person to timeout!", timeout="How many seconds? (0 to reset)")
 async def preventcatch(message: discord.Interaction, person: discord.User, timeout: int):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if timeout < 0:
         await message.response.send_message("uhh i think time is supposed to be a number", ephemeral=True)
         return
@@ -9220,6 +9432,10 @@ async def changetimings(
     minimum_time: Optional[int],
     maximum_time: Optional[int],
 ):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     channel = await Channel.get_or_none(channel_id=message.channel.id)
     if not channel:
         await message.response.send_message("This channel isnt setupped. Please select a valid channel.", ephemeral=True)
@@ -9256,6 +9472,10 @@ async def changetimings(
 @bot.tree.command(description="(ADMIN) Change the cat appear and cought messages")
 @discord.app_commands.default_permissions(manage_guild=True)
 async def changemessage(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     caller = message.user
     channel = await Channel.get_or_none(channel_id=message.channel.id)
     if not channel:
@@ -9393,6 +9613,10 @@ leave blank to reset.""",
     reason="Reason for the kick (optional)"
 )
 async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     """Kick a member from the server"""
     
     # Permission check
@@ -9476,6 +9700,11 @@ async def kick(interaction: discord.Interaction, member: discord.Member, reason:
     delete_messages="Delete how many days of messages? (0-7)"
 )
 async def ban(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided", delete_messages: int = 0):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Ban a user from the server"""
     
     # Permission check
@@ -9570,6 +9799,11 @@ async def ban(interaction: discord.Interaction, user: discord.User, reason: str 
     reason="Reason for the unban (optional)"
 )
 async def unban(interaction: discord.Interaction, user_id: str, reason: str = "No reason provided"):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Unban a user from the server"""
     
     # Permission check
@@ -9624,6 +9858,11 @@ async def unban(interaction: discord.Interaction, user_id: str, reason: str = "N
     reason="Reason for timeout (optional)"
 )
 async def timeout(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Timeout a member (they can't send messages/react)"""
     
     # Permission check
@@ -9717,6 +9956,11 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
     reason="Reason for removal (optional)"
 )
 async def untimeout(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Remove timeout from a member"""
     
     # Permission check
@@ -9756,6 +10000,11 @@ async def untimeout(interaction: discord.Interaction, member: discord.Member, re
     reason="Reason for the warning"
 )
 async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Warn a member (stores warning in database)"""
     
     # Permission check
@@ -9818,6 +10067,11 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     user="(Optional) Only delete messages from this user"
 )
 async def purge(interaction: discord.Interaction, amount: int, user: discord.User = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Delete multiple messages from a channel"""
     
     # Permission check
@@ -9870,6 +10124,11 @@ async def purge(interaction: discord.Interaction, amount: int, user: discord.Use
 @bot.tree.command(description="(MOD) See the ban list for this server")
 @discord.app_commands.default_permissions(ban_members=True)
 async def banlist(interaction: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """View the server's ban list"""
     
     # Permission check
@@ -9929,11 +10188,21 @@ async def banlist(interaction: discord.Interaction):
 
 @bot.tree.command(description="Get ID of a thing")
 async def getid(message: discord.Interaction, thing: discord.User | discord.Role):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.send_message(f"The ID of {thing.mention} is {thing.id}\nyou can use it in /changemessage like this: `{thing.mention}`")
 
 
 @bot.tree.command(description="Claim your daily login streak rewards")
 async def daily(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.defer()
     now = int(time.time())
     
@@ -10023,6 +10292,11 @@ async def daily(message: discord.Interaction):
 
 @bot.tree.command(description="View when the last cat was caught in this channel, and when the next one might spawn")
 async def last(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     channel = await Channel.get_or_none(channel_id=message.channel.id)
     nextpossible = ""
 
@@ -10044,6 +10318,11 @@ async def last(message: discord.Interaction):
 
 @bot.tree.command(description="View all the juicy numbers behind cat types")
 async def catalogue(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     # Build a list of fields first, then paginate into embeds of at most 25 fields (Discord limit)
     await message.response.defer()
 
@@ -10106,6 +10385,11 @@ async def catalogue(message: discord.Interaction):
 @bot.tree.command(name="catpedia", description="Show detailed information about a cat (Catpedia)")
 @discord.app_commands.describe(catname="Name of the cat type to view")
 async def catpedia(message: discord.Interaction, catname: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Show detailed information about a specific cat type.
 
     Displays: Name, image (if available), rarity (%), value, base HP, base DMG, and a short fun description.
@@ -10861,6 +11145,11 @@ class AdvancedCatSelector(discord.ui.View):
 @bot.tree.command(name="play", description="Play with one of your cats to increase its bond")
 @discord.app_commands.describe(name="Optional: specific cat name (leave blank to browse all)")
 async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Play with a cat. Can browse all cats with advanced filtering, or search by exact name."""
     await message.response.defer()
 
@@ -11187,6 +11476,10 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
 @discord.app_commands.autocomplete(catname=cat_type_autocomplete)
 @discord.app_commands.describe(catname="Cat type", index="Index from /cats view (1-based)", new_name="New name for the cat")
 async def rename_cat_cmd(message: discord.Interaction, catname: str, index: int, new_name: str):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     await message.response.defer()
     match = None
     for ct in cattypes:
@@ -11350,6 +11643,10 @@ async def gen_stats(profile, star):
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="Person to view the stats of!")
 async def stats_command(message: discord.Interaction, person_id: Optional[discord.User] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     await message.response.defer()
     try:
         if not person_id:
@@ -11572,6 +11869,11 @@ def gen_items_embed(message, person_id) -> discord.Embed:
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="Person to view the inventory of!")
 async def inventory(message: discord.Interaction, person_id: Optional[discord.User] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.defer()
     try:
         if not person_id:
@@ -11977,6 +12279,11 @@ __Highlighted Stat__
 
 @bot.tree.command(description="its raining cats")
 async def rain(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     user = await User.get_or_create(user_id=message.user.id)
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     user.rain_minutes = 0
@@ -12150,6 +12457,11 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
 
 @bot.tree.command(description="Open the Kibble Shop — items rotate/reset every 6 hours")
 async def shop(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.defer()
     guild_id = message.guild.id
     user_id = message.user.id
@@ -12249,6 +12561,11 @@ async def shop(message: discord.Interaction):
 
 @bot.tree.command(description="Buy Cat Rains!")
 async def store(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.send_message("☔ Cat rains make cats spawn instantly! Make your server active, get more cats and have fun!\n<https://catbot.shop>")
 
 
@@ -12256,6 +12573,11 @@ if config.DONOR_CHANNEL_ID:
 
     @bot.tree.command(description="(SUPPORTER) Bless random KITTAYYYYYYY users with doubled cats!")
     async def bless(message: discord.Interaction):
+        # Global command cooldown check (5 seconds)
+        if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+            await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+            return
+        
         user = await User.get_or_create(user_id=message.user.id)
         do_edit = False
 
@@ -12339,10 +12661,15 @@ Blessing message preview:
     )
     async def editprofile(
         message: discord.Interaction,
-        color: Optional[str],
-        provided_emoji: Optional[str],
-        image: Optional[discord.Attachment],
+        color: Optional[str] = None,
+        provided_emoji: Optional[str] = None,
+        image: Optional[discord.Attachment] = None,
     ):
+        # Global command cooldown check (5 seconds)
+        if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+            await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+            return
+        
         if not config.DONOR_CHANNEL_ID:
             return
 
@@ -12642,6 +12969,11 @@ class PacksView(discord.ui.View):
 
 @bot.tree.command(description="View and open packs")
 async def packs(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     await message.response.defer()
     
     try:
@@ -12936,6 +13268,11 @@ async def packs(message: discord.Interaction):
 @bot.tree.command(description="Attempt to steal a cat from another player (1 hour cooldown)")
 @discord.app_commands.describe(target="The player to attempt to steal from")
 async def steal(interaction: discord.Interaction, target: discord.User):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if interaction.user.id == target.id:
         await interaction.response.send_message("You can't steal from yourself!", ephemeral=True)
         return
@@ -13027,6 +13364,11 @@ async def steal(interaction: discord.Interaction, target: discord.User):
 
 @bot.tree.command(description="why would anyone think a cattlepass would be a good idea")
 async def battlepass(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     # Defer immediately to avoid interaction timeout
     await message.response.defer()
     
@@ -13267,6 +13609,11 @@ async def battlepass(message: discord.Interaction):
 
 @bot.tree.command(description="vote for KITTAYYYYYYY")
 async def vote(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     embed = discord.Embed(
         title="Vote for KITTAYYYYYYY",
         color=Colors.brown,
@@ -13281,6 +13628,11 @@ async def vote(message: discord.Interaction):
 @bot.tree.command(description="cat prisms are a special power up")
 @discord.app_commands.describe(person="Person to view the prisms of")
 async def prism(message: discord.Interaction, person: Optional[discord.User]):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     icon = get_emoji("prism")
     page_number = 0
 
@@ -13436,6 +13788,11 @@ async def prism(message: discord.Interaction, person: Optional[discord.User]):
 
 @bot.tree.command(description="Pong")
 async def ping(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     try:
         latency = round(bot.latency * 1000)
     except Exception:
@@ -13468,6 +13825,11 @@ async def ping(message: discord.Interaction):
 @bot.tree.command(description="play a relaxing game of tic tac toe")
 @discord.app_commands.describe(person="who do you want to play with? (choose KITTAYYYYYYY for ai)")
 async def tictactoe(message: discord.Interaction, person: discord.Member):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     do_edit = False
     board = [None, None, None, None, None, None, None, None, None]
 
@@ -13645,6 +14007,10 @@ async def tictactoe(message: discord.Interaction, person: discord.Member):
 @bot.tree.command(description="dont select a person to make an everyone vs you game")
 @discord.app_commands.describe(person="Who do you want to play with?")
 async def rps(message: discord.Interaction, person: Optional[discord.Member]):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
     clean_name = message.user.name.replace("_", "\\_")
     picks = {"Rock": [], "Paper": [], "Scissors": []}
     mappings = {"Rock": ["Paper", "Rock", "Scissors"], "Paper": ["Scissors", "Paper", "Rock"], "Scissors": ["Rock", "Scissors", "Paper"]}
@@ -13769,8 +14135,13 @@ async def gift(
     message: discord.Interaction,
     person: discord.User,
     cat_type: str,
-    amount: Optional[int],
+    amount: Optional[int] = None,
 ):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if amount is None:
         # default the amount to 1
         amount = 1
@@ -13993,6 +14364,11 @@ def format_cosmetic_display(profile):
 
 @bot.tree.command(description="Browse and purchase cosmetics to customize your profile!")
 async def cosmetics(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Cosmetics shop command"""
     await message.response.defer()
     
@@ -14376,6 +14752,11 @@ async def cosmetics(message: discord.Interaction):
 
 @bot.tree.command(description="View a player's profile with stats, achievements, and showcase!")
 async def profile(message: discord.Interaction, person_id: Optional[discord.User] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Comprehensive profile display with cosmetics, stats, achievements, and cat showcase"""
     await message.response.defer()
     
@@ -14799,6 +15180,11 @@ async def profile(message: discord.Interaction, person_id: Optional[discord.User
 
 @bot.tree.command(description="View your equipped cosmetics!")
 async def mystyle(message: discord.Interaction, person_id: Optional[discord.User] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     """Shortcut to profile cosmetics page"""
     await message.response.send_message("💡 Use `/profile` instead to see a full profile with cosmetics, stats, and more!", ephemeral=True)
 
@@ -16336,6 +16722,11 @@ async def eightball(message: discord.Interaction, question: str):
 
 @bot.tree.command(description="the most engaging boring game")
 async def pig(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     score = 0
 
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
@@ -16960,6 +17351,11 @@ async def catch(interaction: discord.Interaction, msg: discord.Message):
     user = interaction.user
     now = time.time()
 
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+
     # Cooldown check first
     if user.id in catchcooldown and catchcooldown[user.id] + 6 > now:
         await interaction.response.send_message("your phone is overheating bro chill", ephemeral=True)
@@ -16967,31 +17363,49 @@ async def catch(interaction: discord.Interaction, msg: discord.Message):
 
     catchcooldown[user.id] = now  # immediately update cooldown
 
+    # CRITICAL: Defer IMMEDIATELY before any I/O operations
+    # This tells Discord "I'm working on it" within 3 seconds
+    await interaction.response.defer(thinking=True)
+    
     perms = await fetch_perms(interaction)
     if not perms.attach_files:
-        await interaction.response.send_message("i cant attach files here!", ephemeral=True)
+        await interaction.followup.send("i cant attach files here!")
         return
 
-    # Defer response right away (so Discord doesn't timeout)
-    await interaction.response.defer(thinking=True)
+    # Run image conversion in a thread pool with timeout
+    # This prevents img2img from blocking the event loop
+    try:
+        event_loop = asyncio.get_event_loop()
+        result = await asyncio.wait_for(
+            event_loop.run_in_executor(None, msg2img.msg2img, msg),
+            timeout=5.0  # Fail fast if image processing takes too long
+        )
+    except asyncio.TimeoutError:
+        await interaction.followup.send("image processing took too long, try again")
+        return
+    except Exception as e:
+        await interaction.followup.send(f"failed to convert message: {str(e)[:100]}")
+        return
 
-    # Run image conversion in a thread pool
-    event_loop = asyncio.get_event_loop()
-    result = await event_loop.run_in_executor(None, msg2img.msg2img, msg)
-
+    # Send the image immediately
     await interaction.followup.send("caught in 4k", file=result)
-    await achemb(interaction, "4k", "send")
+    
+    # Run achievements in background (don't await these)
+    asyncio.create_task(achemb(interaction, "4k", "send"))
 
     if msg.author.id == bot.user.id and "caught in 4k" in msg.content:
-        await achemb(interaction, "8k", "send")
+        asyncio.create_task(achemb(interaction, "8k", "send"))
 
-    try:
-        is_cat = (await Channel.get_or_none(channel_id=interaction.channel.id)).cat
-    except Exception:
-        is_cat = False
-
-    if int(is_cat) == int(msg.id):
-        await achemb(interaction, "not_like_that", "send")
+    # Check if this was a cat spawn in the background (non-blocking)
+    async def check_cat_in_background():
+        try:
+            is_cat = (await Channel.get_or_none(channel_id=interaction.channel.id)).cat
+            if int(is_cat) == int(msg.id):
+                await achemb(interaction, "not_like_that", "send")
+        except Exception:
+            pass
+    
+    asyncio.create_task(check_cat_in_background())
 
 
 
@@ -17450,6 +17864,11 @@ async def givecat(message: discord.Interaction, person_id: discord.User, cat_typ
 @bot.tree.command(name="setup", description="(ADMIN) Setup cat in current channel")
 @discord.app_commands.default_permissions(manage_guild=True)
 async def setup_channel(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if await Channel.get_or_none(channel_id=message.channel.id):
         await message.response.send_message(
             "bruh you already setup cat here are you dumb\n\nthere might already be a cat sitting in chat. type `cat` to catch it."
@@ -17490,6 +17909,11 @@ async def setup_channel(message: discord.Interaction):
 @bot.tree.command(description="(ADMIN) Undo the setup")
 @discord.app_commands.default_permissions(manage_guild=True)
 async def forget(message: discord.Interaction):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if channel := await Channel.get_or_none(channel_id=message.channel.id):
         await channel.delete()
         await message.response.send_message(f"ok, now i wont send cats in <#{message.channel.id}>")
@@ -17535,6 +17959,11 @@ async def fake(message: discord.Interaction):
 @discord.app_commands.describe(cat_type="select a cat type ok", enchanted="Make it enchanted (true/false)")
 @discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
 async def forcespawn(message: discord.Interaction, cat_type: Optional[str], enchanted: Optional[str] = None):
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
+        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
     if cat_type and cat_type not in cattypes:
         await message.response.send_message("bro what", ephemeral=True)
         return
@@ -17632,7 +18061,7 @@ async def reset(message: discord.Interaction, person_id: discord.User):
                     p.guild_id = og.id
                     await p.save()
                 await interaction.edit_original_response(
-                    content=f"Done! rip {person_id.mention}. f's in chat.\njoin our discord to rollback: <https://discord.gg/staring>", view=None
+                    content=f"Done! rip {person_id.mention}. f's in chat.\njoin our discord to rollback: <https://discord.gg/Zx6em4AEq2>", view=None
                 )
             except Exception:
                 await interaction.edit_original_response(
@@ -17699,11 +18128,11 @@ async def nuke(message: discord.Interaction):
 
                 try:
                     await interaction.edit_original_response(
-                        content="Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/staring>.",
+                        content="Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/Zx6em4AEq2>.",
                         view=None,
                     )
                 except Exception:
-                    await interaction.followup.send("Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/staring>.")
+                    await interaction.followup.send("Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/Zx6em4AEq2>.")
             else:
                 view = await gen(counter)
                 try:
@@ -18810,3 +19239,70 @@ async def log_vote_to_channel(user_id: int, source: str = "unknown"):
     except Exception as e:
         print(f"[LOG_VOTE ERROR] Unhandled exception: {e}", flush=True)
         logging.exception("Unhandled exception in log_vote_to_channel")
+
+
+async def diagnose_connection():
+    """
+    Diagnostic tool to check connection quality and gateway routing.
+    Run this periodically to detect if bot is being routed to suboptimal servers.
+    """
+    await bot.wait_until_ready()
+    
+    import socket
+    import ipaddress
+    
+    print("\n" + "="*60)
+    print("🔍 GATEWAY DIAGNOSTICS")
+    print("="*60)
+    
+    try:
+        # Get current latency
+        latency_ms = round(bot.latency * 1000)
+        print(f"📊 Current WS Latency: {latency_ms}ms")
+        
+        # Try to determine if we're on US or EU gateway
+        try:
+            if hasattr(bot, 'ws') and bot.ws:
+                ws_url = getattr(bot.ws, 'gateway_url', None)
+                if ws_url:
+                    print(f"🌐 Gateway URL: {ws_url}")
+                    # Parse gateway URL to guess region
+                    if 'gateway-us-' in ws_url or '.us-' in ws_url:
+                        print(f"   ⚠️  Using US gateway (high latency for non-US users)")
+                    elif 'gateway-eu-' in ws_url or '.eu-' in ws_url:
+                        print(f"   ✅ Using EU gateway")
+                    elif 'gateway-ap-' in ws_url or '.ap-' in ws_url:
+                        print(f"   ✅ Using AP gateway")
+                    else:
+                        print(f"   🤔 Unknown gateway region")
+        except Exception as e:
+            print(f"   (Gateway URL unavailable: {e})")
+        
+        # Try to get client's perceived IP region
+        try:
+            print(f"\n🌍 Network Analysis:")
+            hostname = socket.gethostname()
+            print(f"   Hostname: {hostname}")
+            
+            # Get local IPs
+            local_ips = socket.gethostbyname_ex(hostname)[2]
+            print(f"   Local IPs: {local_ips}")
+        except Exception as e:
+            print(f"   (Network info unavailable: {e})")
+        
+        # Recommendations
+        print(f"\n💡 Recommendations:")
+        if latency_ms > 150:
+            print(f"   ⚠️  High latency detected ({latency_ms}ms)")
+            print(f"   - If you're in EU and latency is high, the bot may be routed to US gateway")
+            print(f"   - Discord gateway routing is automatic and based on DNS resolution")
+            print(f"   - Try changing your DNS to a regional provider (e.g., cloudflare.com, 1.1.1.1)")
+            print(f"   - Or run the bot closer to Discord's servers")
+        else:
+            print(f"   ✅ Latency is good ({latency_ms}ms)")
+        
+    except Exception as e:
+        print(f"❌ Diagnostic error: {e}")
+    
+    print("="*60 + "\n")
+
