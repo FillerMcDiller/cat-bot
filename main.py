@@ -7814,6 +7814,9 @@ async def on_message(message: discord.Message):
                 await user.save()
 
                 await _check_full_stack_and_huzzful(user, message, le_emoji)
+                
+                # Auto-sync instances to create the caught cat, including enchanted if applicable
+                created = await auto_sync_cat_instances(user, cat_type=le_emoji, enchanted=is_enchanted)
 
                 if random.randint(0, 1000) == 69:
                     await achemb(message, "lucky", "send")
@@ -11168,15 +11171,31 @@ class AdvancedCatSelector(discord.ui.View):
             await select_it.response.send_message("This is not your selector.", ephemeral=True)
             return
         
+        # Defer immediately to avoid timeout
+        try:
+            await select_it.response.defer()
+        except discord.errors.NotFound:
+            return
+        
         selected_id = select_it.data['values'][0]
         selected_cat = next((c for c in self.all_cats if c.get('id') == selected_id), None)
         
         if not selected_cat:
-            await select_it.response.send_message("Cat not found.", ephemeral=True)
+            try:
+                await select_it.followup.send("Cat not found.", ephemeral=True)
+            except Exception:
+                pass
             return
         
-        # Call the callback function
-        await self.callback_func(select_it, selected_cat)
+        # Call the callback function (which will handle its own defer/response)
+        try:
+            await self.callback_func(select_it, selected_cat)
+        except Exception as e:
+            print(f"[SELECTOR CALLBACK ERROR] {e}")
+            try:
+                await select_it.followup.send("An error occurred selecting that cat.", ephemeral=True)
+            except Exception:
+                pass
     
     def _get_filter_info(self):
         """Get filter info string"""
@@ -11426,7 +11445,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
     # If no name provided, show advanced selector
     if not name:
         async def on_cat_selected(interaction: discord.Interaction, selected_cat: dict):
-            await interaction.response.defer()
+            # Selector already deferred for us, so just use followup
             inst = selected_cat
             embed = make_play_embed(inst)
             file_to_send = None
@@ -11444,7 +11463,10 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 else:
                     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                try:
+                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                except Exception:
+                    pass
         
         selector = AdvancedCatSelector(
             author_id=message.user.id,
