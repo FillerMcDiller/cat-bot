@@ -547,6 +547,40 @@ def get_active_buffs(guild_id: int, user_id: int) -> dict:
     return out
 
 
+def get_bond_level_and_progress(absolute_bond: float) -> tuple[int, float, float]:
+    """
+    Convert absolute bond to (level, current_progress, max_progress).
+    
+    Level 1: 0-100 (max 100)
+    Level 2: 0-120 (max 100 * 1.2)
+    Level 3: 0-144 (max 120 * 1.2)
+    etc.
+    
+    Returns: (level, progress_in_level, max_for_level)
+    """
+    if absolute_bond < 0:
+        absolute_bond = 0
+    
+    level = 1
+    cumulative = 0
+    max_per_level = 100
+    
+    # Find which level we're on
+    while absolute_bond >= cumulative + max_per_level:
+        cumulative += max_per_level
+        level += 1
+        max_per_level = int(100 * (1.2 ** (level - 1)))
+    
+    progress_in_level = absolute_bond - cumulative
+    return (level, progress_in_level, max_per_level)
+
+
+def format_bond_display(absolute_bond: float) -> str:
+    """Format bond as 'Level X: Y/Z'"""
+    level, progress, max_val = get_bond_level_and_progress(absolute_bond)
+    return f"Lvl {level}: {int(progress)}/{max_val}"
+
+
 def _paginate_lines(lines: list[str], per_page: int = 15) -> list[str]:
     pages = []
     for i in range(0, len(lines), per_page):
@@ -6294,7 +6328,7 @@ async def maintaince_loop():
                 try:
                     if inst:
                         inc = random.randint(1, 3)
-                        inst["bond"] = min(100, inst.get("bond", 0) + inc)
+                        inst["bond"] = inst.get("bond", 0) + inc  # No longer capped at 100
                         inst["on_adventure"] = False
                         await save_user_cats(guild_id, user_id, user_cats)
                 except Exception:
@@ -7686,6 +7720,13 @@ async def on_message(message: discord.Message):
                     view = View(timeout=VIEW_TIMEOUT)
                     view.add_item(button)
 
+                # Track enchanted status
+                is_enchanted = False
+                if message.channel.id in enchanted_spawns:
+                    spawn_info = enchanted_spawns.pop(message.channel.id)
+                    if spawn_info[1]:  # is_enchanted
+                        is_enchanted = True
+                
                 # increment the dynamic cat counter safely
                 key = f"cat_{le_emoji}"
                 try:
@@ -7703,14 +7744,10 @@ async def on_message(message: discord.Message):
                         pass
                     new_count = new_val
                 
-                # Track enchanted catches for later application
-                is_enchanted = False
-                if message.channel.id in enchanted_spawns:
-                    spawn_info = enchanted_spawns.pop(message.channel.id)
-                    if spawn_info[1]:  # is_enchanted
-                        is_enchanted = True
-                        key = (message.guild.id, message.author.id, le_emoji)
-                        pending_enchanted[key] = pending_enchanted.get(key, 0) + 1
+                # If cat was enchanted, mark the FINAL (potentially boosted) cat type for enchantment
+                if is_enchanted:
+                    key = (message.guild.id, message.author.id, le_emoji)
+                    pending_enchanted[key] = pending_enchanted.get(key, 0) + 1
 
                 async def delete_cat():
                     try:
@@ -10506,7 +10543,8 @@ async def build_instances_embed(guild_id: int, user_id: int, catname: str):
     embed = discord.Embed(title=f"{get_emoji(match.lower() + 'cat')} Your {match} Cats", color=Colors.brown)
     lines = []
     for i, inst in enumerate(filtered, start=1):
-        lines.append(f"{i}. **{inst.get('name')}** — Bond: {inst.get('bond',0)} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})")
+        bond_display = format_bond_display(inst.get('bond', 0))
+        lines.append(f"{i}. **{inst.get('name')}** — Bond: {bond_display} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})")
     embed.description = "\n".join(lines[:25])
     if len(lines) > 25:
         embed.set_footer(text=f"Showing 25 of {len(lines)} — use the Next button to see more, or /play /renamecat with the index from this list")
@@ -10524,7 +10562,7 @@ async def send_instances_paged(interaction: discord.Interaction, guild_id: int, 
         await interaction.followup.send(f"You have no {match} cats.\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=ephemeral)
         return
 
-    lines = [f"{i}. **{inst.get('name')}** — Bond: {inst.get('bond',0)} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})" for i, inst in enumerate(filtered, start=1)]
+    lines = [f"{i}. **{inst.get('name')}** — Bond: {format_bond_display(inst.get('bond',0))} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})" for i, inst in enumerate(filtered, start=1)]
     page_size = 25
     chunks = [lines[i : i + page_size] for i in range(0, len(lines), page_size)]
 
@@ -10630,10 +10668,11 @@ def build_instance_detail_embed(cat_type: str, inst: dict) -> discord.Embed:
     embed.add_field(name="DMG", value=str(dmg), inline=True)
     embed.add_field(name="On Adventure", value="Yes" if on_adv else "No", inline=True)
 
-    # Bond bar: 10 segments
-    filled = max(0, min(10, bond // 10))
+    # Bond bar: 10 segments per level
+    level, progress, max_for_level = get_bond_level_and_progress(bond)
+    filled = max(0, min(10, int(progress) // max(1, int(max_for_level // 10))))
     bar = "🟩" * filled + "⬛" * (10 - filled)
-    embed.add_field(name="Bond", value=f"{bond}/100\n{bar}", inline=False)
+    embed.add_field(name="Bond", value=f"{format_bond_display(bond)}\n{bar}", inline=False)
 
     if acquired:
         try:
@@ -10950,7 +10989,7 @@ class AdvancedCatSelector(discord.ui.View):
                 
                 options.append(discord.SelectOption(
                     label=f"{is_fav}{display_name} ({cat_type})"[:100],
-                    description=f"HP: {hp} | DMG: {dmg} | Bond: {bond}"[:100],
+                    description=f"HP: {hp} | DMG: {dmg} | Bond: {format_bond_display(bond)}"[:100],
                     value=str(cat_id)
                 ))
             
@@ -11171,6 +11210,21 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
         await message.followup.send("You don't have any cats yet! Catch some first.", ephemeral=True)
         return
     
+    # Helper to build an embed for a single instance (defined early so callbacks can use it)
+    def make_play_embed(inst: dict) -> discord.Embed:
+        title = f"{get_emoji(inst.get('type', '').lower() + 'cat')} {inst.get('name')} — {inst.get('type')}"
+        embed = discord.Embed(title=title, color=Colors.yellow)
+        embed.add_field(name="Bond", value=format_bond_display(inst.get('bond', 0)), inline=True)
+        embed.add_field(name="HP", value=str(inst.get('hp')), inline=True)
+        embed.add_field(name="DMG", value=str(inst.get('dmg')), inline=True)
+        if inst.get('acquired_at'):
+            try:
+                embed.add_field(name="Acquired", value=f"<t:{int(inst.get('acquired_at'))}:f>", inline=False)
+            except Exception:
+                embed.add_field(name="Acquired", value=str(inst.get('acquired_at')), inline=False)
+        embed.description = "Choose an action below to interact with your cat. \n\n" + (inst.get('flavor') or "")
+        return embed
+    
     # If no name provided, show advanced selector
     if not name:
         async def on_cat_selected(interaction: discord.Interaction, selected_cat: dict):
@@ -11212,21 +11266,6 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
         await message.followup.send(f"Couldn't find a cat named '{name}'. Try running `/play` without a name to browse all your cats.", ephemeral=True)
         return
 
-    # Helper to build an embed for a single instance
-    def make_play_embed(inst: dict) -> discord.Embed:
-        title = f"{get_emoji(inst.get('type', '').lower() + 'cat')} {inst.get('name')} — {inst.get('type')}"
-        embed = discord.Embed(title=title, color=Colors.yellow)
-        embed.add_field(name="Bond", value=f"{inst.get('bond', 0)}/100", inline=True)
-        embed.add_field(name="HP", value=str(inst.get('hp')), inline=True)
-        embed.add_field(name="DMG", value=str(inst.get('dmg')), inline=True)
-        if inst.get('acquired_at'):
-            try:
-                embed.add_field(name="Acquired", value=f"<t:{int(inst.get('acquired_at'))}:f>", inline=False)
-            except Exception:
-                embed.add_field(name="Acquired", value=str(inst.get('acquired_at')), inline=False)
-        embed.description = "Choose an action below to interact with your cat. \n\n" + (inst.get('flavor') or "")
-        return embed
-
     # View with interactive buttons for a single instance
     class PlayView(View):
         def __init__(self, guild_id: int, owner_id: int, instance_id: str):
@@ -11256,7 +11295,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 return
 
             gain = random.randint(1, 3)
-            inst['bond'] = min(100, inst.get('bond', 0) + gain)
+            inst['bond'] = inst.get('bond', 0) + gain  # No longer capped at 100
             await save_user_cats(self.guild_id, self.owner_id, cats_now)
             pet_cooldowns[key] = now_ts
 
@@ -11267,7 +11306,8 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
             except Exception:
                 pass
 
-            await interaction2.followup.send(f"You pet **{inst.get('name')}** — Bond +{gain} (now {inst['bond']}).", ephemeral=True)
+            bond_display = format_bond_display(inst['bond'])
+            await interaction2.followup.send(f"You pet **{inst.get('name')}** — Bond +{gain} (now {bond_display}).", ephemeral=True)
 
         @discord.ui.button(label="Use Item", style=ButtonStyle.blurple)
         async def use_item(self, interaction2: discord.Interaction, button: Button):
@@ -11306,16 +11346,19 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                     if sel_inter.user.id != parent_inter.user.id:
                         await do_funny(sel_inter)
                         return
+                    
+                    await sel_inter.response.defer()
+                    
                     choice = sel_inter.data.get("values", [None])[0]
                     if not choice:
-                        await sel_inter.response.send_message("Invalid selection.", ephemeral=True)
+                        await sel_inter.followup.send("Invalid selection.", ephemeral=True)
                         return
                     key_local, tier_local = choice.split("|")
                     # re-load items to avoid races
                     cur_items = get_user_items(parent_inter.guild.id, parent_inter.user.id)
                     have = cur_items.get(key_local, {}).get(tier_local, 0)
                     if have <= 0:
-                        await sel_inter.response.send_message("You don't have that item anymore.", ephemeral=True)
+                        await sel_inter.followup.send("You don't have that item anymore.", ephemeral=True)
                         return
 
                     # If the item targets a specific instance, apply directly to this instance
@@ -11323,7 +11366,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         cats_now = await get_user_cats(self.guild_id, self.owner_id)
                         inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
                         if not inst:
-                            await sel_inter.response.send_message("That instance no longer exists.", ephemeral=True)
+                            await sel_inter.followup.send("That instance no longer exists.", ephemeral=True)
                             return
 
                         # decrement one use
@@ -11331,10 +11374,12 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
 
                         bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
-                        if key_local == 'pancakes' and bond_amt >= 100:
-                            inst['bond'] = 100
+                        if key_local == 'pancakes':
+                            # Pancakes fully restore bond to max of current level
+                            level, _, max_for_level = get_bond_level_and_progress(inst.get('bond', 0))
+                            inst['bond'] = (level - 1) * 100 + max_for_level  # Set to max of current level
                         else:
-                            inst['bond'] = min(100, inst.get('bond', 0) + int(bond_amt))
+                            inst['bond'] = inst.get('bond', 0) + int(bond_amt)  # No longer capped
                         await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
 
                         # update embed in place
@@ -11358,7 +11403,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             user = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
                             user.rain_minutes += int(minutes)
                             await user.save()
-                            await sel_inter.response.send_message(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
+                            await sel_inter.followup.send(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
                             return
 
                         if key_local in ('luck', 'xp'):
@@ -11372,18 +11417,21 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                                 save_item_buffs()
                             except Exception:
                                 pass
-                            await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: +{int(effect*100)}% {key_local} for {duration//3600}h. Expires <t:{now_ts + duration}:R>.", ephemeral=True)
+                            await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}: +{int(effect*100)}% {key_local} for {duration//3600}h. Expires <t:{now_ts + duration}:R>.", ephemeral=True)
                             return
 
-                        await sel_inter.response.send_message(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}.", ephemeral=True)
+                        await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local}.", ephemeral=True)
                     except Exception as e:
                         print(f"[USE ITEM ERROR] {e}")
                         import traceback
                         traceback.print_exc()
                         try:
-                            await sel_inter.response.send_message("Failed to apply item effect.", ephemeral=True)
-                        except:
                             await sel_inter.followup.send("Failed to apply item effect.", ephemeral=True)
+                        except:
+                            try:
+                                await sel_inter.followup.send("Failed to apply item effect.", ephemeral=True)
+                            except:
+                                pass
 
             sel_view = View(timeout=120)
             sel_view.add_item(UseSelect(opts, self.guild_id, self.owner_id, self.instance_id))
@@ -18622,9 +18670,9 @@ async def breed(
                 confirm_view = ConfirmBreedView()
                 bond_warning = ""
                 if cat1_bond > 0:
-                    bond_warning += f"⚠️ **{cat1_inst.get('name')}** has bond level {cat1_bond}/100\n"
+                    bond_warning += f"⚠️ **{cat1_inst.get('name')}** has bond {format_bond_display(cat1_bond)}\n"
                 if cat2_bond > 0:
-                    bond_warning += f"⚠️ **{cat2_inst.get('name')}** has bond level {cat2_bond}/100\n"
+                    bond_warning += f"⚠️ **{cat2_inst.get('name')}** has bond {format_bond_display(cat2_bond)}\n"
                 
                 await message.followup.send(
                     f"**Warning:** You are about to breed cats with bond!\n\n"
