@@ -10248,7 +10248,11 @@ async def daily(message: discord.Interaction):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
     
-    await message.response.defer()
+    try:
+        await message.response.defer()
+    except discord.errors.NotFound:
+        # Interaction already expired or already responded to
+        return
     now = int(time.time())
     
     profile = await Profile.get_or_create(user_id=message.user.id, guild_id=message.guild.id)
@@ -11198,7 +11202,11 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
         return
     
     """Play with a cat. Can browse all cats with advanced filtering, or search by exact name."""
-    await message.response.defer()
+    try:
+        await message.response.defer()
+    except discord.errors.NotFound:
+        # Interaction already expired or already responded to
+        return
 
     # gather user's instances
     try:
@@ -11225,48 +11233,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
         embed.description = "Choose an action below to interact with your cat. \n\n" + (inst.get('flavor') or "")
         return embed
     
-    # If no name provided, show advanced selector
-    if not name:
-        async def on_cat_selected(interaction: discord.Interaction, selected_cat: dict):
-            await interaction.response.defer()
-            inst = selected_cat
-            embed = make_play_embed(inst)
-            file_to_send = None
-            try:
-                img_path = f"images/spawn/{inst.get('type', '').lower()}_cat.png"
-                if os.path.exists(img_path):
-                    file_to_send = discord.File(img_path, filename=os.path.basename(img_path))
-            except Exception:
-                file_to_send = None
-
-            view = PlayView(message.guild.id, interaction.user.id, inst.get('id'))
-            try:
-                if file_to_send:
-                    await interaction.followup.send(embed=embed, view=view, file=file_to_send, ephemeral=True)
-                else:
-                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            except Exception:
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        
-        selector = AdvancedCatSelector(
-            author_id=message.user.id,
-            guild_id=message.guild.id,
-            user_id=message.user.id,
-            all_cats=cats_list,
-            callback_func=on_cat_selected,
-            title="Select a cat to play with"
-        )
-        await message.followup.send("Select a cat to play with:", view=selector, ephemeral=True)
-        return
-
-    # Otherwise, search by exact name (existing behavior)
-    matches = [(i + 1, c) for i, c in enumerate(cats_list) if (c.get("name") or "").lower() == name.lower()]
-
-    if not matches:
-        await message.followup.send(f"Couldn't find a cat named '{name}'. Try running `/play` without a name to browse all your cats.", ephemeral=True)
-        return
-
-    # View with interactive buttons for a single instance
+    # Define PlayView class early so callbacks can use it
     class PlayView(View):
         def __init__(self, guild_id: int, owner_id: int, instance_id: str):
             super().__init__(timeout=180)
@@ -11455,7 +11422,49 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 await interaction2.edit_original_response(view=self)
             except Exception:
                 pass
+    
+    # If no name provided, show advanced selector
+    if not name:
+        async def on_cat_selected(interaction: discord.Interaction, selected_cat: dict):
+            await interaction.response.defer()
+            inst = selected_cat
+            embed = make_play_embed(inst)
+            file_to_send = None
+            try:
+                img_path = f"images/spawn/{inst.get('type', '').lower()}_cat.png"
+                if os.path.exists(img_path):
+                    file_to_send = discord.File(img_path, filename=os.path.basename(img_path))
+            except Exception:
+                file_to_send = None
 
+            view = PlayView(message.guild.id, interaction.user.id, inst.get('id'))
+            try:
+                if file_to_send:
+                    await interaction.followup.send(embed=embed, view=view, file=file_to_send, ephemeral=True)
+                else:
+                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            except Exception:
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        
+        selector = AdvancedCatSelector(
+            author_id=message.user.id,
+            guild_id=message.guild.id,
+            user_id=message.user.id,
+            all_cats=cats_list,
+            callback_func=on_cat_selected,
+            title="Select a cat to play with"
+        )
+        await message.followup.send("Select a cat to play with:", view=selector, ephemeral=True)
+        return
+
+    # Otherwise, search by exact name (existing behavior)
+    matches = [(i + 1, c) for i, c in enumerate(cats_list) if (c.get("name") or "").lower() == name.lower()]
+
+    if not matches:
+        await message.followup.send(f"Couldn't find a cat named '{name}'. Try running `/play` without a name to browse all your cats.", ephemeral=True)
+        return
+
+    # View with interactive buttons for a single instance
     # Present choices (if multiple matches) or show the play UI for the single match
     if len(matches) == 1:
         idx, inst = matches[0]
@@ -11489,7 +11498,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 label = f"#{idx} {inst.get('type', 'Unknown')} — {inst.get('name')}"
                 btn = Button(label=label, custom_id=f"choose_{idx}")
 
-                async def cb(interaction2: discord.Interaction, button: Button, idx_local=idx):
+                async def cb(interaction2: discord.Interaction, idx_local=idx):
                     if interaction2.user.id != self.author_id:
                         await do_funny(interaction2)
                         return
