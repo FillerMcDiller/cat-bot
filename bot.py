@@ -44,42 +44,49 @@ bot = commands.AutoShardedBot(
 @bot.event
 async def setup_hook():
     print("\n" + "="*60)
-    print("[BOT.PY] 🚀 SETUP_HOOK STARTING!")
+    print("[BOT.PY] SETUP_HOOK STARTING!")
     print("="*60 + "\n")
     
     try:
         # Connect to database FIRST
-        print("[BOT.PY] 🗄️ Connecting to database...")
+        print("[BOT.PY] Connecting to database...")
         await database.connect()
-        print("[BOT.PY] ✅ Database connected!")
+        print("[BOT.PY] OK Database connected!")
         
         # Load the main extension
-        print("[BOT.PY] 📦 Loading main.py extension...")
-        await bot.load_extension('main')
-        print("[BOT.PY] ✅ main.py loaded successfully!")
+        print("[BOT.PY] Loading main.py extension...")
+        try:
+            await bot.load_extension('main')
+            print("[BOT.PY] OK main.py loaded successfully!")
+        except Exception as ext_err:
+            print(f"[BOT.PY] FAILED to load main.py: {ext_err}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         # Import the vote receiver function
-        print("[BOT.PY] 📥 Importing start_internal_server...")
+        print("[BOT.PY] Importing start_internal_server...")
         try:
             from main import start_internal_server
-            print("[BOT.PY] ✅ Import successful!")
+            print("[BOT.PY] OK Import successful!")
             
             # Start the internal vote receiver
-            print("[BOT.PY] 🌐 Starting internal vote receiver on port 3002...")
+            print("[BOT.PY] Starting internal vote receiver on port 3002...")
             bot.loop.create_task(start_internal_server(3002))  # Pass port explicitly
-            print("[BOT.PY] ✅ Vote receiver task created!")
+            print("[BOT.PY] OK Vote receiver task created!")
         except ImportError as ie:
-            print(f"[BOT.PY] ⚠️ Could not import start_internal_server: {ie}")
+            print(f"[BOT.PY] WARNING Could not import start_internal_server: {ie}")
             print("[BOT.PY] Vote system will not be available!")
         
     except Exception as e:
-        print(f"\n[BOT.PY] ❌ ERROR in setup_hook: {e}")
+        print(f"\n[BOT.PY] ERROR in setup_hook: {e}")
         import traceback
         traceback.print_exc()
         print()
+        raise  # Re-raise to prevent silent failure
     
     print("\n" + "="*60)
-    print("[BOT.PY] 🏁 SETUP_HOOK COMPLETE!")
+    print("[BOT.PY] SETUP_HOOK COMPLETE!")
     print("="*60 + "\n")
 
 bot.setup_hook = setup_hook
@@ -104,6 +111,20 @@ def _start_webhook_process():
 
 try:
     config.HARD_RESTART_TIME = time.time()
+    print("[BOT.PY] >>> Starting bot.run()...")
+    print(f"[BOT.PY] Token length: {len(config.TOKEN) if config.TOKEN else 0} chars")
+    print(f"[BOT.PY] Token starts with: {config.TOKEN[:20] if config.TOKEN else 'NONE'}...")
+    if not config.TOKEN:
+        raise RuntimeError("TOKEN is empty or not set!")
     bot.run(config.TOKEN)
+except KeyboardInterrupt:
+    print("[BOT.PY] STOPPED: Bot interrupted by user")
+except Exception as e:
+    print(f"[BOT.PY] ERROR during bot.run(): {e}")
+    import traceback
+    traceback.print_exc()
+    raise
 finally:
+    print("[BOT.PY] Closing database connection...")
     asyncio.run(database.close())
+    print("[BOT.PY] Bot shutdown complete")

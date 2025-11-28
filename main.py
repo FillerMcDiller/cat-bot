@@ -845,6 +845,10 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
     pending_enchanted_count = pending_enchanted.get(pending_key, 0)
     
     cats = await get_user_cats(guild_id, user_id)
+    # Defensive: ensure cats is not None (can happen if user data is corrupted)
+    if not cats:
+        cats = []
+    
     for i in range(amount):
         # ensure unique id
         while True:
@@ -906,6 +910,10 @@ async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
         return
 
     cats = await get_user_cats(guild_id, user_id)
+    # Defensive: ensure cats is not None (can happen if user data is corrupted)
+    if not cats:
+        cats = []
+    
     # If there's an on-adventure instance of this type, restore it first
     if amount > 0:
         for c in cats:
@@ -1007,6 +1015,9 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
     
     # Get current instances
     cats = await get_user_cats(guild_id, user_id)
+    # Defensive: ensure cats is not None
+    if not cats:
+        cats = []
     
     # Count instances by type
     from collections import Counter
