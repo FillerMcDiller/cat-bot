@@ -840,6 +840,11 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
     if amount <= 0:
         return
     
+    # Safety cap: don't create more than 500 at once (prevents runaway loops)
+    if amount > 500:
+        print(f"[WARNING] Capped instance creation from {amount} to 500 for user {user_id} (guild {guild_id})", flush=True)
+        amount = 500
+    
     # Check if there are pending enchanted instances for this user/cat type
     pending_key = (guild_id, user_id, cat_type)
     pending_enchanted_count = pending_enchanted.get(pending_key, 0)
@@ -850,11 +855,24 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
         cats = []
     
     for i in range(amount):
-        # ensure unique id
-        while True:
+        # ensure unique id with max retry limit to prevent infinite loops
+        max_retries = 1000
+        retry_count = 0
+        cid = None
+        
+        existing_ids = {c.get("id") for c in cats}  # Convert to set for O(1) lookups
+        
+        while retry_count < max_retries:
             cid = uuid.uuid4().hex[:8]
-            if cid not in [c.get("id") for c in cats]:
+            if cid not in existing_ids:
+                existing_ids.add(cid)
                 break
+            retry_count += 1
+        
+        # If we couldn't generate a unique ID after max retries, skip this instance
+        if cid is None or retry_count >= max_retries:
+            print(f"[WARNING] Could not generate unique cat ID after {max_retries} retries for user {user_id}", flush=True)
+            continue
         
         # Get stats from CAT_BATTLE_STATS with ±5 range, fallback to old calculation
         stats = CAT_BATTLE_STATS.get(cat_type)
@@ -895,7 +913,12 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
                 print(f"[ENCHANTED] Failed to add enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
         
         cats.append(instance)
-    await save_user_cats(guild_id, user_id, cats)
+    
+    try:
+        await save_user_cats(guild_id, user_id, cats)
+    except Exception as e:
+        print(f"[ERROR] Failed to save {len(cats)} cat instances for user {user_id}: {e}", flush=True)
+        raise
 
 
 async def add_cat_instances(profile: Profile, cat_type: str, amount: int):
@@ -1050,6 +1073,13 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
         
         if db_count > inst_count:
             missing = db_count - inst_count
+            
+            # Safety check: if missing count is unreasonably high, log and skip
+            if missing > 1000:
+                print(f"[WARNING] User {user_id} has {missing} missing {ct} instances (DB: {db_count}, actual: {inst_count}). " +
+                      f"This suggests data corruption. Skipping to prevent runaway loop.", flush=True)
+                continue
+            
             if missing > 0:
                 # Create missing instances, passing the enchanted flag
                 await _create_instances_only(guild_id, user_id, ct, missing, enchanted=enchanted)
