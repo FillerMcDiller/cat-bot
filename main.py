@@ -4239,6 +4239,12 @@ async def battles_command(interaction: discord.Interaction):
                         await btn_it.response.send_message("Select at least one cat for your deck!", ephemeral=True)
                         return
                     
+                    # Defer before responding to avoid "interaction failed"
+                    try:
+                        await btn_it.response.defer()
+                    except discord.errors.NotFound:
+                        return
+                    
                     await save_user_deck(guild_id, user_id, self.selected_ids)
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
@@ -4250,7 +4256,11 @@ async def battles_command(interaction: discord.Interaction):
                         color=0x2ecc71
                     )
                     
-                    await btn_it.response.edit_message(embed=embed, view=None)
+                    try:
+                        await btn_it.followup.edit_message(message_id=btn_it.message.id, embed=embed, view=None)
+                    except Exception:
+                        # Fallback if edit fails
+                        await btn_it.followup.send(embed=embed)
                     self.stop()
                 
                 async def clear_selection(self, btn_it: discord.Interaction):
