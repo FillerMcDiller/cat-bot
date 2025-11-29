@@ -1029,6 +1029,9 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
     
     This ensures instances are always created when cats are added,
     even if they were added through old code paths that only increment counters.
+    
+    NOTE: Users with suspiciously high counts (>10,000) are quarantined to prevent
+    infinite loops. The DB count is preserved but instances are capped at 1,000 max.
     """
     try:
         guild_id = profile.guild_id
@@ -1074,11 +1077,19 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
         if db_count > inst_count:
             missing = db_count - inst_count
             
-            # Safety check: if missing count is unreasonably high, log and skip
-            if missing > 1000:
-                print(f"[WARNING] User {user_id} has {missing} missing {ct} instances (DB: {db_count}, actual: {inst_count}). " +
-                      f"This suggests data corruption. Skipping to prevent runaway loop.", flush=True)
-                continue
+            # QUARANTINE: if missing count is suspiciously high (>10,000), cap it
+            # This preserves the DB count but prevents runaway loops
+            if missing > 10000:
+                print(f"[QUARANTINE] User {user_id} (guild {guild_id}) has {missing} missing {ct} cats! " +
+                      f"This is likely a data anomaly. Capping at 1,000 instances to prevent crash.", flush=True)
+                # Log to a special file for manual review
+                try:
+                    with open("/tmp/cat_bot_anomalies.log", "a") as f:
+                        f.write(f"[{datetime.datetime.now().isoformat()}] User {user_id} guild {guild_id}: {missing} missing {ct} cats (DB count: {db_count}, current instances: {inst_count})\n")
+                except:
+                    pass
+                # Cap missing to 1000 max for actual instance creation
+                missing = 1000
             
             if missing > 0:
                 # Create missing instances, passing the enchanted flag
@@ -12153,7 +12164,7 @@ __Highlighted Stat__
                 return
             
             async def on_cat_selected(select_it: discord.Interaction, selected_cat: dict):
-                await select_it.response.defer(ephemeral=True)
+                # Note: AdvancedCatSelector.cat_selected() already deferred for us
                 inst = selected_cat
                 cat_type = inst.get('type', 'Unknown')
                 detail_embed = build_instance_detail_embed(cat_type, inst)
