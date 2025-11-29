@@ -780,7 +780,7 @@ async def get_user_deck(guild_id: int, user_id: int) -> list:
 async def save_user_deck(guild_id: int, user_id: int, deck: list):
     """Save user's battle deck (list of up to 3 cat IDs)."""
     deck_record = await Deck.get_or_none(guild_id=guild_id, user_id=user_id)
-    deck_data = deck[:3]  # Ensure max 3
+    deck_data = json.dumps(deck[:3])  # Convert list to JSON string, max 3
     
     if deck_record:
         deck_record.deck_data = deck_data
