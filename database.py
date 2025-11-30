@@ -92,3 +92,13 @@ class Adventure(catpg.Model):
 
 class Deck(catpg.Model):
     _json_fields = ["deck_data"]  # Store deck as JSONB
+
+
+class Item(catpg.Model):
+    """Store user items (potions, toys, food, etc.)
+    - guild_id: Guild ID
+    - user_id: User ID
+    - item_key: Format "item_code_TIER" (e.g., "candy_cane_I", "luck_III")
+    - quantity: Number of this item the user has
+    """
+    pass

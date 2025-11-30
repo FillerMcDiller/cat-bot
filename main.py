@@ -51,7 +51,7 @@ import config
 import msg2img
 from cat_modifiers import add_modifier, get_cat_display_name, apply_stat_multipliers, get_image_path, CAT_MODIFIERS
 from catpg import RawSQL
-from database import Adventure, Channel, Deck, Prism, Profile, Reminder, User
+from database import Adventure, Channel, Deck, Item, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
 from christmas_update import (
     CHRISTMAS_COSMETICS, CHRISTMAS_ACHIEVEMENTS, TREE_ACHIEVEMENT,
@@ -932,20 +932,101 @@ def _save_items_db(data: dict):
         json.dump(data, f, ensure_ascii=False)
 
 
-def get_user_items(guild_id: int, user_id: int) -> dict:
-    db = _ensure_items_db()
-    return db.get(str(guild_id), {}).get(str(user_id), {})
+async def get_user_items(guild_id: int, user_id: int) -> dict:
+    """Get all items for a user from database. Returns dict with item_key: quantity."""
+    try:
+        filter_str = 'guild_id = $1 AND user_id = $2'
+        items = await Item.collect(filter_str, guild_id, user_id)
+        return {item.item_key: item.quantity for item in items}
+    except Exception:
+        # Fallback to JSON if database table doesn't exist yet
+        return get_user_items_sync(guild_id, user_id)
 
 
-def save_user_items(guild_id: int, user_id: int, items: dict):
+def get_user_items_sync(guild_id: int, user_id: int) -> dict:
+    """Synchronous fallback for getting user items (reads from JSON, does NOT query database)."""
     db = _ensure_items_db()
-    db.setdefault(str(guild_id), {})[str(user_id)] = items
-    _save_items_db(db)
+    # Old format was nested: {guild_id: {user_id: {item_code: {tier: count}}}}
+    # Convert to new format: {item_code_TIER: count}
+    old_format = db.get(str(guild_id), {}).get(str(user_id), {})
+    
+    result = {}
+    for item_code, tiers_dict in old_format.items():
+        if isinstance(tiers_dict, dict):
+            for tier, count in tiers_dict.items():
+                if count > 0:
+                    result[f"{item_code}_{tier}"] = count
+    return result
+
+
+async def save_user_items(guild_id: int, user_id: int, items: dict):
+    """Save/update user's items in database."""
+    try:
+        # Delete existing items for this user
+        filter_str = 'guild_id = $1 AND user_id = $2'
+        existing = await Item.collect(filter_str, guild_id, user_id)
+        for item in existing:
+            await item.delete()
+        
+        # Create new items
+        for item_key, quantity in items.items():
+            if quantity > 0:  # Only save items with quantity > 0
+                await Item.create(guild_id=guild_id, user_id=user_id, item_key=item_key, quantity=quantity)
+    except Exception:
+        # Fallback to JSON if database table doesn't exist yet
+        db = _ensure_items_db()
+        # Convert new format back to old format for JSON storage
+        old_format = {}
+        for item_key, count in items.items():
+            parts = item_key.split("_")
+            tier = parts[-1]
+            item_code = "_".join(parts[:-1])
+            
+            if item_code not in old_format:
+                old_format[item_code] = {}
+            old_format[item_code][tier] = count
+        
+        db.setdefault(str(guild_id), {})[str(user_id)] = old_format
+        _save_items_db(db)
+
+
+async def add_user_item(guild_id: int, user_id: int, item_key: str, quantity: int):
+    """Add or update a single item for a user."""
+    try:
+        item = await Item.get_or_none(guild_id=guild_id, user_id=user_id, item_key=item_key)
+        if item:
+            item.quantity += quantity
+            if item.quantity <= 0:
+                await item.delete()
+            else:
+                await item.save()
+        elif quantity > 0:
+            await Item.create(guild_id=guild_id, user_id=user_id, item_key=item_key, quantity=quantity)
+    except Exception:
+        # Fallback to JSON if database table doesn't exist yet
+        items = get_user_items_sync(guild_id, user_id)
+        items[item_key] = items.get(item_key, 0) + quantity
+        if items[item_key] <= 0:
+            del items[item_key]
+        
+        db = _ensure_items_db()
+        old_format = {}
+        for ik, count in items.items():
+            parts = ik.split("_")
+            tier = parts[-1]
+            item_code = "_".join(parts[:-1])
+            if item_code not in old_format:
+                old_format[item_code] = {}
+            old_format[item_code][tier] = count
+        
+        db.setdefault(str(guild_id), {})[str(user_id)] = old_format
+        _save_items_db(db)
 
 
 # ----- Decks DB (simple JSON storage) -----
 async def get_user_deck(guild_id: int, user_id: int) -> list:
     """Get user's battle deck (list of 3 cat IDs). Returns empty list if no deck set."""
+    
     deck_record = await Deck.get_or_none(guild_id=guild_id, user_id=user_id)
     if deck_record and deck_record.deck_data:
         if isinstance(deck_record.deck_data, str):
@@ -11704,10 +11785,13 @@ class AdvancedCatSelector(discord.ui.View):
         try:
             await self.callback_func(select_it, selected_cat)
         except Exception as e:
+            import traceback
             print(f"[SELECTOR CALLBACK ERROR] {e}")
+            print(traceback.format_exc())
             try:
                 await select_it.followup.send("An error occurred selecting that cat.", ephemeral=True)
-            except Exception:
+            except Exception as follow_e:
+                print(f"[SELECTOR FOLLOWUP ERROR] {follow_e}")
                 pass
     
     def _get_filter_info(self):
@@ -11827,17 +11911,22 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
             await interaction2.response.defer()
 
             # load user's items
-            items_now = get_user_items(self.guild_id, self.owner_id)
+            items_now = await get_user_items(self.guild_id, self.owner_id)
             opts = []
             emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes", "christmas_spawn": "christmas"}
-            for k, v in (items_now or {}).items():
-                data = SHOP_ITEMS.get(k, {})
-                for tier_k, cnt in (v or {}).items():
-                    if not cnt or cnt <= 0:
-                        continue
-                    emoji_label = get_emoji(emoji_map.get(k, k))
-                    label = f"{emoji_label} {data.get('title')} {tier_k} (x{cnt})"
-                    opts.append(discord.SelectOption(label=label, value=f"{k}|{tier_k}"))
+            for item_key, cnt in (items_now or {}).items():
+                # item_key format: "item_code_TIER"
+                parts = item_key.split("_")
+                item_code = "_".join(parts[:-1])  # Handle multi-word item codes
+                tier_k = parts[-1]
+                
+                if not cnt or cnt <= 0:
+                    continue
+                
+                data = SHOP_ITEMS.get(item_code, {})
+                emoji_label = get_emoji(emoji_map.get(item_code, item_code))
+                label = f"{emoji_label} {data.get('title')} {tier_k} (x{cnt})"
+                opts.append(discord.SelectOption(label=label, value=f"{item_code}|{tier_k}"))
 
             if not opts:
                 await interaction2.followup.send("You have no items to use.", ephemeral=True)
@@ -11866,8 +11955,9 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         return
                     key_local, tier_local = choice.split("|")
                     # re-load items to avoid races
-                    cur_items = get_user_items(parent_inter.guild.id, parent_inter.user.id)
-                    have = cur_items.get(key_local, {}).get(tier_local, 0)
+                    cur_items = await get_user_items(parent_inter.guild.id, parent_inter.user.id)
+                    item_key_full = f"{key_local}_{tier_local}"
+                    have = cur_items.get(item_key_full, 0)
                     if have <= 0:
                         await sel_inter.followup.send("You don't have that item anymore.", ephemeral=True)
                         return
@@ -11882,8 +11972,8 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             return
 
                         # decrement one use
-                        cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
-                        save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
+                        cur_items[item_key_full] = max(0, have - 1)
+                        await save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
 
                         bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
                         old_bond = inst.get('bond', 0)
@@ -11906,9 +11996,39 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst.get('name')}** — Bond now {inst['bond']}.{level_up_msg}", ephemeral=True)
                         return
 
-                    # Default behavior for other item types (rains, luck, xp)
-                    cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
-                    save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
+                    # Default behavior for other item types (rains, luck, xp, christmas_spawn)
+                    item_key_full = f"{key_local}_{tier_local}"
+                    cur_items[item_key_full] = max(0, have - 1)
+                    await save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
+
+                    if key_local == 'christmas_spawn':
+                        christmas_luck = SHOP_ITEMS[key_local]['tiers'][tier_local].get('christmas_luck', 1)
+                        # Spawn a random Christmas cat from the available ones
+                        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                        cat_type = random.choice(christmas_cats)
+                        
+                        # Spawn the cat instance
+                        await auto_sync_cat_instances(parent_inter.user, cat_type=cat_type, enchanted=False)
+                        
+                        # Apply snowy modifier if tier is high luck
+                        if christmas_luck >= 3:
+                            # Get the newly created cat and try to add snowy modifier
+                            cats_now = await get_user_cats(parent_inter.guild.id, parent_inter.user.id)
+                            # Find the most recently created cat of this type
+                            recent_cat = None
+                            for cat in sorted(cats_now, key=lambda c: c.get('id_timestamp', 0), reverse=True):
+                                if cat.get('type') == cat_type:
+                                    recent_cat = cat
+                                    break
+                            
+                            if recent_cat and add_modifier(recent_cat, "snowy"):
+                                await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
+                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
+                            else:
+                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
+                        else:
+                            await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
+                        return
 
                     try:
                         if key_local == 'rains':
@@ -11918,35 +12038,6 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             user.rain_minutes += int(minutes)
                             await user.save()
                             await sel_inter.followup.send(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
-                            return
-
-                        if key_local == 'christmas_spawn':
-                            christmas_luck = SHOP_ITEMS[key_local]['tiers'][tier_local].get('christmas_luck', 1)
-                            # Spawn a random Christmas cat from the available ones
-                            christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                            cat_type = random.choice(christmas_cats)
-                            
-                            # Spawn the cat instance
-                            await auto_sync_cat_instances(parent_inter.user, cat_type=cat_type, enchanted=False)
-                            
-                            # Apply snowy modifier if tier is high luck
-                            if christmas_luck >= 3:
-                                # Get the newly created cat and try to add snowy modifier
-                                cats_now = await get_user_cats(parent_inter.guild.id, parent_inter.user.id)
-                                # Find the most recently created cat of this type
-                                recent_cat = None
-                                for cat in sorted(cats_now, key=lambda c: c.get('id_timestamp', 0), reverse=True):
-                                    if cat.get('type') == cat_type:
-                                        recent_cat = cat
-                                        break
-                                
-                                if recent_cat and add_modifier(recent_cat, "snowy"):
-                                    await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
-                                    await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
-                                else:
-                                    await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
-                            else:
-                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
                             return
 
                         if key_local in ('luck', 'xp'):
@@ -12488,26 +12579,46 @@ async def gen_inventory(message, person_id):
     return embedVar
 
 
-def gen_items_embed(message, person_id) -> discord.Embed:
-    """Build an embed showing a user's item inventory (from data/items.json)."""
-    items = get_user_items(message.guild.id, person_id.id)
+async def gen_items_embed(message, person_id) -> discord.Embed:
+    """Build an embed showing a user's item inventory from the database."""
+    items = await get_user_items(message.guild.id, person_id.id)
     embed = discord.Embed(title=f"{get_emoji('staring_cat')} {person_id.name}'s Items", color=Colors.brown)
     if not items:
         embed.description = "No items yet. Visit /shop to buy items!"
         return embed
 
     lines = []
-    # format per-category
-    for key, data in SHOP_ITEMS.items():
+    # Group items by item code, then by tier
+    items_by_code = {}
+    for item_key, count in items.items():
+        # item_key format: "item_code_TIER"
+        parts = item_key.split("_")
+        tier = parts[-1]
+        item_code = "_".join(parts[:-1])
+        
+        if item_code not in items_by_code:
+            items_by_code[item_code] = {}
+        items_by_code[item_code][tier] = count
+    
+    # Format for display
+    for item_code in sorted(SHOP_ITEMS.keys()):
+        if item_code not in items_by_code:
+            continue
+        
+        data = SHOP_ITEMS[item_code]
         title = data.get('title')
         tiers = []
         for tier_key in sorted(data.get('tiers', {}).keys()):
-            cnt = items.get(key, {}).get(tier_key, 0)
-            tiers.append(f"{tier_key}: {cnt}")
+            cnt = items_by_code[item_code].get(tier_key, 0)
+            if cnt > 0:
+                tiers.append(f"{tier_key}: {cnt}")
         if tiers:
             lines.append(f"**{title}** — {', '.join(tiers)}")
 
-    embed.description = "\n".join(lines)
+    if not lines:
+        embed.description = "No items yet. Visit /shop to buy items!"
+    else:
+        embed.description = "\n".join(lines)
     return embed
 
 
@@ -12704,7 +12815,7 @@ __Highlighted Stat__
             if interaction2.user.id != message.user.id:
                 await do_funny(interaction2)
                 return
-            items_embed = gen_items_embed(message, message.user)
+            items_embed = await gen_items_embed(message, message.user)
             # View with switch back button and (for owner) a "Use Item" flow
             class ItemsView(View):
                 def __init__(self):
@@ -12723,17 +12834,22 @@ __Highlighted Stat__
                         await do_funny(interaction3)
                         return
                     await interaction3.response.defer()
-                    items_now = get_user_items(message.guild.id, message.user.id)
+                    items_now = await get_user_items(message.guild.id, message.user.id)
                     opts = []
                     emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain"}
-                    for k, v in items_now.items():
-                        data = SHOP_ITEMS.get(k, {})
-                        for tier_k, cnt in (v or {}).items():
-                            if not cnt or cnt <= 0:
-                                continue
-                            emoji_label = get_emoji(emoji_map.get(k, k))
-                            label = f"{emoji_label} {data.get('title')} {tier_k} (x{cnt})"
-                            opts.append(discord.SelectOption(label=label, value=f"{k}|{tier_k}"))
+                    # items_now is now {item_key: quantity} format
+                    for item_key, cnt in items_now.items():
+                        # Parse item_key format: "item_code_TIER"
+                        parts = item_key.split("_")
+                        tier_k = parts[-1]
+                        item_code = "_".join(parts[:-1])
+                        
+                        data = SHOP_ITEMS.get(item_code, {})
+                        if not cnt or cnt <= 0:
+                            continue
+                        emoji_label = get_emoji(emoji_map.get(item_code, item_code))
+                        label = f"{emoji_label} {data.get('title')} {tier_k} (x{cnt})"
+                        opts.append(discord.SelectOption(label=label, value=f"{item_code}|{tier_k}"))
 
                     if not opts:
                         await interaction3.followup.send("You have no items to use.", ephemeral=True)
@@ -12753,8 +12869,9 @@ __Highlighted Stat__
                                 return
                             key_local, tier_local = choice.split("|")
                             # re-load items to avoid races
-                            cur_items = get_user_items(message.guild.id, message.user.id)
-                            have = cur_items.get(key_local, {}).get(tier_local, 0)
+                            cur_items = await get_user_items(message.guild.id, message.user.id)
+                            item_key_full = f"{key_local}_{tier_local}"
+                            have = cur_items.get(item_key_full, 0)
                             if have <= 0:
                                 await sel_inter.response.send_message("You don't have that item anymore.", ephemeral=True)
                                 return
@@ -12783,13 +12900,14 @@ __Highlighted Stat__
 
                                         async def apply_to_instance(idx_local: int, inst_local: dict):
                                             # decrement one use
-                                            cur_items2 = get_user_items(message.guild.id, message.user.id)
-                                            cur_have = cur_items2.get(key_local, {}).get(tier_local, 0)
+                                            cur_items2 = await get_user_items(message.guild.id, message.user.id)
+                                            item_key_full = f"{key_local}_{tier_local}"
+                                            cur_have = cur_items2.get(item_key_full, 0)
                                             if cur_have <= 0:
                                                 await modal_inter.followup.send("You don't have that item anymore.", ephemeral=True)
                                                 return
-                                            cur_items2.setdefault(key_local, {})[tier_local] = max(0, cur_have - 1)
-                                            save_user_items(message.guild.id, message.user.id, cur_items2)
+                                            cur_items2[item_key_full] = max(0, cur_have - 1)
+                                            await save_user_items(message.guild.id, message.user.id, cur_items2)
 
                                             bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
                                             old_bond = inst_local.get('bond', 0)
@@ -12854,8 +12972,8 @@ __Highlighted Stat__
 
                             # Default behavior for other item types (existing handling: rains, luck, xp)
                             # decrement one use
-                            cur_items.setdefault(key_local, {})[tier_local] = max(0, have - 1)
-                            save_user_items(message.guild.id, message.user.id, cur_items)
+                            cur_items[item_key_full] = max(0, have - 1)
+                            await save_user_items(message.guild.id, message.user.id, cur_items)
 
                             # apply effects
                             try:
@@ -12908,7 +13026,7 @@ __Highlighted Stat__
         # show view for other user's inventory with switch button
         view_other = View(timeout=VIEW_TIMEOUT)
         async def switch_to_items_other(interaction2: discord.Interaction):
-            items_embed = gen_items_embed(message, person_id)
+            items_embed = await gen_items_embed(message, person_id)
             class BackViewOther(View):
                 def __init__(self):
                     super().__init__(timeout=VIEW_TIMEOUT)
@@ -13188,10 +13306,11 @@ async def shop(message: discord.Interaction):
             profile.kibble = max(0, profile.kibble - price_local)
             await profile.save()
             # award item — if the tier defines 'uses', buying one increments by that many uses
-            items = get_user_items(guild_id, user_id)
+            items = await get_user_items(guild_id, user_id)
+            item_key = f"{key_local}_{tier_local}"
             uses = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('uses', 1)
-            items.setdefault(key_local, {})[tier_local] = items.get(key_local, {}).get(tier_local, 0) + int(uses)
-            save_user_items(guild_id, user_id, items)
+            items[item_key] = items.get(item_key, 0) + int(uses)
+            await save_user_items(guild_id, user_id, items)
             await interaction.followup.send(f"Purchased {SHOP_ITEMS[key_local]['title']} {tier_local} for {price_local:,} Kibble.", ephemeral=True)
 
         btn.callback = make_buy_cb
@@ -13444,9 +13563,10 @@ class PacksView(discord.ui.View):
         if item_reward:
             item_name = item_reward["name"]
             item_tier = item_reward["tier"]
-            items_data = get_user_items(self.user.guild_id, self.user.user_id)
-            items_data.setdefault(item_name, {})[item_tier] = items_data.get(item_name, {}).get(item_tier, 0) + 1
-            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+            items_data = await get_user_items(self.user.guild_id, self.user.user_id)
+            item_key = f"{item_name}_{item_tier}"
+            items_data[item_key] = items_data.get(item_key, 0) + 1
+            await save_user_items(self.user.guild_id, self.user.user_id, items_data)
             
         await self.user.save()
         
@@ -13528,10 +13648,12 @@ class PacksView(discord.ui.View):
         
         # Batch save all items at once
         if all_items:
-            items_data = get_user_items(self.user.guild_id, self.user.user_id)
+            items_data = await get_user_items(self.user.guild_id, self.user.user_id)
             for item_name, tiers in all_items.items():
-                items_data.setdefault(item_name, {}).update(tiers)
-            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+                for tier, count in tiers.items():
+                    item_key = f"{item_name}_{tier}"
+                    items_data[item_key] = items_data.get(item_key, 0) + count
+            await save_user_items(self.user.guild_id, self.user.user_id, items_data)
         
         # Build description with pack counts and rewards
         description = f"**Opened:**\n" + "\n".join(pack_results)
@@ -13744,9 +13866,10 @@ class PacksView(discord.ui.View):
         if item_reward:
             item_name = item_reward["name"]
             item_tier = item_reward["tier"]
-            items_data = get_user_items(self.user.guild_id, self.user.user_id)
-            items_data.setdefault(item_name, {})[item_tier] = items_data.get(item_name, {}).get(item_tier, 0) + 1
-            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+            items_data = await get_user_items(self.user.guild_id, self.user.user_id)
+            item_key = f"{item_name}_{item_tier}"
+            items_data[item_key] = items_data.get(item_key, 0) + 1
+            await save_user_items(self.user.guild_id, self.user.user_id, items_data)
             
         await self.user.save()
         
@@ -16094,7 +16217,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                         break
                 elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
                     # Item format: "item_name_TIER"
-                    user1_items = get_user_items(interaction.guild.id, person1.id)
+                    user1_items = await get_user_items(interaction.guild.id, person1.id)
                     if user1_items.get(k, 0) < v:
                         error = True
                         break
@@ -16124,7 +16247,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                         break
                 elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
                     # Item format: "item_name_TIER"
-                    user2_items = get_user_items(interaction.guild.id, person2.id)
+                    user2_items = await get_user_items(interaction.guild.id, person2.id)
                     if user2_items.get(k, 0) < v:
                         error = True
                         break
@@ -16168,13 +16291,13 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     user2.kibble += v
                 elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
                     # Transfer items - k is in format "item_name_TIER"
-                    user1_items = get_user_items(message.guild.id, person1.id)
+                    user1_items = await get_user_items(message.guild.id, person1.id)
                     user1_items[k] = user1_items.get(k, 0) - v
-                    save_user_items(message.guild.id, person1.id, user1_items)
+                    await save_user_items(message.guild.id, person1.id, user1_items)
                     
-                    user2_items = get_user_items(message.guild.id, person2.id)
+                    user2_items = await get_user_items(message.guild.id, person2.id)
                     user2_items[k] = user2_items.get(k, 0) + v
-                    save_user_items(message.guild.id, person2.id, user2_items)
+                    await save_user_items(message.guild.id, person2.id, user2_items)
                 else:
                     user1[f"pack_{k.lower()}"] -= v
                     user2[f"pack_{k.lower()}"] += v
@@ -16202,13 +16325,13 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     user2.kibble -= v
                 elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
                     # Transfer items - k is in format "item_name_TIER"
-                    user2_items = get_user_items(message.guild.id, person2.id)
+                    user2_items = await get_user_items(message.guild.id, person2.id)
                     user2_items[k] = user2_items.get(k, 0) - v
-                    save_user_items(message.guild.id, person2.id, user2_items)
+                    await save_user_items(message.guild.id, person2.id, user2_items)
                     
-                    user1_items = get_user_items(message.guild.id, person1.id)
+                    user1_items = await get_user_items(message.guild.id, person1.id)
                     user1_items[k] = user1_items.get(k, 0) + v
-                    save_user_items(message.guild.id, person1.id, user1_items)
+                    await save_user_items(message.guild.id, person1.id, user1_items)
                 else:
                     user1[f"pack_{k.lower()}"] += v
                     user2[f"pack_{k.lower()}"] -= v
@@ -16386,6 +16509,37 @@ async def trade(message: discord.Interaction, person_id: discord.User):
             await achemb(message, "blackhole", "send")
             await achemb(message, "blackhole", "send", person2)
 
+    # Helper to map display names or code names to actual item code
+    def get_item_code_from_input(user_input: str) -> str | None:
+        """Convert user input (display name or code name) to SHOP_ITEMS key."""
+        user_input_lower = user_input.lower().strip()
+        
+        # First check if it's already a valid code name
+        if user_input_lower in SHOP_ITEMS:
+            return user_input_lower
+        
+        # Try to match against display names (case-insensitive)
+        for code_name, item_data in SHOP_ITEMS.items():
+            title = item_data["title"].lower()
+            # Remove emojis and extra whitespace for comparison
+            # Split by space, filter out emoji characters (which are typically 1-4 bytes)
+            title_words = [w for w in title.split() if w and not all(ord(c) > 127 for c in w)]
+            title_clean = "".join(title_words)
+            
+            input_words = [w for w in user_input_lower.split() if w]
+            input_clean = "".join(input_words)
+            
+            # Direct match or word-by-word match (for multi-word items)
+            if title_clean == input_clean:
+                return code_name
+            
+            # Also try matching just the title without emoji, case-insensitive
+            title_no_emoji = "".join(c for c in item_data["title"] if ord(c) < 128).lower().strip()
+            if title_no_emoji == user_input_lower or "".join(title_no_emoji.split()) == input_clean:
+                return code_name
+        
+        return None
+
     # lets go add cats modal thats fun
     class TradeModal(discord.ui.Modal):
         def __init__(self, currentuser):
@@ -16397,7 +16551,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
 
             self.cattype = discord.ui.TextInput(
                 label='Cat, Pack, Prism, Rain, or Item',
-                placeholder="Fine / Wooden / Alpha / Rain / candy_cane I",
+                placeholder="Fine / Wooden / Alpha / Rain / Luck Potion I / Candy Cane I",
             )
             self.add_item(self.cattype)
 
@@ -16520,45 +16674,52 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                 await update_trade_embed(interaction)
                 return
 
-            # handle items - format: "item_name tier" (e.g. "candy_cane I" or "luck III")
+            # handle items - can be in format "code_name tier", "Display Name tier", or just display name with tier
             input_parts = self.cattype.value.split()
-            if len(input_parts) >= 2:
-                # Try to parse as item: first part is item name, second part is tier
-                potential_item_name = input_parts[0].lower()
-                potential_tier = input_parts[1].upper()
+            if len(input_parts) >= 1:
+                # Try to find the tier (last part should be Roman numeral)
+                potential_tier = input_parts[-1].upper()
                 
-                if potential_item_name in SHOP_ITEMS:
-                    # Validate tier
-                    if potential_tier not in SHOP_ITEMS[potential_item_name].get("tiers", {}):
-                        await interaction.response.send_message(f"Invalid tier '{potential_tier}' for {SHOP_ITEMS[potential_item_name]['title']}", ephemeral=True)
+                # Check if last part looks like a tier
+                if potential_tier in ["I", "II", "III", "IV", "V"]:
+                    # Join all parts except last to get item name
+                    item_name_input = " ".join(input_parts[:-1]).lower()
+                    
+                    # Try to get the item code from the input (works with both display name and code name)
+                    item_code = get_item_code_from_input(item_name_input)
+                    
+                    if item_code and item_code in SHOP_ITEMS:
+                        # Validate tier
+                        if potential_tier not in SHOP_ITEMS[item_code].get("tiers", {}):
+                            await interaction.response.send_message(f"Invalid tier '{potential_tier}' for {SHOP_ITEMS[item_code]['title']}", ephemeral=True)
+                            return
+                        
+                        try:
+                            amt = int(value)
+                            if amt < 1:
+                                raise Exception
+                        except Exception:
+                            await interaction.response.send_message("please enter a valid amount for items", ephemeral=True)
+                            return
+                        
+                        # Check if user has the item
+                        user_items = await get_user_items(interaction.guild.id, interaction.user.id)
+                        item_key = f"{item_code}_{potential_tier}"
+                        current_count = user_items.get(item_key, 0)
+                        
+                        if current_count < amt:
+                            await interaction.response.send_message(f"you dont have enough {SHOP_ITEMS[item_code]['title']} {potential_tier} (have {current_count}, need {amt})", ephemeral=True)
+                            return
+                        
+                        # Add to trade using item_key format
+                        if self.currentuser == 1:
+                            person1gives[item_key] = person1gives.get(item_key, 0) + amt
+                        else:
+                            person2gives[item_key] = person2gives.get(item_key, 0) + amt
+                        
+                        await interaction.response.defer()
+                        await update_trade_embed(interaction)
                         return
-                    
-                    try:
-                        amt = int(value)
-                        if amt < 1:
-                            raise Exception
-                    except Exception:
-                        await interaction.response.send_message("please enter a valid amount for items", ephemeral=True)
-                        return
-                    
-                    # Check if user has the item
-                    user_items = get_user_items(interaction.guild.id, interaction.user.id)
-                    item_key = f"{potential_item_name}_{potential_tier}"
-                    current_count = user_items.get(item_key, 0)
-                    
-                    if current_count < amt:
-                        await interaction.response.send_message(f"you dont have enough {SHOP_ITEMS[potential_item_name]['title']} {potential_tier} (have {current_count}, need {amt})", ephemeral=True)
-                        return
-                    
-                    # Add to trade using item_key format
-                    if self.currentuser == 1:
-                        person1gives[item_key] = person1gives.get(item_key, 0) + amt
-                    else:
-                        person2gives[item_key] = person2gives.get(item_key, 0) + amt
-                    
-                    await interaction.response.defer()
-                    await update_trade_embed(interaction)
-                    return
 
             lc_input = self.cattype.value.lower()
 
@@ -16707,20 +16868,20 @@ async def atm(message: discord.Interaction):
         cat_bond = selected_cat.get('bond', 0)
         
         if not cat_id or not cat_type:
-            await interaction.response.send_message("Invalid cat selected.", ephemeral=True)
+            await interaction.followup.send("Invalid cat selected.", ephemeral=True)
             return
         
         # Toggle selection
         if cat_id in selection_state["cats"]:
             selection_state["cats"].remove(cat_id)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Removed **{cat_name}** from selection.\n\n**Selected: {len(selection_state['cats'])} cats**",
                 ephemeral=True
             )
         else:
             # Add to selection
             selection_state["cats"].append(cat_id)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"✅ Added **{cat_name}** ({cat_type}) to selection!\n\n**Selected: {len(selection_state['cats'])} cats**\n\n"
                 f"💡 Keep selecting cats, or go back to the main ATM message to convert all selected cats.",
                 ephemeral=True
@@ -19613,14 +19774,14 @@ async def breed(
                 async def parent_selected(sel_it: discord.Interaction, selected_cat: dict):
                     cat_type = selected_cat.get('type')
                     if not cat_type:
-                        await sel_it.response.send_message("Invalid cat selected.", ephemeral=True)
+                        await sel_it.followup.send("Invalid cat selected.", ephemeral=True)
                         return
                     
                     pair_parents.append(cat_type)
                     
                     if len(pair_parents) == 1:
                         # First parent selected
-                        await sel_it.response.send_message(
+                        await sel_it.followup.send(
                             f"✅ First parent: {get_emoji(cat_type.lower() + 'cat')} **{cat_type}**\n"
                             f"Now select the second parent...",
                             ephemeral=True
@@ -19646,7 +19807,7 @@ async def breed(
                             for i, (p1, p2) in enumerate(breed_pairs)
                         ])
                         
-                        await sel_it.response.send_message(
+                        await sel_it.followup.send(
                             f"✅ Added pair: {get_emoji(pair_parents[0].lower()+'cat')} **{pair_parents[0]}** + {get_emoji(pair_parents[1].lower()+'cat')} **{pair_parents[1]}**\n\n"
                             f"**All Pairs ({len(breed_pairs)}):**\n{pairs_text}",
                             ephemeral=True
