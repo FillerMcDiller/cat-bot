@@ -6,7 +6,7 @@ catbot.db-wal
 app.py
 .vscode
 config.py
-christmas_update.py
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
