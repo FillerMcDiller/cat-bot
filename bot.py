@@ -78,6 +78,27 @@ async def setup_hook():
             print(f"[BOT.PY] WARNING Could not import start_internal_server: {ie}")
             print("[BOT.PY] Vote system will not be available!")
         
+        # Update top.gg stats
+        try:
+            from main import update_topgg_stats
+            from config import TOP_GG_TOKEN, MIN_SERVER_SEND
+            
+            if TOP_GG_TOKEN:
+                server_count = len(bot.guilds)
+                if server_count >= MIN_SERVER_SEND:
+                    print(f"[BOT.PY] Updating top.gg stats ({server_count} servers)...")
+                    success = await update_topgg_stats(TOP_GG_TOKEN, server_count)
+                    if success:
+                        print("[BOT.PY] OK top.gg stats updated!")
+                    else:
+                        print("[BOT.PY] WARNING Failed to update top.gg stats")
+                else:
+                    print(f"[BOT.PY] Skipping top.gg update (only {server_count} servers, need {MIN_SERVER_SEND}+)")
+            else:
+                print("[BOT.PY] TOP_GG_TOKEN not configured, skipping stats update")
+        except Exception as e:
+            print(f"[BOT.PY] WARNING Could not update top.gg stats: {e}")
+        
     except Exception as e:
         print(f"\n[BOT.PY] ERROR in setup_hook: {e}")
         import traceback

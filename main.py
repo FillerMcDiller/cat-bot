@@ -53,6 +53,12 @@ from cat_modifiers import add_modifier, get_cat_display_name, apply_stat_multipl
 from catpg import RawSQL
 from database import Adventure, Channel, Deck, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
+from christmas_update import (
+    CHRISTMAS_COSMETICS, CHRISTMAS_ACHIEVEMENTS, TREE_ACHIEVEMENT,
+    ADVENT_REWARDS, TREE_ORNAMENTS, advent_command, tree_view_command,
+    tree_ornament_info_command, update_naughty_score, update_nice_score,
+    check_tree_ornament_unlock, get_tree_boosts
+)
 
 import time
 
@@ -77,6 +83,16 @@ with open(BATTLEPASS_FILE, "r", encoding="utf-8-sig") as f:
 COSMETICS_FILE = os.path.join(BASE_PATH, "data", "cosmetics.json")
 with open(COSMETICS_FILE, "r", encoding="utf-8") as f:
     COSMETICS_DATA = json.load(f)
+
+# Merge Christmas cosmetics into main cosmetics data
+for category in CHRISTMAS_COSMETICS:
+    if category not in COSMETICS_DATA:
+        COSMETICS_DATA[category] = {}
+    COSMETICS_DATA[category].update(CHRISTMAS_COSMETICS[category])
+
+# Merge Christmas achievements into main achievements data
+aches_data.update(CHRISTMAS_ACHIEVEMENTS)
+aches_data.update(TREE_ACHIEVEMENT)
 
 # Now you can use aches_data and battlepass_data anywhere in your bot
 print("Aches loaded:", len(aches_data))
@@ -124,6 +140,14 @@ type_dict = {
     "eGirl": 2,
     "TV": 1,
     "Donut": 0.5,
+    # Christmas cats (Dec only in original, now always available)
+    "Santa": 40,
+    "Elf": 30,
+    "Snowman": 22,
+    "ChristmasTree": 20,
+    "Gingerbread": 18,
+    "Cocoa": 8,
+    "Present": 4,
 }
 
 # this list stores unique non-duplicate cattypes
@@ -411,6 +435,70 @@ CAT_BATTLE_STATS = {
             {"name": "Glaze Trap", "power_cost": 1, "damage_mult": 1.7, "requires_flip": False, "desc": "Sticky situation"},
             {"name": "Homer's Revenge", "power_cost": 3, "damage_mult": 3.2, "requires_flip": True, "desc": "50% chance for D'oh! damage"}
         ]
+    },
+    # Christmas Cats
+    "Santa": {
+        "hp": 72, "dmg": 19,
+        "weakness": "Baby",
+        "abilities": [
+            {"name": "Ho Ho Ho", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Jolly laugh"},
+            {"name": "Gift Strike", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Present-powered attack"},
+            {"name": "Santa's Blessing", "power_cost": 4, "damage_mult": 2.4, "requires_flip": False, "desc": "Holiday magic strike"}
+        ]
+    },
+    "Elf": {
+        "hp": 70, "dmg": 18,
+        "weakness": "Rickroll",
+        "abilities": [
+            {"name": "Elf Kick", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Quick elf attack"},
+            {"name": "Workshop Tactics", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Strategic strike"},
+            {"name": "Magic Hammer", "power_cost": 3, "damage_mult": 2.5, "requires_flip": False, "desc": "Enchanted blow"}
+        ]
+    },
+    "Snowman": {
+        "hp": 68, "dmg": 16,
+        "weakness": "Fire",
+        "abilities": [
+            {"name": "Snowball", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Icy projectile"},
+            {"name": "Blizzard", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Cold storm"},
+            {"name": "Frostbite", "power_cost": 3, "damage_mult": 2.3, "requires_flip": True, "desc": "50% chance for freezing damage"}
+        ]
+    },
+    "ChristmasTree": {
+        "hp": 75, "dmg": 20,
+        "weakness": "Water",
+        "abilities": [
+            {"name": "Branch Swat", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Branch strike"},
+            {"name": "Ornament Barrage", "power_cost": 2, "damage_mult": 1.9, "requires_flip": False, "desc": "Festive projectiles"},
+            {"name": "Star Burst", "power_cost": 4, "damage_mult": 2.6, "requires_flip": False, "desc": "Radiant explosion"}
+        ]
+    },
+    "Gingerbread": {
+        "hp": 65, "dmg": 14,
+        "weakness": "Chef",
+        "abilities": [
+            {"name": "Crumble Strike", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Crumbly attack"},
+            {"name": "Gingerbread Punch", "power_cost": 2, "damage_mult": 1.6, "requires_flip": False, "desc": "Sweet but strong"},
+            {"name": "Candy Cane Slash", "power_cost": 3, "damage_mult": 2.2, "requires_flip": False, "desc": "Sharp striped strike"}
+        ]
+    },
+    "Cocoa": {
+        "hp": 66, "dmg": 15,
+        "weakness": "Water",
+        "abilities": [
+            {"name": "Cocoa Splash", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Warm splash"},
+            {"name": "Hot Chocolate Wave", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Steamy attack"},
+            {"name": "Marshmallow Explosion", "power_cost": 3, "damage_mult": 2.4, "requires_flip": True, "desc": "50% chance for sweet damage"}
+        ]
+    },
+    "Present": {
+        "hp": 62, "dmg": 13,
+        "weakness": "Trash",
+        "abilities": [
+            {"name": "Unwrap", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Gift attack"},
+            {"name": "Surprise Inside", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Unexpected strike"},
+            {"name": "Ribbon Bind", "power_cost": 3, "damage_mult": 2.0, "requires_flip": False, "desc": "Ribbon restraint strike"}
+        ]
     }
 }
 
@@ -427,6 +515,15 @@ ITEM_PRICES = {
     # Food
     "dogtreat": {"I": 120},
     "pancakes": {"I": 5000},
+    # Christmas items
+    "candy_cane": {"I": 150},
+    "gingerbread": {"I": 180},
+    "hot_cocoa": {"I": 200},
+    "present": {"I": 250},
+    "ornament": {"I": 180},
+    "festive_toy": {"I": 200, "II": 500},
+    "snowglobe": {"I": 220},
+    "christmas_spawn": {"I": 500, "II": 1200, "III": 3000},
 }
 
 # Human-readable item definitions
@@ -475,6 +572,58 @@ SHOP_ITEMS = {
         "title": "Pancakes",
         "tiers": {
             "I": {"desc": "Delicious pancakes — fully restores bond (one-time)", "bond": 100},
+        },
+    },
+    # Christmas items
+    "candy_cane": {
+        "title": "🍭 Candy Cane",
+        "tiers": {
+            "I": {"desc": "Sweet treat — +20 bond (one-time)", "bond": 20},
+        },
+    },
+    "gingerbread": {
+        "title": "🎂 Gingerbread Cookie",
+        "tiers": {
+            "I": {"desc": "Festive cookie — +25 bond (one-time)", "bond": 25},
+        },
+    },
+    "hot_cocoa": {
+        "title": "☕ Hot Cocoa",
+        "tiers": {
+            "I": {"desc": "Warm & cozy — +30 bond (one-time)", "bond": 30},
+        },
+    },
+    "present": {
+        "title": "🎁 Wrapped Present",
+        "tiers": {
+            "I": {"desc": "Mystery gift — random 15-50 bond (one-time)", "bond": 30},
+        },
+    },
+    "ornament": {
+        "title": "⛄ Christmas Ornament",
+        "tiers": {
+            "I": {"desc": "Pretty ornament — +10 bond per use (8 uses)", "uses": 8, "bond": 10},
+        },
+    },
+    "festive_toy": {
+        "title": "🎄 Festive Toy",
+        "tiers": {
+            "I": {"desc": "Holiday toy — +12 bond per use (6 uses)", "uses": 6, "bond": 12},
+            "II": {"desc": "Premium Holiday Toy — +18 bond per use (6 uses)", "uses": 6, "bond": 18},
+        },
+    },
+    "snowglobe": {
+        "title": "❄️ Snow Globe",
+        "tiers": {
+            "I": {"desc": "Magical snow globe — +15 bond per use (10 uses)", "uses": 10, "bond": 15},
+        },
+    },
+    "christmas_spawn": {
+        "title": "🎄 Christmas Cat Spawner",
+        "tiers": {
+            "I": {"desc": "Spawns a random Christmas cat (low luck)", "christmas_luck": 1},
+            "II": {"desc": "Spawns a random Christmas cat (medium luck)", "christmas_luck": 2},
+            "III": {"desc": "Spawns a random Christmas cat (high luck - may have modifiers)", "christmas_luck": 3},
         },
     },
 }
@@ -573,6 +722,26 @@ def get_bond_level_and_progress(absolute_bond: float) -> tuple[int, float, float
     
     progress_in_level = absolute_bond - cumulative
     return (level, progress_in_level, max_per_level)
+
+
+def apply_bond_level_stats(cat: dict, old_bond: float, new_bond: float) -> str:
+    """
+    Check if bond level increased and apply stat increases (+5 per level).
+    Returns a message string if level up occurred, empty string otherwise.
+    """
+    old_level, _, _ = get_bond_level_and_progress(old_bond)
+    new_level, _, _ = get_bond_level_and_progress(new_bond)
+    
+    if new_level > old_level:
+        levels_gained = new_level - old_level
+        stat_increase = 5 * levels_gained
+        
+        cat['hp'] = cat.get('hp', 0) + stat_increase
+        cat['dmg'] = cat.get('dmg', 0) + stat_increase
+        
+        return f"\n⭐ **Bond Level Up!** +{stat_increase} HP and DMG (now Level {new_level})"
+    
+    return ""
 
 
 def format_bond_display(absolute_bond: float) -> str:
@@ -713,8 +882,16 @@ async def get_user_cats(guild_id: int, user_id: int) -> list:
     if profile.cat_instances:
         # If it's already a list, return it; if it's a JSON string, parse it
         if isinstance(profile.cat_instances, str):
-            return json.loads(profile.cat_instances)
-        return profile.cat_instances
+            cats = json.loads(profile.cat_instances)
+        else:
+            cats = profile.cat_instances
+        
+        # Ensure all cats have the modifiers field (for backwards compatibility)
+        for cat in cats:
+            if "modifiers" not in cat:
+                cat["modifiers"] = []
+        
+        return cats
     return []
 
 
@@ -789,6 +966,45 @@ async def save_user_deck(guild_id: int, user_id: int, deck: list):
         await Deck.create(guild_id=guild_id, user_id=user_id, deck_data=deck_data)
 
 
+# ----- Top.gg Stats Update -----
+async def update_topgg_stats(token: str, server_count: int, shard_count: int = None):
+    """Update bot stats on top.gg.
+    
+    Args:
+        token: Top.gg API token
+        server_count: Number of guilds the bot is in
+        shard_count: Optional number of shards (if bot is sharded)
+    """
+    url = "https://top.gg/api/bots/stats"
+    
+    payload = {
+        "server_count": server_count,
+    }
+    
+    if shard_count is not None:
+        payload["shard_count"] = shard_count
+    
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print(f"[TOP.GG] Stats updated successfully: {server_count} servers", flush=True)
+                    return True
+                else:
+                    error_text = await resp.text()
+                    print(f"[TOP.GG] Failed to update stats: {resp.status} - {error_text}", flush=True)
+                    return False
+    except Exception as e:
+        print(f"[TOP.GG] Error updating stats: {e}", flush=True)
+        return False
+
+
 # ----- Shop state (per-guild persisted rotation) -----
 SHOP_STATE_PATH = "data/shop_state.json"
 
@@ -831,14 +1047,28 @@ def save_guild_shop(guild_id: int, shop_data: dict):
 
 
 
-async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int, enchanted: bool = False):
+async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amount: int, enchanted: bool = False, modifiers: list = None):
     """Create `amount` instances in the database WITHOUT touching aggregated DB counters.
 
     This is used to repair/sync per-instance storage when aggregated counters indicate the
     user should have instances but the database store is missing them.
+    
+    Args:
+        guild_id: Guild ID
+        user_id: User ID
+        cat_type: Type of cat to create
+        amount: Number of instances to create
+        enchanted: Deprecated - use modifiers instead. If True, adds "enchanted" modifier
+        modifiers: List of modifier strings to apply (e.g., ["enchanted", "snowy"])
     """
     if amount <= 0:
         return
+    
+    # Convert deprecated enchanted param to modifiers list
+    if enchanted and not modifiers:
+        modifiers = ["enchanted"]
+    elif modifiers is None:
+        modifiers = []
     
     # Safety cap: don't create more than 500 at once (prevents runaway loops)
     if amount > 500:
@@ -896,21 +1126,24 @@ async def _create_instances_only(guild_id: int, user_id: int, cat_type: str, amo
             "hp": hp,
             "dmg": dmg,
             "acquired_at": int(time.time()),
+            "modifiers": [],
         }
         
-        # Apply enchanted modifier if explicitly requested OR if there are pending enchanted instances
-        should_enchant = enchanted or (pending_enchanted_count > 0)
-        if should_enchant:
+        # Apply pending enchanted instances if any (backwards compat)
+        if pending_enchanted_count > 0:
             if add_modifier(instance, "enchanted"):
-                print(f"[ENCHANTED] Added enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
-                # Decrement pending count if we used one
-                if pending_enchanted_count > 0:
-                    pending_enchanted_count -= 1
-                    pending_enchanted[pending_key] = pending_enchanted_count
-                    if pending_enchanted_count == 0:
-                        del pending_enchanted[pending_key]
+                print(f"[ENCHANTED] Added enchanted modifier (pending) to {cat_type} cat for user {user_id}. Instance now has modifiers: {instance.get('modifiers')}", flush=True)
+                pending_enchanted_count -= 1
+                pending_enchanted[pending_key] = pending_enchanted_count
+                if pending_enchanted_count == 0:
+                    del pending_enchanted[pending_key]
+        
+        # Apply explicit modifiers from parameter
+        for modifier in modifiers:
+            if add_modifier(instance, modifier):
+                print(f"[MODIFIER] Added {modifier} modifier to {cat_type} cat for user {user_id}. Instance now has modifiers: {instance.get('modifiers')}", flush=True)
             else:
-                print(f"[ENCHANTED] Failed to add enchanted modifier to {cat_type} cat for user {user_id}", flush=True)
+                print(f"[MODIFIER] Failed to add {modifier} modifier to {cat_type} cat for user {user_id}", flush=True)
         
         cats.append(instance)
     
@@ -1021,23 +1254,37 @@ async def update_cat_stats_from_battle_stats(guild_id: int, user_id: int):
     return updated
 
 
-async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchanted: bool = False):
+async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchanted: bool = False, modifiers: list = None):
     """Automatically sync cat instances with database counts.
     
     If a specific cat_type is provided, only sync that type.
     Otherwise, sync all types where DB count > 0.
+    
+    For Christmas cats, creates instances directly without requiring a DB count.
     
     This ensures instances are always created when cats are added,
     even if they were added through old code paths that only increment counters.
     
     NOTE: Users with suspiciously high counts (>10,000) are quarantined to prevent
     infinite loops. The DB count is preserved but instances are capped at 1,000 max.
+    
+    Args:
+        profile: User profile
+        cat_type: Optional specific cat type to sync
+        enchanted: Deprecated - use modifiers instead. If True, adds "enchanted" modifier
+        modifiers: List of modifier strings to apply (e.g., ["enchanted", "snowy"])
     """
     try:
         guild_id = profile.guild_id
         user_id = profile.user_id
     except Exception:
         return False
+    
+    # Convert deprecated enchanted param to modifiers list
+    if enchanted and not modifiers:
+        modifiers = ["enchanted"]
+    elif modifiers is None:
+        modifiers = []
     
     # Get current instances
     cats = await get_user_cats(guild_id, user_id)
@@ -1048,6 +1295,9 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
     # Count instances by type
     from collections import Counter
     instance_counts = Counter(c.get("type") for c in cats if c.get("type"))
+    
+    # Define Christmas cats
+    christmas_cats_list = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
     
     # Determine which types to check
     if cat_type:
@@ -1067,36 +1317,49 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
     # Check each type and create missing instances
     created_any = False
     for ct in types_to_check:
-        try:
-            db_count = int(getattr(profile, f"cat_{ct}", 0) or 0)
-        except Exception:
-            db_count = 0
-        
-        inst_count = instance_counts.get(ct, 0)
-        
-        if db_count > inst_count:
-            missing = db_count - inst_count
-            
-            # QUARANTINE: if missing count is suspiciously high (>10,000), cap it
-            # This preserves the DB count but prevents runaway loops
-            if missing > 10000:
-                print(f"[QUARANTINE] User {user_id} (guild {guild_id}) has {missing} missing {ct} cats! " +
-                      f"This is likely a data anomaly. Capping at 1,000 instances to prevent crash.", flush=True)
-                # Log to a special file for manual review
-                try:
-                    with open("/tmp/cat_bot_anomalies.log", "a") as f:
-                        f.write(f"[{datetime.datetime.now().isoformat()}] User {user_id} guild {guild_id}: {missing} missing {ct} cats (DB count: {db_count}, current instances: {inst_count})\n")
-                except:
-                    pass
-                # Cap missing to 1000 max for actual instance creation
-                missing = 1000
-            
-            if missing > 0:
-                # Create missing instances, passing the enchanted flag
-                await _create_instances_only(guild_id, user_id, ct, missing, enchanted=enchanted)
+        # For Christmas cats, create one instance even if DB count is 0
+        # (since we don't increment DB counts for Christmas cats)
+        if ct in christmas_cats_list:
+            # When a specific cat_type is provided (from a catch), always create an instance
+            # Otherwise, only create if we have zero instances
+            if cat_type is not None or instance_counts.get(ct, 0) == 0:
+                # Create one instance for the caught Christmas cat
+                await _create_instances_only(guild_id, user_id, ct, 1, modifiers=modifiers)
                 created_any = True
-                enchanted_text = " (enchanted)" if enchanted else ""
-                print(f"[AUTO-SYNC] Created {missing}x {ct} instances{enchanted_text} for user {user_id} (guild {guild_id})", flush=True)
+                modifiers_text = f" ({', '.join(modifiers)})" if modifiers else ""
+                print(f"[AUTO-SYNC] Created 1x {ct} instance{modifiers_text} for user {user_id} (guild {guild_id})", flush=True)
+        else:
+            # For regular cats, check DB count vs instances
+            try:
+                db_count = int(getattr(profile, f"cat_{ct}", 0) or 0)
+            except Exception:
+                db_count = 0
+            
+            inst_count = instance_counts.get(ct, 0)
+            
+            if db_count > inst_count:
+                missing = db_count - inst_count
+                
+                # QUARANTINE: if missing count is suspiciously high (>10,000), cap it
+                # This preserves the DB count but prevents runaway loops
+                if missing > 10000:
+                    print(f"[QUARANTINE] User {user_id} (guild {guild_id}) has {missing} missing {ct} cats! " +
+                          f"This is likely a data anomaly. Capping at 1,000 instances to prevent crash.", flush=True)
+                    # Log to a special file for manual review
+                    try:
+                        with open("/tmp/cat_bot_anomalies.log", "a") as f:
+                            f.write(f"[{datetime.datetime.now().isoformat()}] User {user_id} guild {guild_id}: {missing} missing {ct} cats (DB count: {db_count}, current instances: {inst_count})\n")
+                    except:
+                        pass
+                    # Cap missing to 1000 max for actual instance creation
+                    missing = 1000
+                
+                if missing > 0:
+                    # Create missing instances, passing the modifiers list
+                    await _create_instances_only(guild_id, user_id, ct, missing, modifiers=modifiers)
+                    created_any = True
+                    modifiers_text = f" ({', '.join(modifiers)})" if modifiers else ""
+                    print(f"[AUTO-SYNC] Created {missing}x {ct} instances{modifiers_text} for user {user_id} (guild {guild_id})", flush=True)
     
     return created_any
 
@@ -1107,10 +1370,12 @@ active_adventures = {}  # Tracks active adventures
 active_reminders = {}  # Tracks active reminders
 # cooldown tracker for pet actions: key = (guild_id, user_id, instance_id) -> last_pet_ts
 pet_cooldowns = {}
-# Track enchanted spawns: channel_id -> (cat_type, is_enchanted)
+# Track enchanted spawns: channel_id -> (cat_type, modifiers_list)
 enchanted_spawns = {}
 # Track enchanted catches: (guild_id, user_id, cat_type) -> count of pending enchanted instances
 pending_enchanted = {}
+# Track modifiers for caught cats: (guild_id, user_id, cat_type) -> list of modifiers
+pending_modifiers = {}
 
 # Simple in-memory active fights mapping: channel_id -> SimpleFightSession
 FIGHT_SESSIONS: dict = {}
@@ -1500,7 +1765,8 @@ pack_data = [
     {"name": "Gold", "value": 230, "upgrade": 30, "totalvalue": 400},
     {"name": "Platinum", "value": 630, "upgrade": 30, "totalvalue": 800},
     {"name": "Diamond", "value": 860, "upgrade": 30, "totalvalue": 1200},
-    {"name": "Celestial", "value": 2000, "upgrade": 30, "totalvalue": 2000}  # is that a madeline celeste reference????
+    {"name": "Celestial", "value": 2000, "upgrade": 30, "totalvalue": 2000},  # is that a madeline celeste reference????
+    {"name": "Festive", "value": 500, "upgrade": 35, "totalvalue": 1500}  # Christmas pack
 ]
 
 prism_names_start = [
@@ -1800,8 +2066,9 @@ logging.getLogger().addHandler(_discord_handler)
 logging.getLogger().setLevel(logging.INFO)
 
 # Redirect stdout/stderr into logging (will be INFO/ERROR level; handler filters by WARNING)
-sys.stdout = _StreamToLogger(logging.getLogger("stdout"), logging.INFO)
-sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
+# NOTE: Disabled due to hanging issues - will investigate separately
+# sys.stdout = _StreamToLogger(logging.getLogger("stdout"), logging.INFO)
+# sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
 
 @bot.event
 async def on_ready():
@@ -3971,6 +4238,16 @@ async def battles_command(interaction: discord.Interaction):
                     
                     return filtered
                 
+                def format_deck_cat(self, c):
+                    """Format a cat for deck display with modifiers and stat multipliers"""
+                    modifiers = c.get('modifiers', [])
+                    if modifiers:
+                        stats = apply_stat_multipliers(c)
+                        hp, dmg = stats.get('hp', c.get('hp', 0)), stats.get('dmg', c.get('dmg', 0))
+                        modifier_str = ''.join([CAT_MODIFIERS[m]['emoji'] for m in modifiers if m in CAT_MODIFIERS])
+                        return f"• {modifier_str} {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {hp}, DMG: {dmg}"
+                    return f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}"
+                
                 def update_buttons(self):
                     self.clear_items()
                     
@@ -4086,7 +4363,15 @@ async def battles_command(interaction: discord.Interaction):
                             self.update_buttons()
                             
                             deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                            deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                            def format_deck_cat(c):
+                                modifiers = c.get('modifiers', [])
+                                if modifiers:
+                                    stats = apply_stat_multipliers(c)
+                                    hp, dmg = stats.get('hp', c.get('hp', 0)), stats.get('dmg', c.get('dmg', 0))
+                                    modifier_str = ''.join([CAT_MODIFIERS[m]['emoji'] for m in modifiers if m in CAT_MODIFIERS])
+                                    return f"• {modifier_str} {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {hp}, DMG: {dmg}"
+                                return f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}"
+                            deck_text = "\\n".join([format_deck_cat(c) for c in deck_cats])
                             
                             embed = discord.Embed(
                                 title="🎴 Deck Configuration",
@@ -4118,7 +4403,15 @@ async def battles_command(interaction: discord.Interaction):
                             self.update_buttons()
                             
                             deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                            deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                            def format_deck_cat(c):
+                                modifiers = c.get('modifiers', [])
+                                if modifiers:
+                                    stats = apply_stat_multipliers(c)
+                                    hp, dmg = stats.get('hp', c.get('hp', 0)), stats.get('dmg', c.get('dmg', 0))
+                                    modifier_str = ''.join([CAT_MODIFIERS[m]['emoji'] for m in modifiers if m in CAT_MODIFIERS])
+                                    return f"• {modifier_str} {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {hp}, DMG: {dmg}"
+                                return f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}"
+                            deck_text = "\\n".join([format_deck_cat(c) for c in deck_cats])
                             
                             embed = discord.Embed(
                                 title="🎴 Deck Configuration",
@@ -4141,7 +4434,7 @@ async def battles_command(interaction: discord.Interaction):
                     self.update_buttons()
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     embed = discord.Embed(
                         title="🎴 Deck Configuration",
@@ -4160,7 +4453,7 @@ async def battles_command(interaction: discord.Interaction):
                     self.update_buttons()
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     embed = discord.Embed(
                         title="🎴 Deck Configuration",
@@ -4181,7 +4474,7 @@ async def battles_command(interaction: discord.Interaction):
                     self.update_buttons()
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     embed = discord.Embed(
                         title="🎴 Deck Configuration",
@@ -4211,7 +4504,7 @@ async def battles_command(interaction: discord.Interaction):
                     
                     # Show current deck
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     filter_info = ""
                     if self.filter_type or self.filter_name:
@@ -4248,7 +4541,7 @@ async def battles_command(interaction: discord.Interaction):
                     await save_user_deck(guild_id, user_id, self.selected_ids)
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     embed = discord.Embed(
                         title="✅ Deck Saved!",
@@ -4298,7 +4591,7 @@ async def battles_command(interaction: discord.Interaction):
                     self.update_buttons()
                     
                     deck_cats = [c for c in all_cats if c.get('id') in self.selected_ids]
-                    deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                    deck_text = "\\n".join([self.format_deck_cat(c) for c in deck_cats])
                     
                     embed = discord.Embed(
                         title="🎴 Deck Configuration",
@@ -4311,7 +4604,15 @@ async def battles_command(interaction: discord.Interaction):
             # Show current deck first
             deck_cats = [c for c in all_cats if c.get('id') in current_deck_ids]
             if deck_cats:
-                deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}" for c in deck_cats])
+                def format_deck_cat(c):
+                    modifiers = c.get('modifiers', [])
+                    if modifiers:
+                        stats = apply_stat_multipliers(c)
+                        hp, dmg = stats.get('hp', c.get('hp', 0)), stats.get('dmg', c.get('dmg', 0))
+                        modifier_str = ''.join([CAT_MODIFIERS[m]['emoji'] for m in modifiers if m in CAT_MODIFIERS])
+                        return f"• {modifier_str} {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {hp}, DMG: {dmg}"
+                    return f"• {c.get('name', 'Unknown')} ({c.get('type')}) - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)}"
+                deck_text = "\\n".join([format_deck_cat(c) for c in deck_cats])
             else:
                 deck_text = "*No deck configured - using auto-select in battles*"
             
@@ -4374,13 +4675,21 @@ async def battles_command(interaction: discord.Interaction):
             top_3 = sorted_cats[:3]
             
             top_text = "\\n".join([
-                f"{i+1}. {c.get('name', 'Unknown')} - HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)} (Score: {_score_cat(c)})"
+                f"{i+1}. {(lambda c: ''.join([CAT_MODIFIERS[m]['emoji'] for m in c.get('modifiers', []) if m in CAT_MODIFIERS]) + ' ' if c.get('modifiers') else '')(c)}{c.get('name', 'Unknown')} - HP: {(apply_stat_multipliers(c) if c.get('modifiers') else c).get('hp', c.get('hp', 0))}, DMG: {(apply_stat_multipliers(c) if c.get('modifiers') else c).get('dmg', c.get('dmg', 0))} (Score: {_score_cat(c)})"
                 for i, c in enumerate(top_3)
             ])
             
             deck_cats = [c for c in all_cats if c.get('id') in deck_ids]
             if deck_cats:
-                deck_text = "\\n".join([f"• {c.get('name', 'Unknown')} (HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)})" for c in deck_cats])
+                def format_deck_cat_stats(c):
+                    modifiers = c.get('modifiers', [])
+                    if modifiers:
+                        stats = apply_stat_multipliers(c)
+                        hp, dmg = stats.get('hp', c.get('hp', 0)), stats.get('dmg', c.get('dmg', 0))
+                        modifier_str = ''.join([CAT_MODIFIERS[m]['emoji'] for m in modifiers if m in CAT_MODIFIERS])
+                        return f"• {modifier_str} {c.get('name', 'Unknown')} (HP: {hp}, DMG: {dmg})"
+                    return f"• {c.get('name', 'Unknown')} (HP: {c.get('hp', 0)}, DMG: {c.get('dmg', 0)})"
+                deck_text = "\\n".join([format_deck_cat_stats(c) for c in deck_cats])
             else:
                 deck_text = "*No custom deck - auto-selecting best cats*"
             
@@ -5267,6 +5576,7 @@ news_list = [
     {"title": "NEW CATS, KIBBLE, AND.. ITEMS??? WOWOWOWOOWO!!!", "emoji": "🔥"},
     {"title": "BIG APOLOGIES FOR LAST NIGHT!", "emoji": "😭"},
     {"title": "CAT MODIFIERS ARE HERE!", "emoji": "✨"},
+    {"title": "CHRISTMAS UPDATE + BUG FIXES", "emoji": "🎄"},
 ]
 
 
@@ -5523,13 +5833,21 @@ async def refresh_quests(user):
 
         user.season = full_months_passed
         await user.save()
-    if 12 * 3600 < user.vote_cooldown + 12 * 3600 < time.time():
+    
+    # Check vote quest - regenerate if 12 hours have passed since last completion
+    if user.vote_cooldown != 0 and user.vote_cooldown + 12 * 3600 < time.time():
         await generate_quest(user, "vote")
-    if 12 * 3600 < user.catch_cooldown + 12 * 3600 < time.time():
+    
+    # Check catch quest - regenerate if 12 hours have passed since last completion
+    if user.catch_cooldown != 0 and user.catch_cooldown + 12 * 3600 < time.time():
         await generate_quest(user, "catch")
-    if 12 * 3600 < user.misc_cooldown + 12 * 3600 < time.time():
+    
+    # Check misc quest - regenerate if 12 hours have passed since last completion
+    if user.misc_cooldown != 0 and user.misc_cooldown + 12 * 3600 < time.time():
         await generate_quest(user, "misc")
-    if 12 * 3600 < (getattr(user, 'extra_cooldown', 1) or 1) + 12 * 3600 < time.time():
+    
+    # Check extra quest - regenerate if 12 hours have passed since last completion
+    if getattr(user, 'extra_cooldown', 1) != 0 and getattr(user, 'extra_cooldown', 1) + 12 * 3600 < time.time():
         await generate_quest(user, "extra")
 
 
@@ -5944,7 +6262,31 @@ def alnum(string):
     return "".join(item for item in string.lower() if item.isalnum())
 
 
-async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
+def get_random_spawn_modifiers():
+    """Determine which modifiers to apply to a naturally spawned cat.
+    - 1/3 chance for enchanted modifier
+    - During Christmas (Dec 1-31), additional chance for snowy modifier
+    - Can have both snowy and enchanted modifiers
+    """
+    modifiers = []
+    
+    # Check for enchanted modifier (1/3 chance)
+    if random.randint(1, 3) == 1:
+        modifiers.append("enchanted")
+    
+    # Check if it's Christmas time (Dec 1-31)
+    now = datetime.datetime.now()
+    is_christmas = now.month == 12 and now.day <= 31
+    
+    if is_christmas:
+        # 1/5 chance for snowy modifier during Christmas
+        if random.randint(1, 5) == 1:
+            modifiers.append("snowy")
+    
+    return modifiers
+
+
+async def spawn_cat(ch_id, localcat=None, force_spawn=None, modifiers=None):
     try:
         channel = await Channel.get_or_none(channel_id=int(ch_id))
         if not channel:
@@ -5956,18 +6298,30 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
 
     if not localcat:
         localcat = random.choices(cattypes, weights=type_dict.values())[0]
+    
+    # Default to empty modifiers list
+    if modifiers is None:
+        modifiers = []
+    
     icon = get_emoji(localcat.lower() + "cat")
     
-    # Handle enchanted image variant
-    image_filename = f"{localcat.lower()}_cat_enchanted.png" if enchanted else f"{localcat.lower()}_cat.png"
+    # Check if enchanted or snowy modifier to determine image
+    image_suffix = ""
+    if "enchanted" in modifiers:
+        image_suffix = "_enchanted"
+    elif "snowy" in modifiers:
+        image_suffix = "_snowy"
+    
+    image_filename = f"{localcat.lower()}_cat{image_suffix}.png"
     file = discord.File(
         f"images/spawn/{image_filename}",
     )
     channeley = bot.get_partial_messageable(int(ch_id))
 
-    # Add enchanted indicator to appear string
-    enchanted_prefix = "✨ " if enchanted else ""
-    appearstring = '{emoji} {enchanted}{type} cat has appeared! Type "cat" to catch it!' if not channel.appear else channel.appear
+    # Add modifier emojis to appear string
+    modifier_emojis = "".join([CAT_MODIFIERS[m]["emoji"] for m in modifiers if m in CAT_MODIFIERS])
+    modifier_prefix = f"{modifier_emojis} " if modifier_emojis else ""
+    appearstring = '{emoji} {modifier_prefix}{type} cat has appeared! Type "cat" to catch it!' if not channel.appear else channel.appear
 
     if channel.cat:
         # its never too late to return
@@ -5975,7 +6329,7 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
 
     try:
         message_is_sus = await channeley.send(
-            appearstring.replace("{emoji}", str(icon)).replace("{enchanted}", enchanted_prefix).replace("{type}", localcat),
+            appearstring.replace("{emoji}", str(icon)).replace("{modifier_prefix}", modifier_prefix).replace("{type}", localcat),
             file=file,
             allowed_mentions=discord.AllowedMentions.all(),
         )
@@ -5992,12 +6346,12 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, enchanted=False):
     channel.yet_to_spawn = 0
     channel.forcespawned = bool(force_spawn)
     channel.cattype = localcat
-    channel.enchanted = enchanted
+    channel.modifiers = json.dumps(modifiers)
     await channel.save()
     
-    # Store enchanted status in memory for when cat is caught
-    if enchanted:
-        enchanted_spawns[int(ch_id)] = (localcat, True)
+    # Store modifiers in memory for when cat is caught
+    if modifiers:
+        enchanted_spawns[int(ch_id)] = (localcat, modifiers)
 
 
 async def postpone_reminder(interaction):
@@ -6059,9 +6413,9 @@ async def maintaince_loop():
 
     # revive dead catch loops
     async for channel in Channel.limit(["channel_id"], "yet_to_spawn < $1 AND cat = 0", time.time(), refetch=False):
-        # 1 in 3 chance to spawn an enchanted cat
-        is_enchanted = random.randint(1, 3) == 1
-        await spawn_cat(str(channel.channel_id), enchanted=is_enchanted)
+        # Determine random modifiers for natural spawn
+        modifiers = get_random_spawn_modifiers()
+        await spawn_cat(str(channel.channel_id), modifiers=modifiers)
         await asyncio.sleep(0.1)
 
     # Process any completed adventures
@@ -6581,9 +6935,8 @@ async def maintaince_loop():
                     channel_db.yet_to_spawn = 0
                     await channel_db.save()
                     # spawn initial cat immediately
-                    # 1 in 3 chance to spawn an enchanted cat
-                    is_enchanted = random.randint(1, 3) == 1
-                    await spawn_cat(str(chosen), enchanted=is_enchanted)
+                    modifiers = get_random_spawn_modifiers()
+                    await spawn_cat(str(chosen), modifiers=modifiers)
                     last_random_rain_time = time.time()
                     try:
                         notify_ch = bot.get_channel(config.RAIN_CHANNEL_ID)
@@ -7782,34 +8135,46 @@ async def on_message(message: discord.Message):
                     view = View(timeout=VIEW_TIMEOUT)
                     view.add_item(button)
 
-                # Track enchanted status
-                is_enchanted = False
+                # Track modifiers from forced spawn
+                modifiers_to_apply = []
                 if message.channel.id in enchanted_spawns:
                     spawn_info = enchanted_spawns.pop(message.channel.id)
-                    if spawn_info[1]:  # is_enchanted
-                        is_enchanted = True
+                    if isinstance(spawn_info[1], list):
+                        modifiers_to_apply = spawn_info[1]  # List of modifiers
+                    elif spawn_info[1]:  # Backwards compatibility: True means enchanted
+                        modifiers_to_apply = ["enchanted"]
                 
-                # increment the dynamic cat counter safely
-                key = f"cat_{le_emoji}"
-                try:
-                    # try mapping-style access first (some ORM wrappers support this)
-                    user[key] += silly_amount
-                    new_count = user[key]
-                except Exception:
-                    # fallback to attribute-style access (most DB models use attributes)
-                    current = getattr(user, key, 0) or 0
-                    new_val = current + silly_amount
+                # Check if this is a Christmas cat - if so, only create instances, don't increment counter
+                christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                is_christmas_cat = le_emoji in christmas_cats
+                
+                # Only increment the database counter for non-Christmas cats
+                if not is_christmas_cat:
+                    # increment the dynamic cat counter safely
+                    key = f"cat_{le_emoji}"
                     try:
-                        setattr(user, key, new_val)
+                        # try mapping-style access first (some ORM wrappers support this)
+                        user[key] += silly_amount
+                        new_count = user[key]
                     except Exception:
-                        # last resort: leave new_count as computed value
-                        pass
-                    new_count = new_val
+                        # fallback to attribute-style access (most DB models use attributes)
+                        current = getattr(user, key, 0) or 0
+                        new_val = current + silly_amount
+                        try:
+                            setattr(user, key, new_val)
+                        except Exception:
+                            # last resort: leave new_count as computed value
+                            pass
+                        new_count = new_val
+                else:
+                    # For Christmas cats, instances will be created by auto_sync_cat_instances
+                    # Just set new_count for display purposes
+                    new_count = silly_amount
                 
-                # If cat was enchanted, mark the FINAL (potentially boosted) cat type for enchantment
-                if is_enchanted:
+                # Store any modifiers to apply to caught instance
+                if modifiers_to_apply:
                     key = (message.guild.id, message.author.id, le_emoji)
-                    pending_enchanted[key] = pending_enchanted.get(key, 0) + 1
+                    pending_modifiers[key] = modifiers_to_apply
 
                 async def delete_cat():
                     try:
@@ -7831,10 +8196,16 @@ async def on_message(message: discord.Message):
                         catch_message = catch_message.replace("{count}", f"{new_count:,}")
                         catch_message = catch_message.replace("{time}", caught_time[:-1])
                         
-                        # Add enchanted indicator if applicable
-                        if is_enchanted:
-                            catch_message = catch_message.replace(message.author.name.replace("_", "\\_"), 
-                                                                  f"{message.author.name.replace('_', '\\_')} caught ✨***ENCHANTED***", 1)
+                        # Add modifier indicators if applicable
+                        if modifiers_to_apply:
+                            modifier_emojis = []
+                            for mod in modifiers_to_apply:
+                                if mod in CAT_MODIFIERS and "emoji" in CAT_MODIFIERS[mod]:
+                                    modifier_emojis.append(CAT_MODIFIERS[mod]["emoji"])
+                            if modifier_emojis:
+                                modifiers_text = " " + " ".join(modifier_emojis)
+                                catch_message = catch_message.replace(message.author.name.replace("_", "\\_"), 
+                                                                      f"{message.author.name.replace('_', '\\_')}{modifiers_text}", 1)
                         
                         catch_message += suffix_string
                         
@@ -7877,8 +8248,12 @@ async def on_message(message: discord.Message):
 
                 await _check_full_stack_and_huzzful(user, message, le_emoji)
                 
-                # Auto-sync instances to create the caught cat, including enchanted if applicable
-                created = await auto_sync_cat_instances(user, cat_type=le_emoji, enchanted=is_enchanted)
+                # Get any pending modifiers for this catch
+                modifiers_key = (message.guild.id, message.author.id, le_emoji)
+                catch_modifiers = pending_modifiers.pop(modifiers_key, None) or []
+                
+                # Auto-sync instances to create the caught cat, including modifiers if applicable
+                created = await auto_sync_cat_instances(user, cat_type=le_emoji, modifiers=catch_modifiers)
 
                 if random.randint(0, 1000) == 69:
                     await achemb(message, "lucky", "send")
@@ -7955,8 +8330,8 @@ async def on_message(message: discord.Message):
                     except Exception:
                         pass
                     # 1 in 3 chance to spawn an enchanted cat
-                    is_enchanted = random.randint(1, 3) == 1
-                    await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
+                    modifiers = get_random_spawn_modifiers()
+                    await spawn_cat(str(message.channel.id), modifiers=modifiers)
                 else:
                     try:
                         temp_catches_storage.remove(pls_remove_me_later_k_thanks)
@@ -8516,6 +8891,31 @@ async def news(message: discord.Interaction):
                 "name": "1 Platinum Pack"
             }
        },
+         {
+            "title": "CHRISTMAS UPDATE + BUG FIXES",
+            "emoji": "🌲",
+            "desc": "chrimas",
+            "body": (
+                "HELL YEAH! ITS CHRISTMAS TIME!!!!111!!!!1!1!11\n"
+                "This update includes 7 new Christmas exclusive cats, new Christmas-themed items, A Festive Pack, An advent calendar, Christmas tree, and more!\n"
+                "With the addition of the new cats, comes the brand new Snowy modifier. This slightly increases a cats stats + stacks with Enchanted (if you're lucky to get both)\n"
+                "The shop has been stocked with new toys to increase cat bond and potions to use for this Christmas season.\n"
+                "running /tree will bring up the christmas tree, which allows you to complete its quests to obtain ornaments.\n"
+                "The advent calendar is available from Dec 1-25 by running /advent. \n"
+                "Battlepass Season 12 starts on December 1st, with Christmas-themed rewards.\n"
+                "\n"
+                "If you run any bugs, please report them via /support and make a request in my server, /suggestion to send it directly to me, or simply DM me.\n"
+                "Enjoy the update (and the festive pack :3)\n"
+                "\n"
+                "**Filler <3**"
+            ),
+            "reward": {
+                "type": "pack",
+                "amount": 1,
+                "pack_name": "Festive",  # Used when type is "pack"
+                "name": "1 Festive Pack"
+            }
+       },
     ]
 
     class NewsView(View):
@@ -8763,7 +9163,7 @@ class AdminPanelModal(discord.ui.Modal):
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give cats to"))
             self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Cat type to give"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount to give"))
-            self.add_item(discord.ui.TextInput(label="Enchanted (true/false)", placeholder="true or false", default="false"))
+            self.add_item(discord.ui.TextInput(label="Modifiers (optional)", placeholder="e.g. Snowy, Enchanted", default="", required=False))
         elif action == "Give Rains":
             self.add_item(discord.ui.TextInput(label="Username", placeholder="Username or nickname to give Rains to"))
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of Rain Minutes to give"))
@@ -8850,8 +9250,15 @@ class AdminPanelModal(discord.ui.Modal):
             user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
             cat_type = self.children[1].value
             amount = int(self.children[2].value)
-            enchanted_str = self.children[3].value.lower().strip()
-            enchanted = enchanted_str in ["true", "1", "yes", "y"]
+            modifiers_str = self.children[3].value.strip()
+            
+            # Parse modifiers (comma-separated, e.g. "Snowy, Enchanted")
+            modifier_list = []
+            if modifiers_str:
+                raw_mods = [m.strip().lower() for m in modifiers_str.split(",")]
+                for mod in raw_mods:
+                    if mod in CAT_MODIFIERS:
+                        modifier_list.append(mod)
             
             try:
                 # Get cats and add instances
@@ -8884,11 +9291,12 @@ class AdminPanelModal(discord.ui.Modal):
                         "hp": hp,
                         "dmg": dmg,
                         "acquired_at": int(time.time()),
+                        "modifiers": [],
                     }
                     
-                    # Add enchanted modifier if requested
-                    if enchanted:
-                        add_modifier(instance, "enchanted")
+                    # Add modifiers if requested
+                    for mod in modifier_list:
+                        add_modifier(instance, mod)
                     
                     cats.append(instance)
                 
@@ -8898,8 +9306,8 @@ class AdminPanelModal(discord.ui.Modal):
                 user[f"cat_{cat_type}"] = user.get(f"cat_{cat_type}", 0) + amount
                 await user.save()
                 
-                enchanted_text = " ✨ Enchanted" if enchanted else ""
-                await interaction.response.send_message(f"Gave {amount} {cat_type}{enchanted_text} cats to {member.mention}", ephemeral=True)
+                modifier_display = " " + " ".join([CAT_MODIFIERS[m]["emoji"] for m in modifier_list]) if modifier_list else ""
+                await interaction.response.send_message(f"Gave {amount} {cat_type}{modifier_display} cats to {member.mention}", ephemeral=True)
             except Exception as e:
                 print(f"Error giving cats: {e}")
                 # fallback to aggregated count update
@@ -9428,8 +9836,8 @@ async def give_rain(channel, duration):
     channel_data.yet_to_spawn = 0
     await channel_data.save()
     # 1 in 3 chance to spawn an enchanted cat
-    is_enchanted = random.randint(1, 3) == 1
-    await spawn_cat(str(channel.id), enchanted=is_enchanted)
+    modifiers = get_random_spawn_modifiers()
+    await spawn_cat(str(channel.id), modifiers=modifiers)
     # Notify the channel that a rain event has started
     try:
         await channel.send(f"🌧️ A Cat Rain has started in this channel for {duration} minutes, ending <t:{int(channel_data.cat_rains)}:R>!")
@@ -10441,9 +10849,21 @@ async def catalogue(message: discord.Interaction):
     await message.response.defer()
 
     fields = []
+    christmas_fields = []
     total_weight = sum(type_dict.values())
+    
+    # Get all cat instances for the user to count discovered Christmas cats
+    all_cats = await get_user_cats(message.guild.id, message.user.id) or []
+    christmas_cat_types = {"Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"}
+    
     for cat_type in cattypes:
         in_server = await Profile.sum(f"cat_{cat_type}", f'guild_id = $1 AND "cat_{cat_type}" > 0', message.guild.id)
+        
+        # For Christmas cats, also count instances from cat_instances
+        if cat_type in christmas_cat_types:
+            instance_count = sum(1 for cat in all_cats if cat.get('type') == cat_type)
+            in_server = (in_server or 0) + instance_count
+        
         title = f"{get_emoji(cat_type.lower() + 'cat')} {cat_type}"
         if in_server == 0 or not in_server:
             in_server = 0
@@ -10451,7 +10871,17 @@ async def catalogue(message: discord.Interaction):
 
         title += f" ({round((type_dict[cat_type] / total_weight) * 100, 2)}%)"
         value = f"{round(total_weight / type_dict[cat_type], 2)} value\n{in_server:,} in this server"
-        fields.append((title, value))
+        
+        # Separate Christmas cats into their own list
+        if cat_type in christmas_cat_types:
+            christmas_fields.append((title, value))
+        else:
+            fields.append((title, value))
+    
+    # Add Christmas section header if there are any
+    if christmas_fields:
+        fields.append(("🎄 ─── CHRISTMAS CATS ─── 🎄", "Festive seasonal felines"))
+        fields.extend(christmas_fields)
 
     # chunk into pages of 25 fields
     page_size = 25
@@ -10613,7 +11043,16 @@ async def build_instances_embed(guild_id: int, user_id: int, catname: str):
     lines = []
     for i, inst in enumerate(filtered, start=1):
         bond_display = format_bond_display(inst.get('bond', 0))
-        lines.append(f"{i}. **{inst.get('name')}** — Bond: {bond_display} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})")
+        # Apply modifiers to display stats
+        modifiers = inst.get("modifiers", [])
+        if modifiers:
+            stats = apply_stat_multipliers(inst)
+            hp = stats.get('hp', inst.get('hp'))
+            dmg = stats.get('dmg', inst.get('dmg'))
+        else:
+            hp = inst.get('hp')
+            dmg = inst.get('dmg')
+        lines.append(f"{i}. **{inst.get('name')}** — Bond: {bond_display} | HP: {hp} | DMG: {dmg} (id: {inst.get('id')})")
     embed.description = "\n".join(lines[:25])
     if len(lines) > 25:
         embed.set_footer(text=f"Showing 25 of {len(lines)} — use the Next button to see more, or /play /renamecat with the index from this list")
@@ -10631,7 +11070,19 @@ async def send_instances_paged(interaction: discord.Interaction, guild_id: int, 
         await interaction.followup.send(f"You have no {match} cats.\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=ephemeral)
         return
 
-    lines = [f"{i}. **{inst.get('name')}** — Bond: {format_bond_display(inst.get('bond',0))} | HP: {inst.get('hp')} | DMG: {inst.get('dmg')} (id: {inst.get('id')})" for i, inst in enumerate(filtered, start=1)]
+    lines = []
+    for i, inst in enumerate(filtered, start=1):
+        bond_display = format_bond_display(inst.get('bond', 0))
+        # Apply modifiers to display stats
+        modifiers = inst.get("modifiers", [])
+        if modifiers:
+            stats = apply_stat_multipliers(inst)
+            hp = stats.get('hp', inst.get('hp'))
+            dmg = stats.get('dmg', inst.get('dmg'))
+        else:
+            hp = inst.get('hp')
+            dmg = inst.get('dmg')
+        lines.append(f"{i}. **{inst.get('name')}** — Bond: {bond_display} | HP: {hp} | DMG: {dmg} (id: {inst.get('id')})")
     page_size = 25
     chunks = [lines[i : i + page_size] for i in range(0, len(lines), page_size)]
 
@@ -11304,8 +11755,17 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
         title = f"{get_emoji(inst.get('type', '').lower() + 'cat')} {inst.get('name')} — {inst.get('type')}"
         embed = discord.Embed(title=title, color=Colors.yellow)
         embed.add_field(name="Bond", value=format_bond_display(inst.get('bond', 0)), inline=True)
-        embed.add_field(name="HP", value=str(inst.get('hp')), inline=True)
-        embed.add_field(name="DMG", value=str(inst.get('dmg')), inline=True)
+        
+        # Apply modifiers to display stats
+        display_stats = {}
+        modifiers = inst.get("modifiers", [])
+        if modifiers:
+            display_stats = apply_stat_multipliers(inst)
+        else:
+            display_stats = {"hp": inst.get("hp", 0), "dmg": inst.get("dmg", 0)}
+        
+        embed.add_field(name="HP", value=str(display_stats.get('hp')), inline=True)
+        embed.add_field(name="DMG", value=str(display_stats.get('dmg')), inline=True)
         if inst.get('acquired_at'):
             try:
                 embed.add_field(name="Acquired", value=f"<t:{int(inst.get('acquired_at'))}:f>", inline=False)
@@ -11343,7 +11803,9 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 return
 
             gain = random.randint(1, 3)
-            inst['bond'] = inst.get('bond', 0) + gain  # No longer capped at 100
+            old_bond = inst.get('bond', 0)
+            inst['bond'] = old_bond + gain  # No longer capped at 100
+            level_up_msg = apply_bond_level_stats(inst, old_bond, inst['bond'])
             await save_user_cats(self.guild_id, self.owner_id, cats_now)
             pet_cooldowns[key] = now_ts
 
@@ -11355,7 +11817,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                 pass
 
             bond_display = format_bond_display(inst['bond'])
-            await interaction2.followup.send(f"You pet **{inst.get('name')}** — Bond +{gain} (now {bond_display}).", ephemeral=True)
+            await interaction2.followup.send(f"You pet **{inst.get('name')}** — Bond +{gain} (now {bond_display}).{level_up_msg}", ephemeral=True)
 
         @discord.ui.button(label="Use Item", style=ButtonStyle.blurple)
         async def use_item(self, interaction2: discord.Interaction, button: Button):
@@ -11367,7 +11829,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
             # load user's items
             items_now = get_user_items(self.guild_id, self.owner_id)
             opts = []
-            emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"}
+            emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes", "christmas_spawn": "christmas"}
             for k, v in (items_now or {}).items():
                 data = SHOP_ITEMS.get(k, {})
                 for tier_k, cnt in (v or {}).items():
@@ -11384,11 +11846,12 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
             parent_inter = interaction2
 
             class UseSelect(discord.ui.Select):
-                def __init__(self, options, guild_id, owner_id, instance_id):
+                def __init__(self, options, guild_id, owner_id, instance_id, play_view):
                     super().__init__(placeholder="Select an item to use...", min_values=1, max_values=1, options=options)
                     self.guild_id = guild_id
                     self.owner_id = owner_id
                     self.instance_id = instance_id
+                    self.play_view = play_view
 
                 async def callback(self, sel_inter: discord.Interaction):
                     if sel_inter.user.id != parent_inter.user.id:
@@ -11410,7 +11873,8 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         return
 
                     # If the item targets a specific instance, apply directly to this instance
-                    if key_local in ("ball", "dogtreat", "pancakes"):
+                    # Bond items: ball, dogtreat, pancakes, candy_cane, gingerbread, hot_cocoa, present, ornament, festive_toy, snowglobe
+                    if key_local in ("ball", "dogtreat", "pancakes", "candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"):
                         cats_now = await get_user_cats(self.guild_id, self.owner_id)
                         inst = next((c for c in cats_now if c.get('id') == self.instance_id), None)
                         if not inst:
@@ -11422,22 +11886,24 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         save_user_items(parent_inter.guild.id, parent_inter.user.id, cur_items)
 
                         bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
+                        old_bond = inst.get('bond', 0)
                         if key_local == 'pancakes':
                             # Pancakes fully restore bond to max of current level
-                            level, _, max_for_level = get_bond_level_and_progress(inst.get('bond', 0))
+                            level, _, max_for_level = get_bond_level_and_progress(old_bond)
                             inst['bond'] = (level - 1) * 100 + max_for_level  # Set to max of current level
                         else:
-                            inst['bond'] = inst.get('bond', 0) + int(bond_amt)  # No longer capped
+                            inst['bond'] = old_bond + int(bond_amt)  # No longer capped
+                        level_up_msg = apply_bond_level_stats(inst, old_bond, inst['bond'])
                         await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
 
                         # update embed in place
                         try:
                             new_embed = make_play_embed(inst)
-                            await parent_inter.edit_original_response(embed=new_embed, view=self)
+                            await parent_inter.edit_original_response(embed=new_embed, view=self.play_view)
                         except Exception:
                             pass
 
-                        await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst.get('name')}** — Bond now {inst['bond']}.", ephemeral=True)
+                        await sel_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst.get('name')}** — Bond now {inst['bond']}.{level_up_msg}", ephemeral=True)
                         return
 
                     # Default behavior for other item types (rains, luck, xp)
@@ -11452,6 +11918,35 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                             user.rain_minutes += int(minutes)
                             await user.save()
                             await sel_inter.followup.send(f"✅ Used {SHOP_ITEMS[key_local]['title']} {tier_local}: added {minutes} rain minutes! Check /rain to use them.", ephemeral=True)
+                            return
+
+                        if key_local == 'christmas_spawn':
+                            christmas_luck = SHOP_ITEMS[key_local]['tiers'][tier_local].get('christmas_luck', 1)
+                            # Spawn a random Christmas cat from the available ones
+                            christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                            cat_type = random.choice(christmas_cats)
+                            
+                            # Spawn the cat instance
+                            await auto_sync_cat_instances(parent_inter.user, cat_type=cat_type, enchanted=False)
+                            
+                            # Apply snowy modifier if tier is high luck
+                            if christmas_luck >= 3:
+                                # Get the newly created cat and try to add snowy modifier
+                                cats_now = await get_user_cats(parent_inter.guild.id, parent_inter.user.id)
+                                # Find the most recently created cat of this type
+                                recent_cat = None
+                                for cat in sorted(cats_now, key=lambda c: c.get('id_timestamp', 0), reverse=True):
+                                    if cat.get('type') == cat_type:
+                                        recent_cat = cat
+                                        break
+                                
+                                if recent_cat and add_modifier(recent_cat, "snowy"):
+                                    await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
+                                    await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
+                                else:
+                                    await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
+                            else:
+                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
                             return
 
                         if key_local in ('luck', 'xp'):
@@ -11482,7 +11977,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                                 pass
 
             sel_view = View(timeout=120)
-            sel_view.add_item(UseSelect(opts, self.guild_id, self.owner_id, self.instance_id))
+            sel_view.add_item(UseSelect(opts, self.guild_id, self.owner_id, self.instance_id, self))
             try:
                 await interaction2.followup.send("Choose an item to use:", view=sel_view, ephemeral=True)
             except Exception:
@@ -11924,6 +12419,14 @@ async def gen_inventory(message, person_id):
     for i in cattypes:
         icon = get_emoji(i.lower() + "cat")
         cat_num = person[f"cat_{i}"]
+        
+        # For Christmas cats, also count instances from cat_instances
+        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+        if i in christmas_cats:
+            # Count instances of this cat type from all_cats
+            instance_count = sum(1 for cat in all_cats if cat.get('type') == i)
+            cat_num += instance_count
+        
         if cat_num < 0:
             debt = True
         if cat_num != 0:
@@ -11988,8 +12491,6 @@ async def gen_inventory(message, person_id):
 def gen_items_embed(message, person_id) -> discord.Embed:
     """Build an embed showing a user's item inventory (from data/items.json)."""
     items = get_user_items(message.guild.id, person_id.id)
-    # emoji map for items
-    emoji_map = {"luck": "luckpotion", "xp": "xppotion", "rains": "bottlerain", "ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"}
     embed = discord.Embed(title=f"{get_emoji('staring_cat')} {person_id.name}'s Items", color=Colors.brown)
     if not items:
         embed.description = "No items yet. Visit /shop to buy items!"
@@ -11997,18 +12498,14 @@ def gen_items_embed(message, person_id) -> discord.Embed:
 
     lines = []
     # format per-category
-    # extend emoji map for new items
-    emoji_map.update({"ball": "goodball", "dogtreat": "dogtreat", "pancakes": "pancakes"})
     for key, data in SHOP_ITEMS.items():
         title = data.get('title')
-        emoji_label = get_emoji(emoji_map.get(key, key))
-        title_display = f"{emoji_label} {title}"
         tiers = []
         for tier_key in sorted(data.get('tiers', {}).keys()):
             cnt = items.get(key, {}).get(tier_key, 0)
             tiers.append(f"{tier_key}: {cnt}")
         if tiers:
-            lines.append(f"**{title_display}** — {', '.join(tiers)}")
+            lines.append(f"**{title}** — {', '.join(tiers)}")
 
     embed.description = "\n".join(lines)
     return embed
@@ -12263,7 +12760,8 @@ __Highlighted Stat__
                                 return
 
                             # Special handling for toys/food which must be applied to a specific cat instance
-                            if key_local in ("ball", "dogtreat", "pancakes"):
+                            # Bond items: ball, dogtreat, pancakes, candy_cane, gingerbread, hot_cocoa, present, ornament, festive_toy, snowglobe
+                            if key_local in ("ball", "dogtreat", "pancakes", "candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"):
                                 # Ask the user for the exact cat name via modal
                                 class TargetModal(discord.ui.Modal):
                                     def __init__(self):
@@ -12294,12 +12792,16 @@ __Highlighted Stat__
                                             save_user_items(message.guild.id, message.user.id, cur_items2)
 
                                             bond_amt = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('bond', 0)
-                                            if key_local == 'pancakes' and bond_amt >= 100:
-                                                inst_local['bond'] = 100
+                                            old_bond = inst_local.get('bond', 0)
+                                            if key_local == 'pancakes':
+                                                # Pancakes fully restore bond to max of current level
+                                                level, _, max_for_level = get_bond_level_and_progress(old_bond)
+                                                inst_local['bond'] = (level - 1) * 100 + max_for_level  # Set to max of current level
                                             else:
-                                                inst_local['bond'] = min(100, inst_local.get('bond', 0) + int(bond_amt))
+                                                inst_local['bond'] = old_bond + int(bond_amt)  # No longer capped
+                                            level_up_msg = apply_bond_level_stats(inst_local, old_bond, inst_local['bond'])
                                             await save_user_cats(modal_inter.guild.id, modal_inter.user.id, cats_list)
-                                            await modal_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst_local.get('name')}** — Bond now {inst_local['bond']}.", ephemeral=True)
+                                            await modal_inter.followup.send(f"Used {SHOP_ITEMS[key_local]['title']} {tier_local} on **{inst_local.get('name')}** — Bond now {inst_local['bond']}.{level_up_msg}", ephemeral=True)
 
                                         # if single match, apply directly
                                         if len(matches_local) == 1:
@@ -12567,8 +13069,8 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
         channel.yet_to_spawn = 0
         await channel.save()
         # 1 in 3 chance to spawn an enchanted cat
-        is_enchanted = random.randint(1, 3) == 1
-        await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
+        modifiers = get_random_spawn_modifiers()
+        await spawn_cat(str(message.channel.id), modifiers=modifiers)
         if profile.rain_minutes:
             if rain_length > profile.rain_minutes:
                 user.rain_minutes -= rain_length - profile.rain_minutes
@@ -12921,17 +13423,35 @@ class PacksView(discord.ui.View):
         if self.user[f"pack_{pack_name.lower()}"] < 1:
             return
             
-        chosen_type, cat_amount, upgrades, reward_texts, kibble = await self.get_pack_rewards(level)
-        self.user[f"cat_{chosen_type}"] += cat_amount
+        chosen_type, cat_amount, upgrades, reward_texts, kibble, item_reward = await self.get_pack_rewards(level)
+        
+        # Check if it's a Christmas cat (needs to be created as instances instead of incrementing a field)
+        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+        if chosen_type in christmas_cats:
+            # Create instances for Christmas cats
+            await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
+        else:
+            # Regular cats increment the field
+            self.user[f"cat_{chosen_type}"] += cat_amount
+            
         self.user.pack_upgrades += upgrades
         self.user.packs_opened += 1
         self.user[f"pack_{pack_name.lower()}"] -= 1
         if kibble:
             self.user.kibble += kibble
+        
+        # Handle item rewards
+        if item_reward:
+            item_name = item_reward["name"]
+            item_tier = item_reward["tier"]
+            items_data = get_user_items(self.user.guild_id, self.user.user_id)
+            items_data.setdefault(item_name, {})[item_tier] = items_data.get(item_name, {}).get(item_tier, 0) + 1
+            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+            
         await self.user.save()
         
         try:
-            if self.user[f"cat_{chosen_type}"] >= 64:
+            if chosen_type not in christmas_cats and self.user[f"cat_{chosen_type}"] >= 64:
                 await achemb(interaction, "full_stack", "send")
         except Exception:
             pass
@@ -12958,26 +13478,82 @@ class PacksView(discord.ui.View):
         await self.user.refresh_from_db()
 
         pack_results = []
+        reward_summary = []
+        all_items = {}  # Batch all item updates
+        total_kibble = 0
+        
         for pack in pack_data:
             pack_name = pack['name'].lower()
             pack_count = self.user[f"pack_{pack_name}"]
             if pack_count > 0:
                 level = next((i for i, p in enumerate(pack_data) if p["name"].lower() == pack_name), 0)
-                chosen_type, cat_amount, upgrades, _, kibble = await self.get_pack_rewards(level, is_single=False)
-                pack_results.append(f"{get_emoji(pack_name + 'pack')} {pack_count}x")
-                self.user[f"cat_{chosen_type}"] += cat_amount
+                chosen_type, cat_amount, upgrades, _, kibble, item_reward = await self.get_pack_rewards(level, is_single=False)
+                # Special case for Festive pack emoji
+                if pack_name == "festive":
+                    pack_results.append(f"{get_emoji('festivepack')} {pack_count}x")
+                else:
+                    pack_results.append(f"{get_emoji(pack_name + 'pack')} {pack_count}x")
+                
+                # Add to reward summary
+                cat_emoji = get_emoji(chosen_type.lower() + "cat")
+                total_cats = cat_amount * pack_count
+                reward_summary.append(f"{cat_emoji} {total_cats:,} {chosen_type}")
+                
+                # Check if it's a Christmas cat (needs to be created as instances instead of incrementing a field)
+                christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                if chosen_type in christmas_cats:
+                    # Create instances for Christmas cats
+                    await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, total_cats)
+                else:
+                    # Regular cats increment the field
+                    self.user[f"cat_{chosen_type}"] += total_cats
+                    
                 self.user.pack_upgrades += upgrades
                 self.user.packs_opened += pack_count
                 self.user[f"pack_{pack_name}"] = 0
                 if kibble:
                     # multiplied by count of packs processed
-                    self.user.kibble += kibble * pack_count
+                    kibble_total = kibble * pack_count
+                    self.user.kibble += kibble_total
+                    total_kibble += kibble_total
+                
+                # Batch item rewards (don't save yet, just accumulate)
+                if item_reward:
+                    item_name = item_reward["name"]
+                    item_tier = item_reward["tier"]
+                    all_items.setdefault(item_name, {})[item_tier] = all_items.get(item_name, {}).get(item_tier, 0) + pack_count
 
+        # Save user data once
         await self.user.save()
+        
+        # Batch save all items at once
+        if all_items:
+            items_data = get_user_items(self.user.guild_id, self.user.user_id)
+            for item_name, tiers in all_items.items():
+                items_data.setdefault(item_name, {}).update(tiers)
+            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+        
+        # Build description with pack counts and rewards
+        description = f"**Opened:**\n" + "\n".join(pack_results)
+        if reward_summary:
+            description += f"\n\n**Received:**\n" + "\n".join(reward_summary)
+        
+        # Add items to display
+        if all_items:
+            item_lines = []
+            for item_name, tiers in all_items.items():
+                item_emoji = get_emoji(item_name)
+                for tier, count in tiers.items():
+                    item_lines.append(f"{item_emoji} {count:,}x {item_name.replace('_', ' ').title()} {tier}")
+            if item_lines:
+                description += f"\n\n**Items:**\n" + "\n".join(item_lines)
+        
+        if total_kibble > 0:
+            description += f"\n\n{get_emoji('kibble')} +{total_kibble:,} Kibble"
         
         embed = discord.Embed(
             title="Mass Pack Opening!",
-            description=" ".join(pack_results),
+            description=description,
             color=Colors.brown
         )
         await interaction.edit_original_response(embed=embed)
@@ -12991,24 +13567,56 @@ class PacksView(discord.ui.View):
         build_string = ""
         upgrades = 0
         kibble_reward = 0
+        item_reward = None  # {item_name, tier, count}
+        
+        # Determine if this is a Festive pack
+        is_festive = pack_data[level]['name'] == "Festive"
         
         # Original pack reward logic preserved
-        while random.randint(1, 100) <= pack_data[level]["upgrade"]:
-            if is_single:
-                reward_texts.append(f"{get_emoji(pack_data[level]['name'].lower() + 'pack')} {pack_data[level]['name']}\n" + build_string)
-                build_string = f"Upgraded from {get_emoji(pack_data[level]['name'].lower() + 'pack')} {pack_data[level]['name']}!\n" + build_string
+        while random.randint(1, 100) <= pack_data[level]["upgrade"] and level < len(pack_data) - 1:
+            pack_name = pack_data[level]['name'].lower()
+            # Special case for Festive pack emoji
+            if pack_name == "festive":
+                pack_emoji = get_emoji("festivepack")
             else:
-                build_string += f" -> {get_emoji(pack_data[level + 1]['name'].lower() + 'pack')}"
+                pack_emoji = get_emoji(pack_name + "pack")
+            
+            if is_single:
+                reward_texts.append(f"{pack_emoji} {pack_data[level]['name']}\n" + build_string)
+                build_string = f"Upgraded from {pack_emoji} {pack_data[level]['name']}!\n" + build_string
+            else:
+                next_pack_name = pack_data[level + 1]['name'].lower()
+                # Special case for Festive pack emoji
+                if next_pack_name == "festive":
+                    next_pack_emoji = get_emoji("festivepack")
+                else:
+                    next_pack_emoji = get_emoji(next_pack_name + "pack")
+                build_string += f" -> {next_pack_emoji}"
             level += 1
             upgrades += 1
+            is_festive = pack_data[level]['name'] == "Festive"
         
         final_level = pack_data[level]
+        final_pack_name = final_level['name'].lower()
+        # Special case for Festive pack emoji
+        if final_pack_name == "festive":
+            final_pack_emoji = get_emoji("festivepack")
+        else:
+            final_pack_emoji = get_emoji(final_pack_name + "pack")
+            
         if is_single:
-            reward_texts.append(f"{get_emoji(final_level['name'].lower() + 'pack')} {final_level['name']}\n" + build_string)
+            reward_texts.append(f"{final_pack_emoji} {final_level['name']}\n" + build_string)
 
         # Select cat type and amount
         goal_value = final_level["value"]
-        chosen_type = random.choice(cattypes)
+        
+        # For Festive packs, ONLY give Christmas cats
+        if is_festive:
+            christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+            chosen_type = random.choice(christmas_cats)
+        else:
+            chosen_type = random.choice(cattypes)
+            
         cat_emoji = get_emoji(chosen_type.lower() + "cat")
         pre_cat_amount = goal_value / (sum(type_dict.values()) / type_dict[chosen_type])
         # Apply active luck buff (if any) to increase chance of better rewards
@@ -13048,23 +13656,48 @@ class PacksView(discord.ui.View):
                 cat_amount = 1
         elif not is_single:
             build_string += f" {cat_emoji} {cat_amount:,}"
+        
+        # Item rewards - all packs have a chance
+        # Festive packs get Christmas items, others get regular items
+        if random.random() < 0.30:  # 30% chance for item reward
+            if is_festive:
+                # Christmas items
+                christmas_items = ["candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"]
+                item_name = random.choice(christmas_items)
+                item_tier = random.choice(["I", "II"]) if item_name == "festive_toy" else "I"
+                item_count = 1
+            else:
+                # Regular items
+                regular_items = ["ball", "dogtreat", "pancakes"]
+                item_name = random.choice(regular_items)
+                item_tier = random.choice(["I", "II", "III"]) if item_name == "ball" else "I"
+                item_count = 1
             
-        # small chance to also award some kibble based on pack tier
-        try:
+            item_reward = {"name": item_name, "tier": item_tier, "count": item_count}
+            
+        # Kibble rewards
+        # Festive packs have guaranteed higher kibble
+        if is_festive:
+            kibble_reward = random.randint(int(final_level.get("totalvalue", 100) // 6), int(final_level.get("totalvalue", 100) // 3))
+        else:
             kibble_reward = random.randint(0, max(1, final_level.get("totalvalue", 100) // 12)) if random.random() < 0.25 else 0
-            # apply luck multiplier to kibble
+            
+        # apply luck multiplier to kibble
+        try:
             if luck_mult and kibble_reward:
                 kibble_reward = int(round(kibble_reward * (1 + luck_mult)))
         except Exception:
             kibble_reward = 0
 
         if is_single:
+            if item_reward:
+                reward_texts.append(reward_texts[-1] + f"\nAlso got {get_emoji(item_reward['name'])} {item_reward['name'].replace('_', ' ').title()} {item_reward['tier']}!")
             if kibble_reward:
                 reward_texts.append(reward_texts[-1] + f"\nAlso gained {kibble_reward:,} Kibble!")
             reward_texts.append(reward_texts[-1] + f"\nYou got {get_emoji(chosen_type.lower() + 'cat')} {cat_amount:,} {chosen_type} cats!")
-            return chosen_type, cat_amount, upgrades, reward_texts, kibble_reward
+            return chosen_type, cat_amount, upgrades, reward_texts, kibble_reward, item_reward
             
-        return chosen_type, cat_amount, upgrades, build_string, kibble_reward
+        return chosen_type, cat_amount, upgrades, build_string, kibble_reward, item_reward
     
     @discord.ui.button(label="Refresh", style=ButtonStyle.secondary, custom_id="refresh")
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -13090,17 +13723,35 @@ class PacksView(discord.ui.View):
         if self.user[f"pack_{pack_name.lower()}"] < 1:
             return
             
-        chosen_type, cat_amount, upgrades, reward_texts, kibble = await self.get_pack_rewards(level)
-        self.user[f"cat_{chosen_type}"] += cat_amount
+        chosen_type, cat_amount, upgrades, reward_texts, kibble, item_reward = await self.get_pack_rewards(level)
+        
+        # Check if it's a Christmas cat (needs to be created as instances instead of incrementing a field)
+        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+        if chosen_type in christmas_cats:
+            # Create instances for Christmas cats
+            await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
+        else:
+            # Regular cats increment the field
+            self.user[f"cat_{chosen_type}"] += cat_amount
+            
         self.user.pack_upgrades += upgrades
         self.user.packs_opened += 1
         self.user[f"pack_{pack_name.lower()}"] -= 1
         if kibble:
             self.user.kibble += kibble
+        
+        # Handle item rewards
+        if item_reward:
+            item_name = item_reward["name"]
+            item_tier = item_reward["tier"]
+            items_data = get_user_items(self.user.guild_id, self.user.user_id)
+            items_data.setdefault(item_name, {})[item_tier] = items_data.get(item_name, {}).get(item_tier, 0) + 1
+            save_user_items(self.user.guild_id, self.user.user_id, items_data)
+            
         await self.user.save()
         
         try:
-            if self.user[f"cat_{chosen_type}"] >= 64:
+            if chosen_type not in christmas_cats and self.user[f"cat_{chosen_type}"] >= 64:
                 await achemb(interaction, "full_stack", "send")
         except Exception:
             pass
@@ -15441,6 +16092,12 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     if user1.kibble < v:
                         error = True
                         break
+                elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
+                    # Item format: "item_name_TIER"
+                    user1_items = get_user_items(interaction.guild.id, person1.id)
+                    if user1_items.get(k, 0) < v:
+                        error = True
+                        break
                 elif user1[f"pack_{k.lower()}"] < v:
                     error = True
                     break
@@ -15465,6 +16122,12 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     if user2.kibble < v:
                         error = True
                         break
+                elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
+                    # Item format: "item_name_TIER"
+                    user2_items = get_user_items(interaction.guild.id, person2.id)
+                    if user2_items.get(k, 0) < v:
+                        error = True
+                        break
                 elif user2[f"pack_{k.lower()}"] < v:
                     error = True
                     break
@@ -15472,12 +16135,12 @@ async def trade(message: discord.Interaction, person_id: discord.User):
             if error:
                 try:
                     await interaction.edit_original_response(
-                        content="Uh oh - some of the cats/prisms/packs/rains disappeared while trade was happening",
+                        content="Uh oh - some of the cats/prisms/packs/rains/items disappeared while trade was happening",
                         embed=None,
                         view=None,
                     )
                 except Exception:
-                    await interaction.followup.send("Uh oh - some of the cats/prisms/packs/rains disappeared while trade was happening")
+                    await interaction.followup.send("Uh oh - some of the cats/prisms/packs/rains/items disappeared while trade was happening")
                 return
 
             # exchange
@@ -15503,6 +16166,15 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     # transfer kibble
                     user1.kibble -= v
                     user2.kibble += v
+                elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
+                    # Transfer items - k is in format "item_name_TIER"
+                    user1_items = get_user_items(message.guild.id, person1.id)
+                    user1_items[k] = user1_items.get(k, 0) - v
+                    save_user_items(message.guild.id, person1.id, user1_items)
+                    
+                    user2_items = get_user_items(message.guild.id, person2.id)
+                    user2_items[k] = user2_items.get(k, 0) + v
+                    save_user_items(message.guild.id, person2.id, user2_items)
                 else:
                     user1[f"pack_{k.lower()}"] -= v
                     user2[f"pack_{k.lower()}"] += v
@@ -15528,6 +16200,15 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     # transfer kibble
                     user1.kibble += v
                     user2.kibble -= v
+                elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
+                    # Transfer items - k is in format "item_name_TIER"
+                    user2_items = get_user_items(message.guild.id, person2.id)
+                    user2_items[k] = user2_items.get(k, 0) - v
+                    save_user_items(message.guild.id, person2.id, user2_items)
+                    
+                    user1_items = get_user_items(message.guild.id, person1.id)
+                    user1_items[k] = user1_items.get(k, 0) + v
+                    save_user_items(message.guild.id, person1.id, user1_items)
                 else:
                     user1[f"pack_{k.lower()}"] += v
                     user2[f"pack_{k.lower()}"] -= v
@@ -15667,6 +16348,14 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     # kibble currency
                     valuenum += v
                     valuestr += f"🍖 {v:,} Kibble\n"
+                elif "_" in k and k.split("_")[0] in SHOP_ITEMS:
+                    # items - k is in format "item_name_TIER"
+                    item_key = k.split("_")[0]
+                    tier = k.split("_")[1]
+                    item_title = SHOP_ITEMS[item_key]["title"]
+                    item_price = ITEM_PRICES.get(item_key, {}).get(tier, 0)
+                    valuenum += item_price * v
+                    valuestr += f"{item_title} {tier} x{v}\n"
                 else:
                     # packs
                     valuenum += sum([i["totalvalue"] if i["name"] == k else 0 for i in pack_data]) * v
@@ -15707,8 +16396,8 @@ async def trade(message: discord.Interaction, person_id: discord.User):
             self.currentuser = currentuser
 
             self.cattype = discord.ui.TextInput(
-                label='Cat or Pack Type, Prism Name or "Rain"',
-                placeholder="Fine / Wooden / Alpha / Rain",
+                label='Cat or Pack Type, Prism Name, "Rain", or Item (e.g. "candy_cane I")',
+                placeholder="Fine / Wooden / Alpha / Rain / candy_cane I",
             )
             self.add_item(self.cattype)
 
@@ -15831,6 +16520,46 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                 await update_trade_embed(interaction)
                 return
 
+            # handle items - format: "item_name tier" (e.g. "candy_cane I" or "luck III")
+            input_parts = self.cattype.value.split()
+            if len(input_parts) >= 2:
+                # Try to parse as item: first part is item name, second part is tier
+                potential_item_name = input_parts[0].lower()
+                potential_tier = input_parts[1].upper()
+                
+                if potential_item_name in SHOP_ITEMS:
+                    # Validate tier
+                    if potential_tier not in SHOP_ITEMS[potential_item_name].get("tiers", {}):
+                        await interaction.response.send_message(f"Invalid tier '{potential_tier}' for {SHOP_ITEMS[potential_item_name]['title']}", ephemeral=True)
+                        return
+                    
+                    try:
+                        amt = int(value)
+                        if amt < 1:
+                            raise Exception
+                    except Exception:
+                        await interaction.response.send_message("please enter a valid amount for items", ephemeral=True)
+                        return
+                    
+                    # Check if user has the item
+                    user_items = get_user_items(interaction.guild.id, interaction.user.id)
+                    item_key = f"{potential_item_name}_{potential_tier}"
+                    current_count = user_items.get(item_key, 0)
+                    
+                    if current_count < amt:
+                        await interaction.response.send_message(f"you dont have enough {SHOP_ITEMS[potential_item_name]['title']} {potential_tier} (have {current_count}, need {amt})", ephemeral=True)
+                        return
+                    
+                    # Add to trade using item_key format
+                    if self.currentuser == 1:
+                        person1gives[item_key] = person1gives.get(item_key, 0) + amt
+                    else:
+                        person2gives[item_key] = person2gives.get(item_key, 0) + amt
+                    
+                    await interaction.response.defer()
+                    await update_trade_embed(interaction)
+                    return
+
             lc_input = self.cattype.value.lower()
 
             # loop through the cat types and find the correct one using lowercased user input.
@@ -15838,7 +16567,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
 
             # if no cat type was found, the user input was invalid. as cname is still `None`
             if cname is None:
-                await interaction.response.send_message("add a valid cat/pack/prism name 💀💀💀", ephemeral=True)
+                await interaction.response.send_message("add a valid cat/pack/prism/item name 💀💀💀", ephemeral=True)
                 return
 
             try:
@@ -16404,9 +17133,23 @@ async def sort_inventory_cmd(message: discord.Interaction):
                 cat_emoji = get_emoji(cat.get('type', 'fine').lower() + 'cat')
                 cat_name = cat.get('name') or 'Unnamed'
                 cat_bond = cat.get('bond', 0)
-                cat_hp = cat.get('hp', 0)
-                cat_dmg = cat.get('dmg', 0)
-                description += f"`{i}.` {cat_emoji} **{cat_name}** ({cat.get('type')})\n"
+                # Apply modifiers to display stats and name
+                modifiers = cat.get("modifiers", [])
+                # Add modifier emojis to cat name
+                if modifiers:
+                    modifier_emojis = " ".join([CAT_MODIFIERS[m]["emoji"] for m in modifiers if m in CAT_MODIFIERS])
+                    display_name = f"{modifier_emojis} {cat_name}"
+                else:
+                    display_name = cat_name
+                # Apply stat multipliers
+                if modifiers:
+                    stats = apply_stat_multipliers(cat)
+                    cat_hp = stats.get('hp', cat.get('hp', 0))
+                    cat_dmg = stats.get('dmg', cat.get('dmg', 0))
+                else:
+                    cat_hp = cat.get('hp', 0)
+                    cat_dmg = cat.get('dmg', 0)
+                description += f"`{i}.` {cat_emoji} **{display_name}** ({cat.get('type')})\n"
                 description += f"     Bond: {cat_bond} | HP: {cat_hp} | DMG: {cat_dmg}\n"
             
             self.embed = discord.Embed(
@@ -18054,8 +18797,8 @@ async def setup_channel(message: discord.Interaction):
         return
 
     # 1 in 3 chance to spawn an enchanted cat
-    is_enchanted = random.randint(1, 3) == 1
-    await spawn_cat(str(message.channel.id), enchanted=is_enchanted)
+    modifiers = get_random_spawn_modifiers()
+    await spawn_cat(str(message.channel.id), modifiers=modifiers)
     await message.response.send_message(f"ok, now i will also send cats in <#{message.channel.id}>")
 
 
@@ -18109,9 +18852,9 @@ async def fake(message: discord.Interaction):
 @bot.tree.command(description="(ADMIN) Force cats to appear")
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.rename(cat_type="type")
-@discord.app_commands.describe(cat_type="select a cat type ok", enchanted="Make it enchanted (true/false)")
+@discord.app_commands.describe(cat_type="select a cat type ok", modifiers="Add modifiers (comma-separated, e.g. Snowy, Enchanted)")
 @discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
-async def forcespawn(message: discord.Interaction, cat_type: Optional[str], enchanted: Optional[str] = None):
+async def forcespawn(message: discord.Interaction, cat_type: Optional[str], modifiers: Optional[str] = None):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
@@ -18129,19 +18872,25 @@ async def forcespawn(message: discord.Interaction, cat_type: Optional[str], ench
         await message.response.send_message("there is already a cat", ephemeral=True)
         return
     
-    # Parse enchanted flag
-    is_enchanted = enchanted and enchanted.lower().strip() in ["true", "1", "yes", "y"]
+    # Parse modifiers (comma-separated, e.g. "Snowy, Enchanted")
+    modifier_list = []
+    if modifiers:
+        # Split by comma and strip whitespace
+        raw_mods = [m.strip().lower() for m in modifiers.split(",")]
+        for mod in raw_mods:
+            if mod in CAT_MODIFIERS:
+                modifier_list.append(mod)
     
-    enchanted_text = " ✨ Enchanted" if is_enchanted else ""
+    modifier_display = " " + " ".join([CAT_MODIFIERS[m]["emoji"] for m in modifier_list]) if modifier_list else ""
     
     # Respond immediately to avoid 3-second timeout
     await message.response.defer()
     
     ch.yet_to_spawn = 0
     await ch.save()
-    await spawn_cat(str(message.channel.id), cat_type, True, enchanted=is_enchanted)
+    await spawn_cat(str(message.channel.id), cat_type, True, modifiers=modifier_list)
     
-    await message.followup.send(f"done!{enchanted_text}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
+    await message.followup.send(f"done!{modifier_display}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
 
 
 @bot.tree.command(description="(ADMIN) Give achievements to people")
@@ -18473,24 +19222,24 @@ async def setup(bot2):
         site = web.TCPSite(vote_server, "0.0.0.0", 8069)
         await site.start()
 
-    # Attempt to load the Battles extension into the real bot instance so its cog
+    # Attempt to load the Fights extension into the real bot instance so its cog
     # registers with the running bot (helps when main is loaded as an extension).
     try:
-        await bot2.load_extension("battles")
+        await bot2.load_extension("fights")
     except Exception:
         try:
-            logging.exception("Failed to load 'battles' extension in main.setup; will attempt fallback setup")
+            logging.exception("Failed to load 'fights' extension in main.setup; will attempt fallback setup")
             # Fallback: import and call setup(bot2) if present
             import importlib
 
-            mod = importlib.import_module("battles")
+            mod = importlib.import_module("fights")
             if hasattr(mod, "setup"):
                 try:
                     await mod.setup(bot2)
                 except Exception:
-                    logging.exception("battles.setup(bot2) failed in fallback")
+                    logging.exception("fights.setup(bot2) failed in fallback")
         except Exception:
-            logging.exception("Fallback import for 'battles' also failed in main.setup")
+            logging.exception("Fallback import for 'fights' also failed in main.setup")
 
     # finally replace the fake bot with the real one
     bot = bot2
@@ -19023,6 +19772,33 @@ async def breed(
 
 
 # --- END: Cat Breeding feature ---
+
+# ============================================================================
+# CHRISTMAS FEATURES
+# ============================================================================
+
+@bot.tree.command(name="advent", description="Open the advent calendar and claim daily rewards!")
+async def advent_cmd(interaction: discord.Interaction):
+    """Advent calendar - claim daily rewards"""
+    await advent_command(interaction)
+
+
+@bot.tree.command(name="tree", description="View your Christmas tree decorations!")
+async def tree_cmd(interaction: discord.Interaction):
+    """View Christmas tree with ornaments"""
+    await tree_view_command(interaction)
+
+
+@bot.tree.command(name="tree_ornament", description="Learn about a specific ornament!")
+@discord.app_commands.describe(number="Ornament number (1-8)")
+async def tree_ornament_cmd(interaction: discord.Interaction, number: int):
+    """View details about a specific ornament"""
+    await tree_ornament_info_command(interaction, number)
+
+
+# ============================================================================
+# END CHRISTMAS FEATURES
+# ============================================================================
 
 async def reward_vote(user_id: int):
     """Apply vote rewards to all guild profiles for the given user_id.

@@ -1,0 +1,472 @@
+[
+  {
+    "name": "8ball",
+    "description": "ask the magic catball",
+    "type": 1
+  },
+  {
+    "name": "achievements",
+    "description": "View your achievements",
+    "type": 1
+  },
+  {
+    "name": "admin",
+    "description": "Open the admin control panel",
+    "type": 1
+  },
+  {
+    "name": "advent",
+    "description": "Open the advent calendar and claim daily rewards!",
+    "type": 1
+  },
+  {
+    "name": "adventure",
+    "description": "Send one of your cats on an adventure for 3 hours",
+    "type": 1
+  },
+  {
+    "name": "adventure_list",
+    "description": "Admin: list all active adventures",
+    "type": 1
+  },
+  {
+    "name": "adventures",
+    "description": "Show your active adventure (if any)",
+    "type": 1
+  },
+  {
+    "name": "adventuretest",
+    "description": "(OWNER) Test adventure rewards",
+    "type": 1
+  },
+  {
+    "name": "atm",
+    "description": "Convert cats to Kibble via the CatATM (irreversible)",
+    "type": 1
+  },
+  {
+    "name": "bal",
+    "description": "Get Your balance",
+    "type": 1
+  },
+  {
+    "name": "ban",
+    "description": "(MOD) Ban a member from the server",
+    "type": 1
+  },
+  {
+    "name": "banlist",
+    "description": "(MOD) See the ban list for this server",
+    "type": 1
+  },
+  {
+    "name": "batchrename",
+    "description": "Rename multiple cats at once",
+    "type": 1
+  },
+  {
+    "name": "battlepass",
+    "description": "why would anyone think a cattlepass would be a good idea",
+    "type": 1
+  },
+  {
+    "name": "battles",
+    "description": "Battle hub - manage your deck and view battle stats",
+    "type": 1
+  },
+  {
+    "name": "bless",
+    "description": "(SUPPORTER) Bless random KITTAYYYYYYY users with doubled cats!",
+    "type": 1
+  },
+  {
+    "name": "breed",
+    "description": "Breed two cats to get an offspring (chances are based on parents",
+    "type": 1
+  },
+  {
+    "name": "casino",
+    "description": "Gamble your life savings away in our totally-not-rigged catsino!",
+    "type": 1
+  },
+  {
+    "name": "cat",
+    "description": "Get Cat Image, does not add a cat to your inventory",
+    "type": 1
+  },
+  {
+    "name": "catalogue",
+    "description": "View all the juicy numbers behind cat types",
+    "type": 1
+  },
+  {
+    "name": "catch",
+    "description": "Catch someone in 4k",
+    "type": 1
+  },
+  {
+    "name": "catpedia",
+    "description": "Show detailed information about a cat (Catpedia)",
+    "type": 1
+  },
+  {
+    "name": "changemessage",
+    "description": "(ADMIN) Change the cat appear and cought messages",
+    "type": 1
+  },
+  {
+    "name": "changetimings",
+    "description": "(ADMIN) Change the cat appear timings",
+    "type": 1
+  },
+  {
+    "name": "coffee",
+    "description": "Brew some coffee to catch cats more efficiently",
+    "type": 1
+  },
+  {
+    "name": "cookie",
+    "description": "you feel like making cookies",
+    "type": 1
+  },
+  {
+    "name": "cosmetics",
+    "description": "Browse and purchase cosmetics to customize your profile!",
+    "type": 1
+  },
+  {
+    "name": "credits",
+    "description": "Roll the credits",
+    "type": 1
+  },
+  {
+    "name": "cursed",
+    "description": "Get Cursed Cat",
+    "type": 1
+  },
+  {
+    "name": "daily",
+    "description": "Claim your daily login streak rewards",
+    "type": 1
+  },
+  {
+    "name": "debug_battles",
+    "description": "Debug the Battles cog loading and helpers",
+    "type": 1
+  },
+  {
+    "name": "define",
+    "description": "define a word",
+    "type": 1
+  },
+  {
+    "name": "editprofile",
+    "description": "(SUPPORTER) Customize your profile!",
+    "type": 1
+  },
+  {
+    "name": "fact",
+    "description": "get a random cat fact",
+    "type": 1
+  },
+  {
+    "name": "fake",
+    "description": "LMAO TROLLED SO HARD :JOY:",
+    "type": 1
+  },
+  {
+    "name": "fight",
+    "description": "Challenge other players to a cat fight",
+    "type": 1
+  },
+  {
+    "name": "fights",
+    "description": "Check fights system status",
+    "type": 1
+  },
+  {
+    "name": "forcespawn",
+    "description": "(ADMIN) Force cats to appear",
+    "type": 1
+  },
+  {
+    "name": "forget",
+    "description": "(ADMIN) Undo the setup",
+    "type": 1
+  },
+  {
+    "name": "getid",
+    "description": "Get ID of a thing",
+    "type": 1
+  },
+  {
+    "name": "gift",
+    "description": "give cats now",
+    "type": 1
+  },
+  {
+    "name": "giveachievement",
+    "description": "(ADMIN) Give achievements to people",
+    "type": 1
+  },
+  {
+    "name": "giveaway",
+    "description": "(ADMIN) Start a cat giveaway",
+    "type": 1
+  },
+  {
+    "name": "givecat",
+    "description": "(ADMIN) Give cats to people",
+    "type": 1
+  },
+  {
+    "name": "givekibbles",
+    "description": "(OWNER) Give kibbles to a user",
+    "type": 1
+  },
+  {
+    "name": "help",
+    "description": "Learn to use the bot",
+    "type": 1
+  },
+  {
+    "name": "info",
+    "description": "View various bot information and stats",
+    "type": 1
+  },
+  {
+    "name": "inventory",
+    "description": "View your inventory",
+    "type": 1
+  },
+  {
+    "name": "kick",
+    "description": "(MOD) Kick a member from the server",
+    "type": 1
+  },
+  {
+    "name": "last",
+    "description": "View when the last cat was caught in this channel, and when the next one might spawn",
+    "type": 1
+  },
+  {
+    "name": "leaderboards",
+    "description": "View the leaderboards",
+    "type": 1
+  },
+  {
+    "name": "mystyle",
+    "description": "View your equipped cosmetics!",
+    "type": 1
+  },
+  {
+    "name": "news",
+    "description": "Read The KITTAYYYYYYY Times™️",
+    "type": 1
+  },
+  {
+    "name": "nuke",
+    "description": "(HIGH ADMIN) [VERY DANGEROUS] Reset all KITTAYYYYYYY data of this server",
+    "type": 1
+  },
+  {
+    "name": "packs",
+    "description": "View and open packs",
+    "type": 1
+  },
+  {
+    "name": "pig",
+    "description": "the most engaging boring game",
+    "type": 1
+  },
+  {
+    "name": "ping",
+    "description": "Pong",
+    "type": 1
+  },
+  {
+    "name": "play",
+    "description": "Play with one of your cats to increase its bond",
+    "type": 1
+  },
+  {
+    "name": "preventcatch",
+    "description": "(ADMIN) Prevent someone from catching cats for a certain time period",
+    "type": 1
+  },
+  {
+    "name": "prism",
+    "description": "cat prisms are a special power up",
+    "type": 1
+  },
+  {
+    "name": "profile",
+    "description": "View a player",
+    "type": 1
+  },
+  {
+    "name": "purge",
+    "description": "(MOD) Purge messages in a channel",
+    "type": 1
+  },
+  {
+    "name": "rain",
+    "description": "its raining cats",
+    "type": 1
+  },
+  {
+    "name": "rainstart",
+    "description": "(OWNER) Start a cat rain in a channel",
+    "type": 1
+  },
+  {
+    "name": "random",
+    "description": "Get a random cat",
+    "type": 1
+  },
+  {
+    "name": "rate",
+    "description": "get a super accurate rating of something",
+    "type": 1
+  },
+  {
+    "name": "remind",
+    "description": "get a reminder in the future (+- 5 minutes)",
+    "type": 1
+  },
+  {
+    "name": "renamecat",
+    "description": "Rename one of your cats",
+    "type": 1
+  },
+  {
+    "name": "reset",
+    "description": "(ADMIN) Reset people",
+    "type": 1
+  },
+  {
+    "name": "roll",
+    "description": "roll a dice",
+    "type": 1
+  },
+  {
+    "name": "rps",
+    "description": "dont select a person to make an everyone vs you game",
+    "type": 1
+  },
+  {
+    "name": "servers",
+    "description": "List all servers the bot is in",
+    "type": 1
+  },
+  {
+    "name": "setup",
+    "description": "(ADMIN) Setup cat in current channel",
+    "type": 1
+  },
+  {
+    "name": "shop",
+    "description": "Open the Kibble Shop — items rotate/reset every 6 hours",
+    "type": 1
+  },
+  {
+    "name": "slots",
+    "description": "oh no",
+    "type": 1
+  },
+  {
+    "name": "sortinventory",
+    "description": "Sort and filter your cat inventory",
+    "type": 1
+  },
+  {
+    "name": "stats",
+    "description": "View some advanced stats",
+    "type": 1
+  },
+  {
+    "name": "steal",
+    "description": "Attempt to steal a cat from another player (1 hour cooldown)",
+    "type": 1
+  },
+  {
+    "name": "store",
+    "description": "Buy Cat Rains!",
+    "type": 1
+  },
+  {
+    "name": "suggestion",
+    "description": "Submit a suggestion to the bot owner",
+    "type": 1
+  },
+  {
+    "name": "support",
+    "description": "Get support and help with KITTAYYYYYYY",
+    "type": 1
+  },
+  {
+    "name": "syncats",
+    "description": "Sync your cat instances with database counts (admin/troubleshooting)",
+    "type": 1
+  },
+  {
+    "name": "tictactoe",
+    "description": "play a relaxing game of tic tac toe",
+    "type": 1
+  },
+  {
+    "name": "tiktok",
+    "description": "Read text as TikTok",
+    "type": 1
+  },
+  {
+    "name": "timeout",
+    "description": "(MOD) Timeout a member",
+    "type": 1
+  },
+  {
+    "name": "trade",
+    "description": "Trade stuff!",
+    "type": 1
+  },
+  {
+    "name": "tree",
+    "description": "View your Christmas tree decorations!",
+    "type": 1
+  },
+  {
+    "name": "tree_ornament",
+    "description": "Learn about a specific ornament!",
+    "type": 1
+  },
+  {
+    "name": "unban",
+    "description": "(MOD) Unban a user from the server",
+    "type": 1
+  },
+  {
+    "name": "untimeout",
+    "description": "(MOD) Remove timeout from a member",
+    "type": 1
+  },
+  {
+    "name": "updatecatstats",
+    "description": "Update all your cats to use the new battle stat system",
+    "type": 1
+  },
+  {
+    "name": "vote",
+    "description": "vote for KITTAYYYYYYY",
+    "type": 1
+  },
+  {
+    "name": "warn",
+    "description": "(MOD) Warn a member",
+    "type": 1
+  },
+  {
+    "name": "wiki",
+    "description": "Confused? Check out the KITTAYYYYYYY Wiki!",
+    "type": 1
+  }
+]

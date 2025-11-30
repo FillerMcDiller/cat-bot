@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 import importlib
+import cat_modifiers
 
 
 def _get_main():
@@ -120,6 +121,17 @@ def _build_cat_abilities():
 CAT_ABILITIES = _build_cat_abilities()
 
 
+def get_cat_display_stats(cat: dict) -> dict:
+    """Get cat's displayed stats with modifiers applied. Returns {hp, dmg}."""
+    if not cat:
+        return {"hp": 0, "dmg": 0}
+    
+    modifiers = cat.get("modifiers", [])
+    if modifiers:
+        return cat_modifiers.apply_stat_multipliers(cat)
+    return {"hp": cat.get("hp", 0), "dmg": cat.get("dmg", 0)}
+
+
 class FightSession:
     def __init__(self, ctx: commands.Context, challenger: discord.Member, opponent: discord.Member):
         self.ctx = ctx
@@ -161,7 +173,7 @@ class Fights(commands.Cog):
         if not mm:
             await ctx.reply("Internal error: user cat data unavailable.")
             return
-        cats = mm.get_user_cats(ctx.guild.id, ctx.author.id)
+        cats = await mm.get_user_cats(ctx.guild.id, ctx.author.id)
         if not cats:
             await ctx.reply("You have no cats to save as a deck.")
             return
@@ -170,7 +182,8 @@ class Fights(commands.Cog):
         for c in cats[:25]:
             label = f"{c.get('name')} ({c.get('type')})"
             value = c.get('id')
-            desc = f"HP:{c.get('hp')} DMG:{c.get('dmg')}"
+            display_stats = get_cat_display_stats(c)
+            desc = f"HP:{display_stats.get('hp')} DMG:{display_stats.get('dmg')}"
             options.append(discord.SelectOption(label=label, value=value, description=desc))
 
         select = DeckSelect(options=options, placeholder=f"Select 3 cats to save as '{name}'", owner=ctx.author, guild_id=ctx.guild.id, deck_name=name)
@@ -216,9 +229,13 @@ class Fights(commands.Cog):
         if not mm:
             await ctx.reply("Internal error: user cat data unavailable.")
             return
-        cats = mm.get_user_cats(ctx.guild.id, ctx.author.id)
-        found = [next((c for c in cats if c.get('id') == cid), None) for cid in ids]
-        found = [f"{c.get('name')} ({c.get('type')}) HP:{c.get('hp')} DMG:{c.get('dmg')}" for c in found if c]
+        cats = await mm.get_user_cats(ctx.guild.id, ctx.author.id)
+        cats_found = [next((c for c in cats if c.get('id') == cid), None) for cid in ids]
+        found = []
+        for c in cats_found:
+            if c:
+                display_stats = get_cat_display_stats(c)
+                found.append(f"{c.get('name')} ({c.get('type')}) HP:{display_stats.get('hp')} DMG:{display_stats.get('dmg')}")
         if not found:
             await ctx.reply("Saved deck has no matching cats (they may have been deleted).")
             return
@@ -312,7 +329,7 @@ class ChallengeView(discord.ui.View):
         if not mm:
             await session.channel.send("Internal error: cannot access cat database.")
             return
-        cats = mm.get_user_cats(session.guild.id, member.id)
+        cats = await mm.get_user_cats(session.guild.id, member.id)
         if not cats:
             await session.channel.send(f"{member.mention} has no cats to fight with.")
             return
@@ -322,7 +339,8 @@ class ChallengeView(discord.ui.View):
         for c in cats[:25]:
             label = f"{c.get('name')} ({c.get('type')})"
             value = c.get('id')
-            desc = f"HP:{c.get('hp')} DMG:{c.get('dmg')}"
+            display_stats = get_cat_display_stats(c)
+            desc = f"HP:{display_stats.get('hp')} DMG:{display_stats.get('dmg')}"
             options.append(discord.SelectOption(label=label, value=value, description=desc))
 
         select = CatSelect(options=options, placeholder=f"Select 3 cats ({member.display_name})", member=member, session=session, manager=self.manager)
@@ -348,9 +366,10 @@ class CatSelect(discord.ui.Select):
         if not mm:
             await interaction.response.send_message("Internal error: cannot access cat database.", ephemeral=True)
             return
-        cats_full = mm.get_user_cats(self.session.guild.id, self.member.id)
+        cats_full = await mm.get_user_cats(self.session.guild.id, self.member.id)
         chosen = [next((x for x in cats_full if x.get('id') == val), None) for val in self.values]
         chosen = [c for c in chosen if c]
+        # Store cats with their modifiers intact - get_cat_display_stats will apply them during battle
         self.session.teams[self.member.id] = chosen
         await interaction.response.send_message(f"Saved your deck of {len(chosen)} cats.", ephemeral=True)
 
@@ -367,6 +386,14 @@ class CatSelect(discord.ui.Select):
         s.turn = first
         # set active indices to 0
         s.active = {s.challenger.id: 0, s.opponent.id: 0}
+
+        # Initialize each team's cats with modifier stats applied
+        for team_cats in [s.teams.get(s.challenger.id, []), s.teams.get(s.opponent.id, [])]:
+            for cat in team_cats:
+                # Apply modifiers to initial HP/DMG
+                stats = get_cat_display_stats(cat)
+                cat['hp'] = stats['hp']
+                cat['dmg'] = stats['dmg']
 
         # send fight embed (store message so we can edit it later)
         desc = f"Fight starting between {s.challenger.mention} and {s.opponent.mention}! {self._mention_by_id(s.turn)} goes first."
@@ -498,7 +525,7 @@ class AbilitySelect(discord.ui.Select):
         abilities = CAT_ABILITIES.get(active.get('type'), {}).get('attacks', [])
         ability = abilities[ability_idx]
 
-        # compute damage: base dmg + ability power
+        # compute damage: base dmg (which already has modifiers applied from start_fight)
         base = int(active.get('dmg') or 1)
         damage = base + int(ability.get('power', 0))
 

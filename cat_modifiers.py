@@ -25,6 +25,17 @@ CAT_MODIFIERS = {
         "pack_rarity": ["Platinum", "Diamond"],  # Can spawn from these pack types only
         "emoji": "✨",
         "display_name": "Enchanted",
+    },
+    "snowy": {
+        "name": "❄️ Snowy",
+        "description": "A festive cat covered in snow (December only)",
+        "rarity_divisor": 2.0,  # Spawn rate is 1/2 of the cat's base rarity (higher chance in December)
+        "stat_multiplier": 1.1,  # 10% stat boost
+        "kibble_multiplier": 1.5,  # 50% more kibble
+        "adventure_multiplier": 1.3,  # 30% more adventure rewards
+        "steal_resistance": 0.3,  # 30% harder to steal
+        "emoji": "❄️",
+        "display_name": "Snowy",
     }
 }
 
@@ -69,7 +80,11 @@ def get_image_path(cat: dict, base_path: str = "images/spawn") -> str:
     cat_type = cat.get("type", "Fine").lower()
     modifiers = cat.get("modifiers", [])
     
-    # For now, only enchanted has special image names
+    # Check for snowy modifier first (December exclusive)
+    if "snowy" in modifiers:
+        return f"{base_path}/{cat_type}_snowy.png"
+    
+    # Check for enchanted modifier
     if "enchanted" in modifiers:
         return f"{base_path}/{cat_type}_cat_enchanted.png"
     
