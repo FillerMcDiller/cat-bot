@@ -16396,7 +16396,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
             self.currentuser = currentuser
 
             self.cattype = discord.ui.TextInput(
-                label='Cat or Pack Type, Prism Name, "Rain", or Item (e.g. "candy_cane I")',
+                label='Cat, Pack, Prism, Rain, or Item',
                 placeholder="Fine / Wooden / Alpha / Rain / candy_cane I",
             )
             self.add_item(self.cattype)
