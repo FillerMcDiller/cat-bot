@@ -27,7 +27,12 @@ ADD COLUMN IF NOT EXISTS tree_decorated BOOLEAN DEFAULT false;  -- Completed the
 -- Add Christmas tree decoration tracking
 ALTER TABLE public.profile
 ADD COLUMN IF NOT EXISTS tree_ornaments TEXT DEFAULT '',  -- Comma-separated ornament IDs (e.g. "1,3,5")
-ADD COLUMN IF NOT EXISTS tree_ornament_count INTEGER DEFAULT 0;  -- Number of ornaments collected (0-8)
+ADD COLUMN IF NOT EXISTS tree_ornament_count INTEGER DEFAULT 0,  -- Number of ornaments collected (0-8)
+ADD COLUMN IF NOT EXISTS christmas_spirit_progress INTEGER DEFAULT 0,  -- Track festive cats caught
+ADD COLUMN IF NOT EXISTS gift_giver_progress INTEGER DEFAULT 0,  -- Track gifts given
+ADD COLUMN IF NOT EXISTS pack_festive_opened INTEGER DEFAULT 0,  -- Track festive packs opened
+ADD COLUMN IF NOT EXISTS winter_battles INTEGER DEFAULT 0,  -- Track winter-themed battles
+ADD COLUMN IF NOT EXISTS team_battle_wins INTEGER DEFAULT 0;  -- Track team battle wins
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_profile_advent ON public.profile USING btree (advent_last_claim);

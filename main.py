@@ -57,7 +57,10 @@ from christmas_update import (
     CHRISTMAS_COSMETICS, CHRISTMAS_ACHIEVEMENTS, TREE_ACHIEVEMENT,
     ADVENT_REWARDS, TREE_ORNAMENTS, advent_command, tree_view_command,
     tree_ornament_info_command, update_naughty_score, update_nice_score,
-    check_tree_ornament_unlock, get_tree_boosts
+    check_tree_ornament_unlock, get_tree_boosts,
+    track_festive_catch, track_gift_given, track_advent_claim,
+    track_festive_pack_open, track_nice_score, track_cosmetic_unlock,
+    track_winter_battle, track_team_battle_win
 )
 
 import time
@@ -1457,6 +1460,11 @@ enchanted_spawns = {}
 pending_enchanted = {}
 # Track modifiers for caught cats: (guild_id, user_id, cat_type) -> list of modifiers
 pending_modifiers = {}
+# Per-command cooldown protection (user_id, command_name) -> last_run_time
+command_last_run: dict[tuple[int, str], float] = {}
+COMMAND_COOLDOWNS = {
+    "breed": 3.0,  # 3 seconds between breed commands per user
+}
 
 # Simple in-memory active fights mapping: channel_id -> SimpleFightSession
 FIGHT_SESSIONS: dict = {}
@@ -5897,6 +5905,7 @@ async def refresh_quests(user):
     full_months_passed = (current_date.year - start_date.year) * 12 + (current_date.month - start_date.month)
     if current_date.day < start_date.day:
         full_months_passed -= 1
+    print(f"[SEASON DEBUG] User {user.user_id}: current_season={user.season}, calculated_season={full_months_passed}, date={current_date.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     if user.season != full_months_passed:
         user.bp_history = user.bp_history + f"{user.season},{user.battlepass},{user.progress};"
         user.battlepass = 0
@@ -12007,25 +12016,20 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
                         cat_type = random.choice(christmas_cats)
                         
-                        # Spawn the cat instance
-                        await auto_sync_cat_instances(parent_inter.user, cat_type=cat_type, enchanted=False)
+                        # Get the profile for spawning
+                        spawn_profile = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
                         
-                        # Apply snowy modifier if tier is high luck
+                        # Determine modifiers
+                        modifiers = []
                         if christmas_luck >= 3:
-                            # Get the newly created cat and try to add snowy modifier
-                            cats_now = await get_user_cats(parent_inter.guild.id, parent_inter.user.id)
-                            # Find the most recently created cat of this type
-                            recent_cat = None
-                            for cat in sorted(cats_now, key=lambda c: c.get('id_timestamp', 0), reverse=True):
-                                if cat.get('type') == cat_type:
-                                    recent_cat = cat
-                                    break
-                            
-                            if recent_cat and add_modifier(recent_cat, "snowy"):
-                                await save_user_cats(parent_inter.guild.id, parent_inter.user.id, cats_now)
-                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
-                            else:
-                                await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
+                            modifiers = ["snowy"]
+                        
+                        # Spawn the cat instance with modifiers
+                        await auto_sync_cat_instances(spawn_profile, cat_type=cat_type, modifiers=modifiers)
+                        
+                        # Send confirmation message
+                        if modifiers:
+                            await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
                         else:
                             await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
                         return
@@ -14066,6 +14070,14 @@ async def packs(message: discord.Interaction):
             user[f"pack_{pack.lower()}"] -= 1
             if kibble:
                 user.kibble += kibble
+            
+            # Track festive pack opens for ornament #4
+            if pack.lower() == "festive":
+                try:
+                    await track_festive_pack_open(message.user.id, message.guild.id)
+                except Exception:
+                    pass
+            
             await user.save()
             # after single-pack open save: check for full stack / huzzful
             try:
@@ -15094,6 +15106,14 @@ async def gift(
                 pass
             await user.save()
             await reciever.save()
+            
+            # Track gift for ornament #2 and nice score
+            try:
+                await update_nice_score(message.user.id, message.guild.id, 1)
+                await track_gift_given(message.user.id, message.guild.id)
+            except Exception:
+                pass
+            
             content = f"Successfully transfered {amount:,} {cat_type} cats from {message.user.mention} to <@{person_id}>!"
 
             # handle tax
@@ -15287,7 +15307,97 @@ def format_cosmetic_display(profile):
     return " ".join(parts) if parts else None
 
 
+# Owner-only commands
+OWNER_IDS = {726686526133501952}  # Add your Discord user ID here
+
+@bot.tree.command(name="nicescore", description="(Owner) View a user's nice/naughty score")
+@discord.app_commands.describe(user="User to inspect")
+async def nicescore(message: discord.Interaction, user: discord.User):
+    """Owner-only command to view and verify nice/naughty scores"""
+    if message.user.id not in OWNER_IDS:
+        await message.response.send_message("❌ This command is owner-only.", ephemeral=True)
+        return
+    
+    await message.response.defer(ephemeral=True)
+    
+    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=user.id)
+    
+    nice = profile.nice_score or 0
+    naughty = profile.naughty_score or 0
+    santa_banned = profile.santa_banned or False
+    
+    # Ornament progress
+    ornaments = []
+    if profile.tree_ornaments:
+        ornaments = [int(o) for o in profile.tree_ornaments.split(",") if o]
+    
+    # Achievement flags
+    achievements = []
+    if profile.christmas_spirit:
+        achievements.append("🎄 Christmas Spirit")
+    if profile.advent_master:
+        achievements.append("⭐ Advent Master")
+    if profile.gift_giver:
+        achievements.append("🎁 Gift Giver")
+    if profile.nice_list:
+        achievements.append("😇 Nice List")
+    if profile.naughty_list:
+        achievements.append("😈 Naughty List")
+    if profile.festive_collector:
+        achievements.append("🎅 Festive Collector")
+    if profile.tree_decorated:
+        achievements.append("🎄 Tree Master")
+    
+    embed = discord.Embed(
+        title=f"🎅 Christmas Status: {user.name}",
+        color=0xC41E3A if naughty > nice else 0x2ECC71
+    )
+    
+    embed.add_field(
+        name="😇 Nice Score",
+        value=str(nice),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="😈 Naughty Score",
+        value=str(naughty),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🎅 Santa Status",
+        value="🚫 BANNED" if santa_banned else "✅ Good Standing",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🎄 Tree Ornaments",
+        value=f"{len(ornaments)}/8 collected",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🏆 Christmas Achievements",
+        value="\n".join(achievements) if achievements else "None yet",
+        inline=False
+    )
+    
+    # Advent progress
+    claimed_days = []
+    if profile.advent_claimed:
+        claimed_days = [int(d) for d in profile.advent_claimed.split(",") if d]
+    embed.add_field(
+        name="📅 Advent Calendar",
+        value=f"{len(claimed_days)}/25 days claimed",
+        inline=True
+    )
+    
+    await message.followup.send(embed=embed, ephemeral=True)
+
+
 @bot.tree.command(description="Browse and purchase cosmetics to customize your profile!")
+@bot.tree.command(description="cosmetics shop! buy badges, titles, and more")
 async def cosmetics(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -19601,6 +19711,18 @@ async def breed(
         - Produces an offspring whose probability distribution is centered on the
           average spawn/rarity value of both parents (not required to be strictly rarer).
         """
+        # Check command cooldown
+        now = time.time()
+        cooldown_key = (message.user.id, "breed")
+        last_run = command_last_run.get(cooldown_key, 0)
+        if now - last_run < COMMAND_COOLDOWNS["breed"]:
+            await message.response.send_message(
+                "⏳ Slow down! Please wait a few seconds between breed commands.",
+                ephemeral=True
+            )
+            return
+        command_last_run[cooldown_key] = now
+        
         await message.response.defer()
         
         profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
@@ -19710,6 +19832,13 @@ async def breed(
                 # Create offspring instance
                 try:
                     await auto_sync_cat_instances(profile, offspring)
+                except Exception:
+                    pass
+                
+                # Update breed quest progress
+                try:
+                    if profile.extra_quest in ["breed3", "breed5"]:
+                        await progress(message, profile, profile.extra_quest)
                 except Exception:
                     pass
                 
@@ -19886,6 +20015,18 @@ async def breed(
                 # Track total breeds
                 fresh_profile.breeds_total = (fresh_profile.breeds_total or 0) + len(breed_pairs)
                 await fresh_profile.save()
+                
+                # Update breed quest progress for each breed
+                try:
+                    if fresh_profile.extra_quest in ["breed3", "breed5"]:
+                        for _ in range(len(breed_pairs)):
+                            await progress(message, fresh_profile, fresh_profile.extra_quest)
+                            # Refresh to check if quest is complete
+                            await fresh_profile.refresh_from_db()
+                            if fresh_profile.extra_cooldown != 0:
+                                break  # Quest completed
+                except Exception:
+                    pass
                 
                 # Format results
                 result_lines = [

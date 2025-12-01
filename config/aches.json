@@ -104,5 +104,13 @@
   "tylenol": {"title": "You Failure", "description": "breed and receive a worse cat", "is_hidden": false, "category": "Silly"},
   "grinder": {"title": "Grinder", "description": "complete a battlepass", "is_hidden": false, "category": "Hard"},
 
-  "thanksforplaying": {"title": "Thanks For Playing", "description": "Complete the story", "is_hidden": false, "category": "Cat Hunt"}
+  "thanksforplaying": {"title": "Thanks For Playing", "description": "Complete the story", "is_hidden": false, "category": "Cat Hunt"},
+
+  "christmas_spirit": {"title": "Festive Spirit", "description": "Catch 10 festive cats during December", "is_hidden": false, "category": "Christmas"},
+  "advent_master": {"title": "Advent Master", "description": "Claim all 25 days of the advent calendar", "is_hidden": false, "category": "Christmas"},
+  "gift_giver": {"title": "Gift Giver", "description": "Gift 5 cats to other players during December", "is_hidden": false, "category": "Christmas"},
+  "nice_list": {"title": "Nice List", "description": "Maintain a positive nice/naughty ratio throughout December", "is_hidden": false, "category": "Christmas"},
+  "naughty_list": {"title": "Naughty List", "description": "Get banned from Santa's presents", "is_hidden": false, "category": "Christmas"},
+  "festive_collector": {"title": "Festive Collector", "description": "Open 50 festive packs", "is_hidden": false, "category": "Christmas"},
+  "tree_decorated": {"title": "Christmas Tree Master", "description": "Collect all 8 ornaments and decorate the Christmas tree", "is_hidden": false, "category": "Christmas"}
 }

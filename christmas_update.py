@@ -184,26 +184,26 @@ CHRISTMAS_ACHIEVEMENTS = {
     "christmas_spirit": {
         "title": "Christmas Spirit",
         "display": "🎄 Christmas Spirit",
-        "description": "Catch 25 festive cats during the holiday season",
-        "reward": "Festive badge and 5,000 Kibbles"
+        "description": "Catch 10 festive cats during the holiday season",
+        "reward": "Festive badge, +5,000 Kibbles, Festive Pack x3"
     },
     "advent_master": {
         "title": "Advent Master",
         "display": "📅 Advent Master",
         "description": "Claim all 25 days of the advent calendar",
-        "reward": "Advent Star badge and 10,000 Kibbles"
+        "reward": "Advent Star badge, +10,000 Kibbles, Celestial Pack x2"
     },
     "gift_giver": {
         "title": "Gift Giver",
         "display": "🎁 Gift Giver",
-        "description": "Gift 10 cats to other players during December",
-        "reward": "Gift Giver title"
+        "description": "Gift 5 cats to other players during December",
+        "reward": "Gift Giver title, +3,000 Kibbles"
     },
     "nice_list": {
         "title": "Nice List",
         "display": "😇 Nice List",
         "description": "Maintain a positive nice/naughty ratio throughout December",
-        "reward": "Nice List badge"
+        "reward": "Nice List badge, +5,000 Kibbles"
     },
     "naughty_list": {
         "title": "Naughty List",
@@ -215,7 +215,7 @@ CHRISTMAS_ACHIEVEMENTS = {
         "title": "Festive Collector",
         "display": "🎅 Festive Collector",
         "description": "Open 50 festive packs",
-        "reward": "Festive Collector title"
+        "reward": "Festive Collector title, +15,000 Kibbles, Celestial Pack x5"
     }
 }
 
@@ -225,30 +225,30 @@ CHRISTMAS_ACHIEVEMENTS = {
 
 ADVENT_REWARDS = {
     1: {"kibble": 500, "packs": {"festive": 1}, "message": "🎄 Day 1: Welcome to the advent calendar!"},
-    2: {"kibble": 600, "packs": {"festive": 1}, "message": "❄️ Day 2: The snow is falling!"},
-    3: {"kibble": 700, "packs": {"festive": 2}, "message": "🎅 Day 3: Santa's checking his list!"},
-    4: {"kibble": 800, "packs": {"festive": 2}, "message": "🎁 Day 4: Presents are being wrapped!"},
-    5: {"kibble": 1000, "packs": {"festive": 3}, "message": "⭐ Day 5: Five golden stars!"},
-    6: {"kibble": 1200, "packs": {"festive": 2}, "message": "🔔 Day 6: Jingle bells ring!"},
-    7: {"kibble": 1400, "packs": {"festive": 3}, "message": "🕯️ Day 7: Week one complete!"},
-    8: {"kibble": 1600, "packs": {"festive": 3}, "message": "🎶 Day 8: Carol singing time!"},
-    9: {"kibble": 1800, "packs": {"festive": 4}, "message": "🍪 Day 9: Cookies for Santa!"},
-    10: {"kibble": 2000, "packs": {"festive": 4}, "message": "🎄 Day 10: Tree decorating day!"},
-    11: {"kibble": 2200, "packs": {"festive": 4}, "message": "❄️ Day 11: Snowman building!"},
-    12: {"kibble": 2500, "packs": {"festive": 5}, "message": "🎅 Day 12: Santa's workshop tour!"},
-    13: {"kibble": 2800, "packs": {"festive": 5}, "message": "🦌 Day 13: Reindeer games!"},
-    14: {"kibble": 3000, "packs": {"festive": 6}, "message": "🎁 Day 14: Two weeks of cheer!"},
-    15: {"kibble": 3500, "packs": {"festive": 6}, "message": "⭐ Day 15: Halfway to Christmas!"},
-    16: {"kibble": 4000, "packs": {"festive": 7}, "message": "🔔 Day 16: The bells are ringing louder!"},
-    17: {"kibble": 4500, "packs": {"festive": 7}, "message": "🕯️ Day 17: Light up the night!"},
-    18: {"kibble": 5000, "packs": {"festive": 8}, "message": "🎶 Day 18: Silent night approaches!"},
-    19: {"kibble": 5500, "packs": {"festive": 8}, "message": "🍪 Day 19: More cookies needed!"},
-    20: {"kibble": 6000, "packs": {"festive": 9}, "message": "🎄 Day 20: Almost Christmas!"},
-    21: {"kibble": 7000, "packs": {"festive": 10}, "message": "❄️ Day 21: Winter wonderland!"},
-    22: {"kibble": 8000, "packs": {"festive": 10}, "message": "🎅 Day 22: Santa's getting ready!"},
-    23: {"kibble": 9000, "packs": {"festive": 12}, "message": "🦌 Day 23: Reindeer are practicing!"},
-    24: {"kibble": 10000, "packs": {"festive": 15}, "message": "🎁 Day 24: Christmas Eve! Big rewards!"},
-    25: {"kibble": 25000, "packs": {"festive": 25, "celestial": 5}, "cats": {"Fine": 1}, "message": "🎄 Day 25: MERRY CHRISTMAS! 🎅"}
+    2: {"kibble": 600, "packs": {"festive": 1}, "message": "❄️ Day 2: the snow is falling :O"},
+    3: {"kibble": 700, "packs": {"festive": 2}, "message": "🎅 Day 3: santa is checking the list!!!11!!"},
+    4: {"kibble": 800, "packs": {"festive": 2}, "message": "🎁 Day 4: time to wrap those presents :D"},
+    5: {"kibble": 1000, "packs": {"festive": 3}, "message": "⭐ Day 5: five golden stars!!!!!"},
+    6: {"kibble": 1200, "packs": {"festive": 2}, "message": "🔔 Day 6: ding dong bell ring!"},
+    7: {"kibble": 1400, "packs": {"festive": 3}, "message": "🕯️ Day 7: week complete, w cat!"},
+    8: {"kibble": 1600, "packs": {"festive": 3}, "message": "🎶 Day 8: jamming cat is practicing carols"},
+    9: {"kibble": 1800, "packs": {"festive": 4}, "message": "🍪 Day 9: chef cat is making cookies hell yeah!"},
+    10: {"kibble": 2000, "packs": {"festive": 4}, "message": "🎄 Day 10: time to decorate christmas tree cat!"},
+    11: {"kibble": 2200, "packs": {"festive": 4}, "message": "❄️ Day 11: construct snowman cat :D"},
+    12: {"kibble": 2500, "packs": {"festive": 5}, "message": "🎅 Day 12: santa cat has workshop tours open"},
+    13: {"kibble": 2800, "packs": {"festive": 5}, "message": "🦌 Day 13: the reindeers are having a party??!?!?!?!"},
+    14: {"kibble": 3000, "packs": {"festive": 6}, "message": "🎁 Day 14: two weeks of cheer!"},
+    15: {"kibble": 3500, "packs": {"festive": 6}, "message": "⭐ Day 15: halfway to christmas!"},
+    16: {"kibble": 4000, "packs": {"festive": 7}, "message": "🔔 Day 16: the bells are ringing louder, AHHH HELP"},
+    17: {"kibble": 4500, "packs": {"festive": 7}, "message": "🕯️ Day 17: fairy lights????"},
+    18: {"kibble": 5000, "packs": {"festive": 8}, "message": "🎶 Day 18: woohooo more carols, thank you jamming cat!"},
+    19: {"kibble": 5500, "packs": {"festive": 8}, "message": "🍪 Day 19: gingerbread cat is.. cooking himself?"},
+    20: {"kibble": 6000, "packs": {"festive": 9}, "message": "🎄 Day 20: almost christmas!"},
+    21: {"kibble": 7000, "packs": {"festive": 10}, "message": "❄️ Day 21: pretty cold ngl.. brr"},
+    22: {"kibble": 8000, "packs": {"festive": 10}, "message": "🎅 Day 22: santa cat is getting readyyy"},
+    23: {"kibble": 9000, "packs": {"festive": 12}, "message": "🦌 Day 23: reindeer are practicing!"},
+    24: {"kibble": 10000, "packs": {"festive": 15}, "message": "🎁 Day 24: christmas eve! big rewards!"},
+    25: {"kibble": 25000, "packs": {"festive": 25, "celestial": 5}, "cats": {"Fine": 1}, "message": "🎄 Day 25: merry catsmas!1!!1!!! :3"}
 }
 
 async def advent_command(message: discord.Interaction):
@@ -270,8 +270,8 @@ async def advent_command(message: discord.Interaction):
     # Check if banned by Santa
     if profile.santa_banned:
         await message.followup.send(
-            "🎅 Santa has banned you from receiving presents due to your naughty behavior! 😈\n"
-            "Maybe next year if you improve your ways...",
+            "🎅 santa has banned you from receiving advent gifts, you dip. be nice next time \n"
+            "maybe next year if you improve your ways...",
             ephemeral=True
         )
         # Try to trigger naughty_list achievement if achemb is available
@@ -513,6 +513,80 @@ async def check_tree_ornament_unlock(user_id: int, guild_id: int, ornament_id: i
     await profile.save()
     return True
 
+# Helper functions to track ornament progress
+async def track_festive_catch(user_id: int, guild_id: int):
+    """Track festive cat catches and unlock ornament #1 at 10 catches"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    profile.christmas_spirit_progress = (getattr(profile, 'christmas_spirit_progress', None) or 0) + 1
+    await profile.save()
+    if profile.christmas_spirit_progress >= 10:
+        return await check_tree_ornament_unlock(user_id, guild_id, 1)
+    return False
+
+async def track_gift_given(user_id: int, guild_id: int):
+    """Track gifts and unlock ornament #2 at 5 gifts"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    profile.gift_giver_progress = (getattr(profile, 'gift_giver_progress', None) or 0) + 1
+    await profile.save()
+    if profile.gift_giver_progress >= 5:
+        return await check_tree_ornament_unlock(user_id, guild_id, 2)
+    return False
+
+async def track_advent_claim(user_id: int, guild_id: int):
+    """Track advent claims and unlock ornament #3 at 10 claims"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    # Check claimed days count
+    claimed_days = []
+    if profile.advent_claimed:
+        claimed_days = [int(d) for d in profile.advent_claimed.split(",") if d]
+    if len(claimed_days) >= 10:
+        return await check_tree_ornament_unlock(user_id, guild_id, 3)
+    return False
+
+async def track_festive_pack_open(user_id: int, guild_id: int):
+    """Track festive pack opens and unlock ornament #4 at 15 opens"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    pack_festive = getattr(profile, 'pack_festive_opened', None) or 0
+    pack_festive += 1
+    profile.pack_festive_opened = pack_festive
+    await profile.save()
+    if pack_festive >= 15:
+        return await check_tree_ornament_unlock(user_id, guild_id, 4)
+    return False
+
+async def track_nice_score(user_id: int, guild_id: int):
+    """Check nice score and unlock ornament #5 at 10 points"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    if (profile.nice_score or 0) >= 10:
+        return await check_tree_ornament_unlock(user_id, guild_id, 5)
+    return False
+
+async def track_cosmetic_unlock(user_id: int, guild_id: int, cosmetic_id: str):
+    """Check if santa_hat was unlocked and give ornament #6"""
+    if cosmetic_id == "santa_hat":
+        return await check_tree_ornament_unlock(user_id, guild_id, 6)
+    return False
+
+async def track_winter_battle(user_id: int, guild_id: int):
+    """Track battles with winter cats and unlock ornament #7 at 20 battles"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    winter_battles = (getattr(profile, 'winter_battles', None) or 0) + 1
+    profile.winter_battles = winter_battles
+    await profile.save()
+    if winter_battles >= 20:
+        return await check_tree_ornament_unlock(user_id, guild_id, 7)
+    return False
+
+async def track_team_battle_win(user_id: int, guild_id: int):
+    """Track team battle wins and unlock ornament #8 at 5 wins"""
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    team_wins = (getattr(profile, 'team_battle_wins', None) or 0) + 1
+    profile.team_battle_wins = team_wins
+    await profile.save()
+    if team_wins >= 5:
+        return await check_tree_ornament_unlock(user_id, guild_id, 8)
+    return False
+
 async def tree_view_command(message: discord.Interaction):
     """Display current Christmas tree decoration progress"""
     await message.response.defer()
@@ -527,7 +601,7 @@ async def tree_view_command(message: discord.Interaction):
     # Create visual tree
     tree_art = """
 ```
-        ⭐
+       ⭐
        🎄
       🎄🎄
      🎄🎄🎄
@@ -536,7 +610,7 @@ async def tree_view_command(message: discord.Interaction):
   🎄🎄🎄🎄🎄🎄
  🎄🎄🎄🎄🎄🎄🎄
 🎄🎄🎄🎄🎄🎄🎄🎄
-       ║
+         ║ 
 ```
     """
     
