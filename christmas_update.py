@@ -5,6 +5,7 @@ import discord
 import datetime
 import time
 from database import Profile
+from catpg import pool
 
 # NOTE: achemb() function is imported from main.py at runtime
 # It's called in advent_command() and update_naughty_score()
@@ -523,10 +524,10 @@ async def track_festive_catch(user_id: int, guild_id: int):
         return await check_tree_ornament_unlock(user_id, guild_id, 1)
     return False
 
-async def track_gift_given(user_id: int, guild_id: int):
-    """Track gifts and unlock ornament #2 at 5 gifts"""
+async def track_gift_given(user_id: int, guild_id: int, amount: int = 1):
+    """Track gifts and unlock ornament #2 at 5 cats gifted (total)"""
     profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
-    profile.gift_giver_progress = (getattr(profile, 'gift_giver_progress', None) or 0) + 1
+    profile.gift_giver_progress = (getattr(profile, 'gift_giver_progress', None) or 0) + amount
     await profile.save()
     if profile.gift_giver_progress >= 5:
         return await check_tree_ornament_unlock(user_id, guild_id, 2)
@@ -543,16 +544,34 @@ async def track_advent_claim(user_id: int, guild_id: int):
         return await check_tree_ornament_unlock(user_id, guild_id, 3)
     return False
 
-async def track_festive_pack_open(user_id: int, guild_id: int):
-    """Track festive pack opens and unlock ornament #4 at 15 opens"""
+async def increment_festive_pack_progress(user_id: int, guild_id: int, amount: int) -> int:
+    """Atomically increment festive pack progress and return new total"""
+    print(f"[PACK DEBUG] increment_festive_pack_progress start user={user_id} guild={guild_id} amount={amount}")
+    if amount < 1:
+        profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+        current = getattr(profile, 'pack_festive_opened', 0) or 0
+        print(f"[PACK DEBUG] amount<1 returning current={current}")
+        return current
+
+    query = (
+        "UPDATE \"profile\" "
+        "SET pack_festive_opened = COALESCE(pack_festive_opened, 0) + $3 "
+        "WHERE user_id = $1 AND guild_id = $2 "
+        "RETURNING pack_festive_opened"
+    )
+
+    row = await pool.fetchrow(query, user_id, guild_id, amount)
+    print(f"[PACK DEBUG] SQL update result row={row}")
+    if row and 'pack_festive_opened' in row:
+        new_value = row['pack_festive_opened']
+        print(f"[PACK DEBUG] SQL path new_value={new_value}")
+        return new_value
+
     profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
-    pack_festive = getattr(profile, 'pack_festive_opened', None) or 0
-    pack_festive += 1
-    profile.pack_festive_opened = pack_festive
+    profile.pack_festive_opened = (profile.pack_festive_opened or 0) + amount
     await profile.save()
-    if pack_festive >= 15:
-        return await check_tree_ornament_unlock(user_id, guild_id, 4)
-    return False
+    print(f"[PACK DEBUG] fallback path new_value={profile.pack_festive_opened}")
+    return profile.pack_festive_opened
 
 async def track_nice_score(user_id: int, guild_id: int):
     """Check nice score and unlock ornament #5 at 10 points"""
@@ -561,9 +580,13 @@ async def track_nice_score(user_id: int, guild_id: int):
         return await check_tree_ornament_unlock(user_id, guild_id, 5)
     return False
 
-async def track_cosmetic_unlock(user_id: int, guild_id: int, cosmetic_id: str):
-    """Check if santa_hat was unlocked and give ornament #6"""
-    if cosmetic_id == "santa_hat":
+async def track_cosmetic_unlock(user_id: int, guild_id: int, cosmetic_id: str = None):
+    """Check if santa_hat is owned and give ornament #6"""
+    from main import get_owned_cosmetics
+    profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
+    owned = get_owned_cosmetics(profile)
+    
+    if "santa_hat" in owned:
         return await check_tree_ornament_unlock(user_id, guild_id, 6)
     return False
 
@@ -616,12 +639,41 @@ async def tree_view_command(message: discord.Interaction):
     
     # Build ornament display
     ornament_display = []
+    
+    # Get progress values
+    christmas_progress = getattr(profile, 'christmas_spirit_progress', 0) or 0
+    gift_progress = getattr(profile, 'gift_giver_progress', 0) or 0
+    advent_days = len([int(d) for d in profile.advent_claimed.split(",") if d]) if profile.advent_claimed else 0
+    festive_opened = getattr(profile, 'pack_festive_opened', 0) or 0
+    nice = profile.nice_score or 0
+    winter_battles = getattr(profile, 'winter_battles', 0) or 0
+    team_wins = getattr(profile, 'team_battle_wins', 0) or 0
+    
+    # Check santa hat ownership and unlock if owned
+    from main import get_owned_cosmetics
+    owned = get_owned_cosmetics(profile)
+    has_santa_hat = "santa_hat" in owned
+    if has_santa_hat:
+        await track_cosmetic_unlock(message.user.id, message.guild.id)
+    
+    progress_info = [
+        f"{christmas_progress}/10",
+        f"{gift_progress}/5",
+        f"{advent_days}/10",
+        f"{festive_opened}/15",
+        f"{nice}/10",
+        "✅" if has_santa_hat else "❌",
+        f"{winter_battles}/20",
+        f"{team_wins}/5"
+    ]
+    
     for ornament_id in range(1, 9):
         ornament = TREE_ORNAMENTS[ornament_id]
+        progress = progress_info[ornament_id - 1]
         if ornament_id in collected:
             ornament_display.append(f"{ornament['emoji']} **{ornament['name']}** ✅")
         else:
-            ornament_display.append(f"⚫ *{ornament['name']}* - {ornament['source']}")
+            ornament_display.append(f"⚫ *{ornament['name']}* ({progress}) - {ornament['source']}")
     
     # Create embed
     embed = discord.Embed(

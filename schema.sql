@@ -290,7 +290,26 @@ CREATE TABLE IF NOT EXISTS public.profile (
     breeds_total integer DEFAULT 0,
     battles_won integer DEFAULT 0,
     last_daily_claim BIGINT DEFAULT 0,
-    daily_streak INTEGER DEFAULT 0
+    daily_streak INTEGER DEFAULT 0,
+    advent_claimed TEXT DEFAULT '',
+    advent_last_claim BIGINT DEFAULT 0,
+    naughty_score INTEGER DEFAULT 0,
+    nice_score INTEGER DEFAULT 0,
+    santa_banned BOOLEAN DEFAULT false,
+    christmas_spirit BOOLEAN DEFAULT false,
+    advent_master BOOLEAN DEFAULT false,
+    gift_giver BOOLEAN DEFAULT false,
+    nice_list BOOLEAN DEFAULT false,
+    naughty_list BOOLEAN DEFAULT false,
+    festive_collector BOOLEAN DEFAULT false,
+    tree_decorated BOOLEAN DEFAULT false,
+    tree_ornaments TEXT DEFAULT '',
+    tree_ornament_count INTEGER DEFAULT 0,
+    christmas_spirit_progress INTEGER DEFAULT 0,
+    gift_giver_progress INTEGER DEFAULT 0,
+    pack_festive_opened INTEGER DEFAULT 0,
+    winter_battles INTEGER DEFAULT 0,
+    team_battle_wins INTEGER DEFAULT 0
 );
 
 

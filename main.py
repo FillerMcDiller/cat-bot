@@ -59,7 +59,7 @@ from christmas_update import (
     tree_ornament_info_command, update_naughty_score, update_nice_score,
     check_tree_ornament_unlock, get_tree_boosts,
     track_festive_catch, track_gift_given, track_advent_claim,
-    track_festive_pack_open, track_nice_score, track_cosmetic_unlock,
+    increment_festive_pack_progress, track_nice_score, track_cosmetic_unlock,
     track_winter_battle, track_team_battle_win
 )
 
@@ -14074,7 +14074,10 @@ async def packs(message: discord.Interaction):
             # Track festive pack opens for ornament #4
             if pack.lower() == "festive":
                 try:
-                    await track_festive_pack_open(message.user.id, message.guild.id)
+                    new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, 1)
+                    user.pack_festive_opened = new_progress
+                    if new_progress >= 15:
+                        await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
                 except Exception:
                     pass
             
@@ -14111,11 +14114,17 @@ async def packs(message: discord.Interaction):
         results_detail = []
         results_percat = {cat: 0 for cat in cattypes}
         total_upgrades = 0
+        festive_packs_opened = 0
         for level, pack in enumerate(pack_names):
             pack_id = f"pack_{pack.lower()}"
             this_packs_count = user[pack_id]
             if this_packs_count < 1:
                 continue
+            
+            # Track festive pack opens
+            if pack.lower() == "festive":
+                festive_packs_opened += this_packs_count
+            
             results_header.append(f"{this_packs_count:,}x {get_emoji(pack.lower() + 'pack')}")
             for _ in range(this_packs_count):
                 chosen_type, cat_amount, upgrades, rewards, kibble = get_pack_rewards(level, is_single=False, guild_id=message.guild.id, user_id=message.user.id)
@@ -14132,6 +14141,17 @@ async def packs(message: discord.Interaction):
         for cat_type, cat_amount in results_percat.items():
             user[f"cat_{cat_type}"] += cat_amount
         await user.save()
+        
+        # Track festive pack opens for ornament #4
+        if festive_packs_opened > 0:
+            try:
+                new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, festive_packs_opened)
+                user.pack_festive_opened = new_progress
+                if new_progress >= 15:
+                    await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
+            except Exception:
+                pass
+        
         # after bulk packs save: award Full Stack if any cat crossed the 64 threshold
         try:
             for cat_type, cat_amount in results_percat.items():
@@ -15110,7 +15130,7 @@ async def gift(
             # Track gift for ornament #2 and nice score
             try:
                 await update_nice_score(message.user.id, message.guild.id, 1)
-                await track_gift_given(message.user.id, message.guild.id)
+                await track_gift_given(message.user.id, message.guild.id, amount)
             except Exception:
                 pass
             
@@ -15396,7 +15416,6 @@ async def nicescore(message: discord.Interaction, user: discord.User):
     await message.followup.send(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(description="Browse and purchase cosmetics to customize your profile!")
 @bot.tree.command(description="cosmetics shop! buy badges, titles, and more")
 async def cosmetics(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
@@ -15672,6 +15691,13 @@ async def cosmetics(message: discord.Interaction):
                     fresh_user.kibble = current_kibbles - price
                     add_owned_cosmetic(fresh_user, item_id)
                     await fresh_user.save()
+                    
+                    # Track santa hat purchase for ornament #6
+                    if item_id == "santa_hat":
+                        try:
+                            await track_cosmetic_unlock(fresh_user.user_id, fresh_user.guild_id)
+                        except Exception:
+                            pass
                     
                     # Update global user reference
                     user = fresh_user
