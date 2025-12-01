@@ -13563,6 +13563,16 @@ class PacksView(discord.ui.View):
         if kibble:
             self.user.kibble += kibble
         
+        festive_progress = 0
+        if pack_name.lower() == "festive":
+            try:
+                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
+                self.user.pack_festive_opened = festive_progress
+                if festive_progress >= 15:
+                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            except Exception:
+                pass
+        
         # Handle item rewards
         if item_reward:
             item_name = item_reward["name"]
@@ -13605,6 +13615,7 @@ class PacksView(discord.ui.View):
         reward_summary = []
         all_items = {}  # Batch all item updates
         total_kibble = 0
+        festive_packs_opened = 0
         
         for pack in pack_data:
             pack_name = pack['name'].lower()
@@ -13635,6 +13646,8 @@ class PacksView(discord.ui.View):
                 self.user.pack_upgrades += upgrades
                 self.user.packs_opened += pack_count
                 self.user[f"pack_{pack_name}"] = 0
+                if pack_name == "festive":
+                    festive_packs_opened += pack_count
                 if kibble:
                     # multiplied by count of packs processed
                     kibble_total = kibble * pack_count
@@ -13658,6 +13671,15 @@ class PacksView(discord.ui.View):
                     item_key = f"{item_name}_{tier}"
                     items_data[item_key] = items_data.get(item_key, 0) + count
             await save_user_items(self.user.guild_id, self.user.user_id, items_data)
+
+        if festive_packs_opened > 0:
+            try:
+                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, festive_packs_opened)
+                self.user.pack_festive_opened = festive_progress
+                if festive_progress >= 15:
+                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            except Exception:
+                pass
         
         # Build description with pack counts and rewards
         description = f"**Opened:**\n" + "\n".join(pack_results)
@@ -13866,6 +13888,15 @@ class PacksView(discord.ui.View):
         if kibble:
             self.user.kibble += kibble
         
+        if pack_name.lower() == "festive":
+            try:
+                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
+                self.user.pack_festive_opened = festive_progress
+                if festive_progress >= 15:
+                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            except Exception:
+                pass
+
         # Handle item rewards
         if item_reward:
             item_name = item_reward["name"]
@@ -19523,6 +19554,8 @@ async def setup(bot2):
     # registers with the running bot (helps when main is loaded as an extension).
     try:
         await bot2.load_extension("fights")
+    except discord.app_commands.errors.CommandAlreadyRegistered:
+        logging.warning("Fights commands already registered; skipping duplicate load")
     except Exception:
         try:
             logging.exception("Failed to load 'fights' extension in main.setup; will attempt fallback setup")
@@ -19550,7 +19583,11 @@ async def setup(bot2):
     bot.loop.create_task(background_index_all_cats(bot2))
     print("[SETUP] Task created!", flush=True, file=sys.stderr)
 
-    app_commands = await bot.tree.sync()
+    try:
+        app_commands = await bot.tree.sync()
+    except discord.errors.DiscordServerError as exc:
+        logging.exception("Slash command sync failed; proceeding without sync", exc_info=exc)
+        app_commands = bot.tree.get_commands()
     for i in app_commands:
         if i.name == "rain":
             RAIN_ID = i.id
