@@ -515,10 +515,13 @@ async def check_tree_ornament_unlock(user_id: int, guild_id: int, ornament_id: i
     return True
 
 # Helper functions to track ornament progress
-async def track_festive_catch(user_id: int, guild_id: int):
+async def track_festive_catch(user_id: int, guild_id: int, amount: int = 1):
     """Track festive cat catches and unlock ornament #1 at 10 catches"""
+    if amount < 1:
+        return False
+
     profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
-    profile.christmas_spirit_progress = (getattr(profile, 'christmas_spirit_progress', None) or 0) + 1
+    profile.christmas_spirit_progress = (getattr(profile, 'christmas_spirit_progress', None) or 0) + amount
     await profile.save()
     if profile.christmas_spirit_progress >= 10:
         return await check_tree_ornament_unlock(user_id, guild_id, 1)

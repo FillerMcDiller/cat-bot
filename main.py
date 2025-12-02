@@ -1412,6 +1412,11 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
                 created_any = True
                 modifiers_text = f" ({', '.join(modifiers)})" if modifiers else ""
                 print(f"[AUTO-SYNC] Created 1x {ct} instance{modifiers_text} for user {user_id} (guild {guild_id})", flush=True)
+                if cat_type is not None:
+                    try:
+                        await track_festive_catch(user_id, guild_id)
+                    except Exception:
+                        pass
         else:
             # For regular cats, check DB count vs instances
             try:
@@ -13553,6 +13558,10 @@ class PacksView(discord.ui.View):
         if chosen_type in christmas_cats:
             # Create instances for Christmas cats
             await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
+            try:
+                await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
+            except Exception:
+                pass
         else:
             # Regular cats increment the field
             self.user[f"cat_{chosen_type}"] += cat_amount
@@ -13639,6 +13648,10 @@ class PacksView(discord.ui.View):
                 if chosen_type in christmas_cats:
                     # Create instances for Christmas cats
                     await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, total_cats)
+                    try:
+                        await track_festive_catch(self.user.user_id, self.user.guild_id, total_cats)
+                    except Exception:
+                        pass
                 else:
                     # Regular cats increment the field
                     self.user[f"cat_{chosen_type}"] += total_cats
@@ -13878,6 +13891,10 @@ class PacksView(discord.ui.View):
         if chosen_type in christmas_cats:
             # Create instances for Christmas cats
             await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
+            try:
+                await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
+            except Exception:
+                pass
         else:
             # Regular cats increment the field
             self.user[f"cat_{chosen_type}"] += cat_amount
