@@ -15165,8 +15165,43 @@ async def gift(
         available = await get_available_cat_count(user, cat_type)
         if available >= amount:
             reciever = await Profile.get_or_create(guild_id=message.guild.id, user_id=person_id)
-            user[f"cat_{cat_type}"] -= amount
-            reciever[f"cat_{cat_type}"] += amount
+            
+            # Check if this is a Christmas cat (which uses instances instead of DB counters)
+            christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+            
+            # Always manipulate instances when they exist to prevent ghost stealing exploit
+            sender_cats = await get_user_cats(message.guild.id, message.user.id)
+            has_instances = any(c.get("type") == cat_type for c in sender_cats)
+            
+            if cat_type in christmas_cats or has_instances:
+                # For Christmas cats or when instances exist, transfer actual instances
+                # Find and remove non-favorite, non-adventuring instances
+                removed_count = 0
+                cats_to_keep = []
+                for cat in sender_cats:
+                    if (cat.get("type") == cat_type and 
+                        not cat.get("favorite") and 
+                        not cat.get("on_adventure") and 
+                        removed_count < amount):
+                        # Skip this cat (it's being gifted)
+                        removed_count += 1
+                    else:
+                        cats_to_keep.append(cat)
+                
+                await save_user_cats(message.guild.id, message.user.id, cats_to_keep)
+                
+                # Create instances for receiver
+                await _create_instances_only(message.guild.id, person_id, cat_type, amount)
+                
+                # Also update DB counters for non-Christmas cats to keep them in sync
+                if cat_type not in christmas_cats:
+                    user[f"cat_{cat_type}"] -= amount
+                    reciever[f"cat_{cat_type}"] += amount
+            else:
+                # No instances exist, use DB counters only
+                user[f"cat_{cat_type}"] -= amount
+                reciever[f"cat_{cat_type}"] += amount
+            
             try:
                 user.cats_gifted += amount
                 reciever.cat_gifts_recieved += amount
@@ -15196,8 +15231,29 @@ async def gift(
                         await interaction.response.defer()
                         await user.refresh_from_db()
                         try:
-                            # transfer tax
-                            user[f"cat_{cat_type}"] -= tax_amount
+                            # transfer tax - check if instances exist
+                            tax_sender_cats = await get_user_cats(message.guild.id, message.user.id)
+                            tax_has_instances = any(c.get("type") == cat_type for c in tax_sender_cats)
+                            
+                            if cat_type in christmas_cats or tax_has_instances:
+                                # For Christmas cats or when instances exist, remove instances for tax
+                                tax_removed = 0
+                                tax_cats_to_keep = []
+                                for cat in tax_sender_cats:
+                                    if (cat.get("type") == cat_type and 
+                                        not cat.get("favorite") and 
+                                        not cat.get("on_adventure") and 
+                                        tax_removed < tax_amount):
+                                        tax_removed += 1
+                                    else:
+                                        tax_cats_to_keep.append(cat)
+                                await save_user_cats(message.guild.id, message.user.id, tax_cats_to_keep)
+                                
+                                # Also update DB counter for non-Christmas cats
+                                if cat_type not in christmas_cats:
+                                    user[f"cat_{cat_type}"] -= tax_amount
+                            else:
+                                user[f"cat_{cat_type}"] -= tax_amount
 
                             try:
                                 await interaction.edit_original_response(view=None)
@@ -15208,7 +15264,7 @@ async def gift(
                             # always save to prevent issue with exceptions leaving bugged state
                             await user.save()
                         await achemb(message, "good_citizen", "send")
-                        if user[f"cat_{cat_type}"] < 0:
+                        if not cat_type in christmas_cats and user[f"cat_{cat_type}"] < 0:
                             bot.loop.create_task(debt_cutscene(interaction, user))
                     else:
                         await do_funny(interaction)
