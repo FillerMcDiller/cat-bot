@@ -1700,6 +1700,28 @@ async def bot_perform_attack(s, attacker_id: int, atk_cat: dict, defender_id: in
                         await s.message.edit(content=None, embed=winner_embed, view=None)
                 except Exception:
                     pass
+                
+                # Track battle win for champion ornament (for the attacker who won)
+                try:
+                    # Get guild_id from the session context
+                    guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
+                    if guild_id:
+                        await track_team_battle_win(attacker_id, guild_id)
+                except Exception:
+                    pass
+                
+                # Track winter battles for ice crystal ornament
+                christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                try:
+                    guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
+                    if guild_id:
+                        for cat in s.challenger_team + s.opponent_team:
+                            if cat.get('type') in christmas_cats:
+                                await track_winter_battle(attacker_id, guild_id)
+                                break
+                except Exception:
+                    pass
+                
                 try:
                     if s.channel.id in FIGHT_SESSIONS:
                         del FIGHT_SESSIONS[s.channel.id]
@@ -2975,6 +2997,24 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                                 await s2.message.edit(content=None, embed=winner_embed, view=None)
                                         except Exception:
                                             pass
+                                        
+                                        # Track battle win for champion ornament
+                                        try:
+                                            await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
+                                        except Exception:
+                                            pass
+                                        
+                                        # Track winter battles for ice crystal ornament
+                                        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                                        try:
+                                            # Check if any cats in the battle were winter/Christmas themed
+                                            for cat in s2.challenger_team + s2.opponent_team:
+                                                if cat.get('type') in christmas_cats:
+                                                    await track_winter_battle(interaction2.user.id, interaction2.guild.id)
+                                                    break
+                                        except Exception:
+                                            pass
+                                        
                                         try:
                                             if s2.channel.id in FIGHT_SESSIONS:
                                                 del FIGHT_SESSIONS[s2.channel.id]
@@ -3177,6 +3217,23 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                 await s.message.edit(embed=discord.Embed(title="Cat Battle", description=text), view=None)
                         except Exception:
                             pass
+                        
+                        # Track battle win for champion ornament (for the winner who didn't surrender)
+                        try:
+                            await track_team_battle_win(other.id, it.guild.id)
+                        except Exception:
+                            pass
+                        
+                        # Track winter battles for ice crystal ornament
+                        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                        try:
+                            for cat in s.challenger_team + s.opponent_team:
+                                if cat.get('type') in christmas_cats:
+                                    await track_winter_battle(other.id, it.guild.id)
+                                    break
+                        except Exception:
+                            pass
+                        
                         # cleanup
                         try:
                             if s.channel.id in FIGHT_SESSIONS:
@@ -3570,6 +3627,23 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                             await s2.message.edit(content="Fight ended.", embed=None, view=None)
                                     except Exception:
                                         pass
+                                    
+                                    # Track battle win for champion ornament
+                                    try:
+                                        await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
+                                    except Exception:
+                                        pass
+                                    
+                                    # Track winter battles for ice crystal ornament
+                                    christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                                    try:
+                                        for cat in s2.challenger_team + s2.opponent_team:
+                                            if cat.get('type') in christmas_cats:
+                                                await track_winter_battle(interaction2.user.id, interaction2.guild.id)
+                                                break
+                                    except Exception:
+                                        pass
+                                    
                                     try:
                                         if s2.channel.id in FIGHT_SESSIONS:
                                             del FIGHT_SESSIONS[s2.channel.id]
@@ -3794,6 +3868,23 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                             await s.message.edit(embed=discord.Embed(title="Cat Battle", description=text), view=None)
                     except Exception:
                         pass
+                    
+                    # Track battle win for champion ornament (for the winner who didn't surrender)
+                    try:
+                        await track_team_battle_win(other.id, it.guild.id)
+                    except Exception:
+                        pass
+                    
+                    # Track winter battles for ice crystal ornament
+                    christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                    try:
+                        for cat in s.challenger_team + s.opponent_team:
+                            if cat.get('type') in christmas_cats:
+                                await track_winter_battle(other.id, it.guild.id)
+                                break
+                    except Exception:
+                        pass
+                    
                     try:
                         if s.channel.id in FIGHT_SESSIONS:
                             del FIGHT_SESSIONS[s.channel.id]
@@ -15188,10 +15279,23 @@ async def gift(
                     else:
                         cats_to_keep.append(cat)
                 
+                # Safety check: ensure we actually removed the requested amount
+                if removed_count < amount:
+                    await message.response.send_message(
+                        f"Error: Could only find {removed_count} available {cat_type} instances to gift (needed {amount}). " +
+                        f"Try running /syncats first or check for favorited/adventuring cats.",
+                        ephemeral=True
+                    )
+                    return
+                
                 await save_user_cats(message.guild.id, message.user.id, cats_to_keep)
                 
                 # Create instances for receiver
                 await _create_instances_only(message.guild.id, person_id, cat_type, amount)
+                
+                # Refresh profiles to ensure we have latest DB state before modifying counters
+                await user.refresh_from_db()
+                await reciever.refresh_from_db()
                 
                 # Also update DB counters for non-Christmas cats to keep them in sync
                 if cat_type not in christmas_cats:
