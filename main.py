@@ -9250,6 +9250,14 @@ async def news(message: discord.Interaction):
     embed = discord.Embed(title="KITTAYYYYYYY Times", description="Choose an article from the dropdown below.", color=Colors.brown)
     view = NewsView()
     await message.response.send_message(embed=embed, view=view)
+    
+    # Track battlepass quest for reading news
+    try:
+        profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+        await progress(message, profile, "news")
+    except Exception:
+        pass
+    
     try:
         await achemb(message, "news", "send")
     except Exception:

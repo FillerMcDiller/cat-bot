@@ -412,6 +412,10 @@ async def update_nice_score(user_id: int, guild_id: int, amount: int):
         profile.nice_list = True
     
     await profile.save()
+    
+    # Check for star ornament unlock at 10 nice score
+    if nice >= 10:
+        await track_nice_score(user_id, guild_id)
 
 # =============================================================================
 # CHRISTMAS TREE DECORATION SYSTEM
