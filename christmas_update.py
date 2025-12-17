@@ -335,10 +335,13 @@ async def advent_command(message: discord.Interaction):
     profile.advent_claimed = ",".join(str(d) for d in sorted(claimed_days))
     profile.advent_last_claim = int(time.time())
     
-    # Increase nice score
-    profile.nice_score = (profile.nice_score or 0) + 1
+    # Increase nice score for claiming advent
+    await update_nice_score(message.user.id, message.guild.id, 1)
     
     await profile.save()
+    
+    # Check for bell ornament (ornament #3) - claim 10 days
+    await track_advent_claim(message.user.id, message.guild.id)
     
     # Check for advent master achievement (all 25 days)
     if len(claimed_days) == 25:

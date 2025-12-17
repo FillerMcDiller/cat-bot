@@ -25,10 +25,10 @@ BACKUP_ID = 1436486865489236299
 WEBHOOK_VERIFY = os.getenv("WEBHOOK_VERIFY")  
 
 # top.gg api token to occasionally post stats
-TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN")
+TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfdCI6Ijc3NzAzNTk1ODYzNDEyNzM2MCIsImlkIjoiNzc0NTI1ODI2OTQzMDA0NjcyIiwiaWF0IjoxNzY1Nzc0NTE2fQ.REorlnG3pwpfYiJNPM0IzkPqDAFEdiUsFMza-8ZlMX4")
 
 # only post stats if server count is above this, to prevent wrong stats
-MIN_SERVER_SEND = 100_000
+MIN_SERVER_SEND = 0  # Changed from 100_000 to 0 to allow stats posting for all server counts
 
 # wordnik api key for /define command
 WORDNIK_API_KEY = None

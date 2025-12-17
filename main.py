@@ -1729,6 +1729,39 @@ async def bot_perform_attack(s, attacker_id: int, atk_cat: dict, defender_id: in
                     pass
                 return True
 
+        # Track that this player (bot) has moved
+        if not hasattr(s, 'moved_this_round'):
+            s.moved_this_round = set()
+        s.moved_this_round.add(attacker_id)
+        
+        # Check if both players have moved this round - auto-advance
+        if len(s.moved_this_round) >= 2:
+            s.round += 1
+            s.moved_this_round.clear()
+            
+            # Charge power +1 for both active cats
+            try:
+                cidx = s.active_idx[s.challenger.id]
+                caid = s.challenger_team[cidx].get('id')
+                s.power_by_cat[caid] = s.power_by_cat.get(caid, 0) + 1
+            except Exception:
+                pass
+            try:
+                oidx = s.active_idx[s.opponent.id]
+                obid = s.opponent_team[oidx].get('id')
+                s.power_by_cat[obid] = s.power_by_cat.get(obid, 0) + 1
+            except Exception:
+                pass
+            
+            s.last_action = f"🔄 Round {s.round} — Both fighters charged +1 power!"
+            
+            # Update the embed to show new round
+            try:
+                if s.message:
+                    await s.message.edit(embed=render_fight_embed(s))
+            except Exception:
+                pass
+
         return False
     except Exception:
         return False
@@ -2794,6 +2827,13 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                             await it.response.send_message("It's not your turn.", ephemeral=True)
                             return
 
+                        # Check if this player has already moved this turn
+                        if not hasattr(s, 'moved_this_round'):
+                            s.moved_this_round = set()
+                        if it.user.id in s.moved_this_round:
+                            await it.response.send_message("You've already attacked this round! Wait for your opponent.", ephemeral=True)
+                            return
+
                         # resolve active cat for this user
                         try:
                             if it.user.id == s.challenger.id:
@@ -2899,6 +2939,11 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                     await interaction2.response.send_message("Not enough power for that ability.", ephemeral=True)
                                     return
 
+                                # Check if this player has already moved this turn
+                                if attacker_id in s2.moved_this_round:
+                                    await interaction2.response.send_message("You've already attacked this round! Wait for your opponent.", ephemeral=True)
+                                    return
+                                
                                 # consume power
                                 if cost > 0:
                                     s2.power_by_cat[aid] = max(0, avail - cost)
@@ -3393,6 +3438,10 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                     self.turn = first_member.id
                     self.round = 1
                     self.power_by_cat = {}
+                    # Track who has moved this round for auto-advance
+                    self.moved_this_round = set()
+                    # Store last action for display
+                    self.last_action = None
                     self.message = None
 
             first = random.choice([executor, opponent])
@@ -3402,20 +3451,40 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
             # render embed (reuse render_fight_embed logic if available, otherwise inline)
             def render_fight_embed_local(s: SimpleFightSessionLocal) -> discord.Embed:
                 title = f"{s.challenger.display_name} vs {s.opponent.display_name}"
-                desc = f"Round: {s.round} — Turn: {s.challenger.display_name if s.turn == s.challenger.id else s.opponent.display_name}"
+                desc_lines = [f"**Round {s.round}** — Turn: **{s.challenger.display_name if s.turn == s.challenger.id else s.opponent.display_name}**"]
+                
+                # Add last action if any
+                if hasattr(s, 'last_action') and s.last_action:
+                    desc_lines.append(f"\n💥 {s.last_action}")
+                
+                desc = "\n".join(desc_lines)
                 embed = discord.Embed(title=title, description=desc, color=0x6E593C)
                 try:
                     cidx = s.active_idx[s.challenger.id]
                     a = s.challenger_team[cidx]
                     aid = a.get('id')
+                    atype = a.get('type')
                     apower = s.power_by_cat.get(aid, 0)
-                    embed.add_field(name=f"{s.challenger.display_name} — {a.get('name')}", value=f"HP: {a.get('hp')}\nPower: {apower}", inline=True)
+                    
+                    # Get weakness info
+                    astats = CAT_BATTLE_STATS.get(atype, {})
+                    aweak = astats.get('weakness', 'None')
+                    
+                    cat_info = f"**{atype} Cat**\nHP: {a.get('hp')}\nDMG: {a.get('dmg')}\nPower: {apower}\n⚠️ Weak to: {aweak}"
+                    embed.add_field(name=f"{s.challenger.display_name} — {a.get('name')}", value=cat_info, inline=True)
 
                     oidx = s.active_idx[s.opponent.id]
                     b = s.opponent_team[oidx]
                     bid = b.get('id')
+                    btype = b.get('type')
                     bpower = s.power_by_cat.get(bid, 0)
-                    embed.add_field(name=f"{s.opponent.display_name} — {b.get('name')}", value=f"HP: {b.get('hp')}\nPower: {bpower}", inline=True)
+                    
+                    # Get weakness info
+                    bstats = CAT_BATTLE_STATS.get(btype, {})
+                    bweak = bstats.get('weakness', 'None')
+                    
+                    cat_info2 = f"**{btype} Cat**\nHP: {b.get('hp')}\nDMG: {b.get('dmg')}\nPower: {bpower}\n⚠️ Weak to: {bweak}"
+                    embed.add_field(name=f"{s.opponent.display_name} — {b.get('name')}", value=cat_info2, inline=True)
                 except Exception:
                     pass
                 return embed
@@ -3541,6 +3610,13 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                             damage_mult = ability["damage_mult"]
                             requires_flip = ability.get("requires_flip", False)
 
+                            # Check if this player has already moved this turn
+                            if not hasattr(s2, 'moved_this_round'):
+                                s2.moved_this_round = set()
+                            if attacker_id in s2.moved_this_round:
+                                await interaction2.response.send_message("You've already attacked this round! Wait for your opponent.", ephemeral=True)
+                                return
+
                             avail = s2.power_by_cat.get(aid, 0)
                             if avail < cost:
                                 await interaction2.response.send_message("Not enough power for that ability.", ephemeral=True)
@@ -3622,9 +3698,15 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                 team = s2.opponent_team if defender_id == s2.opponent.id else s2.challenger_team
                                 if s2.active_idx[defender_id] >= len(team):
                                     try:
-                                        s2.last_action = f"{interaction2.user.display_name} wins the fight!"
+                                        winner_name = interaction2.user.display_name
+                                        s2.last_action = f"{winner_name} wins the fight!"
                                         if s2.message:
-                                            await s2.message.edit(content="Fight ended.", embed=None, view=None)
+                                            winner_embed = discord.Embed(
+                                                title="🏆 Battle Finished!",
+                                                description=f"**{winner_name}** wins the fight!",
+                                                color=0xFFD700
+                                            )
+                                            await s2.message.edit(content=None, embed=winner_embed, view=None)
                                     except Exception:
                                         pass
                                     
@@ -3740,120 +3822,6 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                         except Exception:
                             pass
 
-                @discord.ui.button(label="Next Round", style=discord.ButtonStyle.primary)
-                async def next_round(self, it: discord.Interaction, btn: discord.ui.Button):
-                    s = self.session
-                    # only the current turn player may use next round
-                    if it.user.id != s.turn:
-                        await it.response.send_message("It's not your turn.", ephemeral=True)
-                        return
-                    s.round += 1
-                    try:
-                        cidx = s.active_idx[s.challenger.id]
-                        aid = s.challenger_team[cidx].get('id')
-                        s.power_by_cat[aid] = s.power_by_cat.get(aid, 0) + 1
-                    except Exception:
-                        pass
-                    try:
-                        oidx = s.active_idx[s.opponent.id]
-                        bid = s.opponent_team[oidx].get('id')
-                        s.power_by_cat[bid] = s.power_by_cat.get(bid, 0) + 1
-                    except Exception:
-                        pass
-                    
-                    # Update buttons after charging
-                    if hasattr(self, 'update_buttons'):
-                        self.update_buttons()
-                    
-                    new_emb = render_fight_embed_local(s)
-                    try:
-                        await s.message.edit(embed=new_emb, view=self)
-                        await it.response.defer()
-                    except Exception:
-                        try:
-                            await it.response.send_message("Failed to update fight state.", ephemeral=True)
-                        except Exception:
-                            pass
-                    
-                    # If it's the bot's turn after charging, bot acts with smart AI
-                    if s.turn == bot.user.id:
-                        async def bot_next_round_task():
-                            await asyncio.sleep(2)
-                            try:
-                                bot_idx = s.active_idx.get(bot.user.id, 0)
-                                bot_cat = s.opponent_team[bot_idx]
-                                bot_cat_id = bot_cat.get('id')
-                                bot_type = bot_cat.get('type')
-                                bpower = s.power_by_cat.get(bot_cat_id, 0)
-                                
-                                player_idx = s.active_idx.get(s.challenger.id, 0)
-                                player_cat = s.challenger_team[player_idx]
-                                player_type = player_cat.get('type')
-                                target_hp = player_cat.get('hp', 0)
-                                bot_dmg = bot_cat.get('dmg', 1)
-                                
-                                # Get bot abilities
-                                bot_stats = CAT_BATTLE_STATS.get(bot_type, {})
-                                abilities = bot_stats.get("abilities", [])
-                                
-                                if not abilities:
-                                    return
-                                
-                                # Check weakness
-                                player_stats = CAT_BATTLE_STATS.get(player_type, {})
-                                player_weakness = player_stats.get("weakness")
-                                has_advantage = (player_weakness == bot_type)
-                                weakness_mult = 1.25 if has_advantage else 1.0
-                                
-                                # Find best ability
-                                affordable = []
-                                for idx, ability in enumerate(abilities):
-                                    cost = ability["power_cost"]
-                                    if cost <= bpower and not ability.get("requires_flip", False):
-                                        dmg_est = int(bot_dmg * ability["damage_mult"] * weakness_mult)
-                                        affordable.append({
-                                            "idx": idx,
-                                            "cost": cost,
-                                            "name": ability["name"],
-                                            "dmg": dmg_est,
-                                            "can_ko": dmg_est >= target_hp
-                                        })
-                                
-                                if not affordable:
-                                    affordable = [{
-                                        "idx": 0,
-                                        "cost": abilities[0]["power_cost"],
-                                        "name": abilities[0]["name"],
-                                        "dmg": int(bot_dmg * abilities[0]["damage_mult"] * weakness_mult),
-                                        "can_ko": False
-                                    }]
-                                
-                                # Choose
-                                ko_opts = [ab for ab in affordable if ab["can_ko"]]
-                                if ko_opts:
-                                    chosen = min(ko_opts, key=lambda x: x["cost"])
-                                else:
-                                    chosen = max(affordable, key=lambda x: x["dmg"])
-                                
-                                finished = await bot_perform_attack(s, bot.user.id, bot_cat, s.challenger.id, player_cat, chosen["idx"], chosen["name"], bot.user.display_name)
-                                if finished:
-                                    return
-                                
-                                # Return turn to player
-                                s.turn = s.challenger.id
-                                if hasattr(self, 'update_buttons'):
-                                    self.update_buttons()
-                                try:
-                                    new_emb2 = render_fight_embed_local(s)
-                                    await s.message.edit(embed=new_emb2, view=self)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                        
-                        asyncio.create_task(bot_next_round_task())
-                        pass
-
                 @discord.ui.button(label="Surrender", style=discord.ButtonStyle.danger)
                 async def surrender(self, it: discord.Interaction, btn: discord.ui.Button):
                     s = self.session
@@ -3897,10 +3865,10 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
 
             view2 = BattleControlViewLocal(sess)
             emb = render_fight_embed_local(sess)
-            await interaction.response.send_message(f"{opponent.display_name} (the bot) accepted the challenge! Coin flip: {first.display_name} goes first!", embed=emb, view=view2)
-            # Fetch the message object to store in session
+            sent = await interaction.channel.send(f"{opponent.display_name} (the bot) accepted the challenge! Coin flip: {first.display_name} goes first!", embed=emb, view=view2)
+            # Store the message object in session
             try:
-                sess.message = await interaction.original_response()
+                sess.message = sent
                 # schedule bot action if it goes first with smart AI
                 if sess.turn == bot.user.id:
                     async def bot_first_turn():
@@ -8377,21 +8345,24 @@ async def on_message(message: discord.Message):
 
                         # Build the catch message
                         catch_message = coughstring.replace("{username}", message.author.name.replace("_", "\\_"))
-                        catch_message = catch_message.replace("{emoji}", str(icon))
-                        catch_message = catch_message.replace("{type}", le_emoji)
-                        catch_message = catch_message.replace("{count}", f"{new_count:,}")
-                        catch_message = catch_message.replace("{time}", caught_time[:-1])
                         
-                        # Add modifier indicators if applicable
+                        # Add modifier indicators if applicable (before setting emoji/type)
+                        modifier_emojis = []
                         if modifiers_to_apply:
-                            modifier_emojis = []
                             for mod in modifiers_to_apply:
                                 if mod in CAT_MODIFIERS and "emoji" in CAT_MODIFIERS[mod]:
                                     modifier_emojis.append(CAT_MODIFIERS[mod]["emoji"])
-                            if modifier_emojis:
-                                modifiers_text = " " + " ".join(modifier_emojis)
-                                catch_message = catch_message.replace(message.author.name.replace("_", "\\_"), 
-                                                                      f"{message.author.name.replace('_', '\\_')}{modifiers_text}", 1)
+                        
+                        # Replace emoji with emoji + modifiers
+                        if modifier_emojis:
+                            modifiers_text = " ".join(modifier_emojis) + " "
+                            catch_message = catch_message.replace("{emoji}", f"{modifiers_text}{str(icon)}")
+                        else:
+                            catch_message = catch_message.replace("{emoji}", str(icon))
+                        
+                        catch_message = catch_message.replace("{type}", le_emoji)
+                        catch_message = catch_message.replace("{count}", f"{new_count:,}")
+                        catch_message = catch_message.replace("{time}", caught_time[:-1])
                         
                         catch_message += suffix_string
                         
@@ -12120,20 +12091,26 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
                         cat_type = random.choice(christmas_cats)
                         
-                        # Get the profile for spawning
-                        spawn_profile = await Profile.get_or_create(guild_id=parent_inter.guild.id, user_id=parent_inter.user.id)
-                        
-                        # Determine modifiers
+                        # Determine modifiers based on luck level
                         modifiers = []
                         if christmas_luck >= 3:
-                            modifiers = ["snowy"]
+                            # High luck - may have modifiers
+                            if random.random() < 0.5:  # 50% chance for modifier
+                                modifiers = [random.choice(["snowy", "enchanted"])]
                         
-                        # Spawn the cat instance with modifiers
-                        await auto_sync_cat_instances(spawn_profile, cat_type=cat_type, modifiers=modifiers)
+                        # Create the cat instance directly
+                        await _create_instances_only(parent_inter.guild.id, parent_inter.user.id, cat_type, 1, modifiers=modifiers)
+                        
+                        # Track festive catch for ornament #1
+                        try:
+                            await track_festive_catch(parent_inter.user.id, parent_inter.guild.id, 1)
+                        except Exception:
+                            pass
                         
                         # Send confirmation message
                         if modifiers:
-                            await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! ❄️ It's snowy!", ephemeral=True)
+                            modifier_text = "❄️ It's snowy!" if "snowy" in modifiers else "✨ It's enchanted!"
+                            await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat! {modifier_text}", ephemeral=True)
                         else:
                             await sel_inter.followup.send(f"🎄 Used {SHOP_ITEMS[key_local]['title']} {tier_local}: Spawned a **{cat_type}** cat!", ephemeral=True)
                         return
@@ -13720,57 +13697,65 @@ class PacksView(discord.ui.View):
         await self.user.refresh_from_db()
 
         pack_results = []
-        reward_summary = []
+        reward_summary = {}  # Use dict to aggregate cats by type
         all_items = {}  # Batch all item updates
         total_kibble = 0
         festive_packs_opened = 0
+        total_upgrades = 0
         
         for pack in pack_data:
             pack_name = pack['name'].lower()
             pack_count = self.user[f"pack_{pack_name}"]
             if pack_count > 0:
                 level = next((i for i, p in enumerate(pack_data) if p["name"].lower() == pack_name), 0)
-                chosen_type, cat_amount, upgrades, _, kibble, item_reward = await self.get_pack_rewards(level, is_single=False)
+                
                 # Special case for Festive pack emoji
                 if pack_name == "festive":
                     pack_results.append(f"{get_emoji('festivepack')} {pack_count}x")
                 else:
                     pack_results.append(f"{get_emoji(pack_name + 'pack')} {pack_count}x")
                 
-                # Add to reward summary
-                cat_emoji = get_emoji(chosen_type.lower() + "cat")
-                total_cats = cat_amount * pack_count
-                reward_summary.append(f"{cat_emoji} {total_cats:,} {chosen_type}")
-                
-                # Check if it's a Christmas cat (needs to be created as instances instead of incrementing a field)
-                christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                if chosen_type in christmas_cats:
-                    # Create instances for Christmas cats
-                    await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, total_cats)
-                    try:
-                        await track_festive_catch(self.user.user_id, self.user.guild_id, total_cats)
-                    except Exception:
-                        pass
-                else:
-                    # Regular cats increment the field
-                    self.user[f"cat_{chosen_type}"] += total_cats
+                # Roll EACH pack separately to get different cats
+                for _ in range(pack_count):
+                    chosen_type, cat_amount, upgrades, _, kibble, item_reward = await self.get_pack_rewards(level, is_single=False)
                     
-                self.user.pack_upgrades += upgrades
+                    # Aggregate cats by type
+                    if chosen_type not in reward_summary:
+                        reward_summary[chosen_type] = 0
+                    reward_summary[chosen_type] += cat_amount
+                    
+                    total_upgrades += upgrades
+                    
+                    if kibble:
+                        self.user.kibble += kibble
+                        total_kibble += kibble
+                    
+                    # Batch item rewards (don't save yet, just accumulate)
+                    if item_reward:
+                        item_name = item_reward["name"]
+                        item_tier = item_reward["tier"]
+                        all_items.setdefault(item_name, {})[item_tier] = all_items.get(item_name, {}).get(item_tier, 0) + 1
+                
+                # Update pack counts and stats
+                self.user.pack_upgrades += total_upgrades
                 self.user.packs_opened += pack_count
                 self.user[f"pack_{pack_name}"] = 0
                 if pack_name == "festive":
                     festive_packs_opened += pack_count
-                if kibble:
-                    # multiplied by count of packs processed
-                    kibble_total = kibble * pack_count
-                    self.user.kibble += kibble_total
-                    total_kibble += kibble_total
-                
-                # Batch item rewards (don't save yet, just accumulate)
-                if item_reward:
-                    item_name = item_reward["name"]
-                    item_tier = item_reward["tier"]
-                    all_items.setdefault(item_name, {})[item_tier] = all_items.get(item_name, {}).get(item_tier, 0) + pack_count
+        
+        # Create cats based on aggregated results
+        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+        for cat_type, total_cats in reward_summary.items():
+            if cat_type in christmas_cats:
+                # Create instances for Christmas cats
+                await _create_instances_only(self.user.guild_id, self.user.user_id, cat_type, total_cats)
+                try:
+                    await track_festive_catch(self.user.user_id, self.user.guild_id, total_cats)
+                except Exception:
+                    pass
+            else:
+                # Regular cats increment the field
+                self.user[f"cat_{cat_type}"] += total_cats
 
         # Save user data once
         await self.user.save()
@@ -13796,7 +13781,13 @@ class PacksView(discord.ui.View):
         # Build description with pack counts and rewards
         description = f"**Opened:**\n" + "\n".join(pack_results)
         if reward_summary:
-            description += f"\n\n**Received:**\n" + "\n".join(reward_summary)
+            # Sort by cat type for consistent display
+            summary_lines = []
+            for cat_type in sorted(reward_summary.keys()):
+                total_cats = reward_summary[cat_type]
+                cat_emoji = get_emoji(cat_type.lower() + "cat")
+                summary_lines.append(f"{cat_emoji} {total_cats:,} {cat_type}")
+            description += f"\n\n**Received:**\n" + "\n".join(summary_lines)
         
         # Add items to display
         if all_items:
@@ -14273,7 +14264,8 @@ async def packs(message: discord.Interaction):
                 festive_packs_opened += this_packs_count
             
             results_header.append(f"{this_packs_count:,}x {get_emoji(pack.lower() + 'pack')}")
-            for _ in range(this_packs_count):
+            for pack_num in range(this_packs_count):
+                # Call get_pack_rewards separately for EACH pack to get different cats
                 chosen_type, cat_amount, upgrades, rewards, kibble = get_pack_rewards(level, is_single=False, guild_id=message.guild.id, user_id=message.user.id)
                 total_upgrades += upgrades
                 if not display_cats:
