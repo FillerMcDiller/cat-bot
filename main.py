@@ -9127,9 +9127,9 @@ async def news(message: discord.Interaction):
             embed = discord.Embed(title=f"{art['emoji']} {art['title']}", description=art['body'], color=Colors.brown)
             embed.set_footer(text=f"Article {idx + 1}/{len(news_list)}")
             
-            # Check if article has a reward
-            if art.get("reward"):
-                reward = art["reward"]
+            # Check if article has a reward (single or multiple)
+            rewards = art.get("rewards") or ([art["reward"]] if art.get("reward") else [])
+            if rewards:
                 # Check if user already claimed this reward
                 reward_key = f"news_{idx}"
                 profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
@@ -9139,15 +9139,17 @@ async def news(message: discord.Interaction):
                 except (AttributeError, KeyError):
                     claimed_list = []
                 
+                reward_text = "\n".join([r["name"] for r in rewards])
                 if reward_key in claimed_list:
-                    embed.add_field(name="📦 Reward", value=f"~~{reward['name']}~~ (Already claimed)", inline=False)
+                    embed.add_field(name="📦 Rewards", value=f"~~{reward_text}~~ (Already claimed)", inline=False)
                 else:
-                    embed.add_field(name="📦 Reward", value=f"**{reward['name']}** - Click button below to claim!", inline=False)
+                    embed.add_field(name="📦 Rewards", value=f"**{reward_text}** - Click button below to claim!", inline=False)
             
             # Create new view with claim button if reward exists and not claimed
             new_view = NewsView()
             new_view.current_article_idx = idx
-            if art.get("reward"):
+            rewards = art.get("rewards") or ([art["reward"]] if art.get("reward") else [])
+            if rewards:
                 reward_key = f"news_{idx}"
                 profile = await Profile.get_or_create(guild_id=interaction2.guild.id, user_id=interaction2.user.id)
                 try:
@@ -9158,7 +9160,8 @@ async def news(message: discord.Interaction):
                 
                 if reward_key not in claimed_list:
                     # Add claim button
-                    claim_btn = discord.ui.Button(label=f"Claim {art['reward']['name']}", style=discord.ButtonStyle.green, emoji="🎁")
+                    claim_label = "Claim Rewards" if len(rewards) > 1 else f"Claim {rewards[0]['name']}"
+                    claim_btn = discord.ui.Button(label=claim_label, style=discord.ButtonStyle.green, emoji="🎁")
                     
                     async def claim_callback(btn_interaction: discord.Interaction):
                         await self.claim_reward(btn_interaction, idx)
@@ -9177,9 +9180,9 @@ async def news(message: discord.Interaction):
         async def claim_reward(self, interaction: discord.Interaction, article_idx: int):
             """Handle reward claiming for a news article"""
             art = news_list[article_idx]
-            reward = art.get("reward")
+            rewards = art.get("rewards") or ([art["reward"]] if art.get("reward") else [])
             
-            if not reward:
+            if not rewards:
                 await interaction.response.send_message("❌ This article has no reward!", ephemeral=True)
                 return
             
@@ -9196,27 +9199,30 @@ async def news(message: discord.Interaction):
                 await interaction.response.send_message("❌ You've already claimed this reward!", ephemeral=True)
                 return
             
-            # Give the reward
-            reward_text = ""
+            # Give the rewards
+            reward_texts = []
             try:
-                if reward["type"] == "kibble":
-                    profile.kibble = (profile.kibble or 0) + reward["amount"]
-                    reward_text = f"🪙 {reward['amount']} Kibble"
-                elif reward["type"] == "pack":
-                    pack_name = reward.get("pack_name", "Wooden").lower()
-                    profile[f"pack_{pack_name}"] += reward["amount"]
-                    reward_text = f"📦 {reward['amount']}x {reward.get('pack_name', 'Wooden')} Pack"
-                elif reward["type"] == "cat":
-                    cat_type = reward.get("cat_type", "Fine")
-                    profile[f"cat_{cat_type}"] += reward["amount"]
-                    await auto_sync_cat_instances(profile, cat_type)
-                    reward_text = f"🐱 {reward['amount']}x {cat_type} Cat"
-                elif reward["type"] == "xp":
-                    profile.progress = (profile.progress or 0) + reward["amount"]
-                    reward_text = f"✨ {reward['amount']} Battlepass XP"
-                elif reward["type"] == "rain":
-                    profile.rain_minutes = (profile.rain_minutes or 0) + reward["amount"]
-                    reward_text = f"🌧️ {reward['amount']} Rain Minutes"
+                for reward in rewards:
+                    if reward["type"] == "kibble":
+                        profile.kibble = (profile.kibble or 0) + reward["amount"]
+                        reward_texts.append(f"🪙 {reward['amount']} Kibble")
+                    elif reward["type"] == "pack":
+                        pack_name = reward.get("pack_name", "Wooden").lower()
+                        profile[f"pack_{pack_name}"] += reward["amount"]
+                        reward_texts.append(f"📦 {reward['amount']}x {reward.get('pack_name', 'Wooden')} Pack")
+                    elif reward["type"] == "cat":
+                        cat_type = reward.get("cat_type", "Fine")
+                        profile[f"cat_{cat_type}"] += reward["amount"]
+                        await auto_sync_cat_instances(profile, cat_type)
+                        reward_texts.append(f"🐱 {reward['amount']}x {cat_type} Cat")
+                    elif reward["type"] == "xp":
+                        profile.progress = (profile.progress or 0) + reward["amount"]
+                        reward_texts.append(f"✨ {reward['amount']} Battlepass XP")
+                    elif reward["type"] == "rain":
+                        profile.rain_minutes = (profile.rain_minutes or 0) + reward["amount"]
+                        reward_texts.append(f"🌧️ {reward['amount']} Rain Minutes")
+                
+                reward_text = "\n".join(reward_texts)
                 
                 # Mark as claimed
                 claimed_list.append(reward_key)
@@ -9235,7 +9241,8 @@ async def news(message: discord.Interaction):
                 art = news_list[article_idx]
                 main_embed = discord.Embed(title=f"{art['emoji']} {art['title']}", description=art['body'], color=Colors.brown)
                 main_embed.set_footer(text=f"Article {article_idx + 1}/{len(news_list)}")
-                main_embed.add_field(name="📦 Reward", value=f"~~{reward['name']}~~ (Claimed by you!)", inline=False)
+                reward_names = "\n".join([r["name"] for r in rewards])
+                main_embed.add_field(name="📦 Rewards", value=f"~~{reward_names}~~ (Claimed by you!)", inline=False)
                 
                 # Remove claim button
                 new_view = NewsView()
