@@ -9073,6 +9073,37 @@ async def news(message: discord.Interaction):
                 "name": "1 Festive Pack"
             }
        },
+          {
+            "title": "horrible tragedy strikes kittay",
+            "emoji": "💔",
+            "desc": "chrimas",
+            "body": (
+                "sadly, i must bestow some unfortunate news upon you all\n"
+                "As you may have known, the bot has been down for the past couple days after an accident with the computer.\n"
+                "unfortunately, the hard drive failed and some data was lost. While I was able to preserve some of the system and the bot itself, your data is gone.\n"
+                "I am extremely sorry for this, I understand how frustrating this is, and I understand if you would not like to continue using the bot after this.\n"
+                "I am working towards moving the data to a cloud system and/or a better server to prevent this from happening again.\n"
+                "While I cannot restore your lost data, please think of it as a fresh start, and as a token of apology, please claim some packs below to help you get started again.\n"
+                "Merry Christmas and Happy Holidays to you all, and again, I am very sorry for this tragedy.\n"
+                
+                "\n"
+                "**Filler <3**"
+            ),
+            "rewards": [
+                {
+                    "type": "pack",
+                    "amount": 60,
+                    "pack_name": "Platinum",
+                    "name": "60 Platinum Packs"
+                },
+                {
+                    "type": "pack",
+                    "amount": 40,
+                    "pack_name": "Festive",
+                    "name": "40 Festive Packs"
+                }
+            ]
+       },
     ]
 
     class NewsView(View):
