@@ -53,15 +53,16 @@ from cat_modifiers import add_modifier, get_cat_display_name, apply_stat_multipl
 from catpg import RawSQL
 from database import Adventure, Channel, Deck, Item, Prism, Profile, Reminder, User
 from dotenv import load_dotenv
-from christmas_update import (
-    CHRISTMAS_COSMETICS, CHRISTMAS_ACHIEVEMENTS, TREE_ACHIEVEMENT,
-    ADVENT_REWARDS, TREE_ORNAMENTS, advent_command, tree_view_command,
-    tree_ornament_info_command, update_naughty_score, update_nice_score,
-    check_tree_ornament_unlock, get_tree_boosts,
-    track_festive_catch, track_gift_given, track_advent_claim,
-    increment_festive_pack_progress, track_nice_score, track_cosmetic_unlock,
-    track_winter_battle, track_team_battle_win
-)
+# Christmas features disabled until next year
+# from christmas_update import (
+#     CHRISTMAS_COSMETICS, CHRISTMAS_ACHIEVEMENTS, TREE_ACHIEVEMENT,
+#     ADVENT_REWARDS, TREE_ORNAMENTS, advent_command, tree_view_command,
+#     tree_ornament_info_command, update_naughty_score, update_nice_score,
+#     check_tree_ornament_unlock, get_tree_boosts,
+#     track_festive_catch, track_gift_given, track_advent_claim,
+#     increment_festive_pack_progress, track_nice_score, track_cosmetic_unlock,
+#     track_winter_battle, track_team_battle_win
+# )
 
 import time
 
@@ -87,15 +88,16 @@ COSMETICS_FILE = os.path.join(BASE_PATH, "data", "cosmetics.json")
 with open(COSMETICS_FILE, "r", encoding="utf-8") as f:
     COSMETICS_DATA = json.load(f)
 
+# Christmas features disabled until next year
 # Merge Christmas cosmetics into main cosmetics data
-for category in CHRISTMAS_COSMETICS:
-    if category not in COSMETICS_DATA:
-        COSMETICS_DATA[category] = {}
-    COSMETICS_DATA[category].update(CHRISTMAS_COSMETICS[category])
+# for category in CHRISTMAS_COSMETICS:
+#     if category not in COSMETICS_DATA:
+#         COSMETICS_DATA[category] = {}
+#     COSMETICS_DATA[category].update(CHRISTMAS_COSMETICS[category])
 
 # Merge Christmas achievements into main achievements data
-aches_data.update(CHRISTMAS_ACHIEVEMENTS)
-aches_data.update(TREE_ACHIEVEMENT)
+# aches_data.update(CHRISTMAS_ACHIEVEMENTS)
+# aches_data.update(TREE_ACHIEVEMENT)
 
 # Now you can use aches_data and battlepass_data anywhere in your bot
 print("Aches loaded:", len(aches_data))
@@ -439,43 +441,43 @@ CAT_BATTLE_STATS = {
             {"name": "Homer's Revenge", "power_cost": 3, "damage_mult": 3.2, "requires_flip": True, "desc": "50% chance for D'oh! damage"}
         ]
     },
-    # Christmas Cats
-    "Santa": {
-        "hp": 72, "dmg": 19,
-        "weakness": "Baby",
-        "abilities": [
-            {"name": "Ho Ho Ho", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Jolly laugh"},
-            {"name": "Gift Strike", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Present-powered attack"},
-            {"name": "Santa's Blessing", "power_cost": 4, "damage_mult": 2.4, "requires_flip": False, "desc": "Holiday magic strike"}
-        ]
-    },
-    "Elf": {
-        "hp": 70, "dmg": 18,
-        "weakness": "Rickroll",
-        "abilities": [
-            {"name": "Elf Kick", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Quick elf attack"},
-            {"name": "Workshop Tactics", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Strategic strike"},
-            {"name": "Magic Hammer", "power_cost": 3, "damage_mult": 2.5, "requires_flip": False, "desc": "Enchanted blow"}
-        ]
-    },
-    "Snowman": {
-        "hp": 68, "dmg": 16,
-        "weakness": "Fire",
-        "abilities": [
-            {"name": "Snowball", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Icy projectile"},
-            {"name": "Blizzard", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Cold storm"},
-            {"name": "Frostbite", "power_cost": 3, "damage_mult": 2.3, "requires_flip": True, "desc": "50% chance for freezing damage"}
-        ]
-    },
-    "ChristmasTree": {
-        "hp": 75, "dmg": 20,
-        "weakness": "Water",
-        "abilities": [
-            {"name": "Branch Swat", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Branch strike"},
-            {"name": "Ornament Barrage", "power_cost": 2, "damage_mult": 1.9, "requires_flip": False, "desc": "Festive projectiles"},
-            {"name": "Star Burst", "power_cost": 4, "damage_mult": 2.6, "requires_flip": False, "desc": "Radiant explosion"}
-        ]
-    },
+    # Christmas Cats (disabled until next year)
+    # "Santa": {
+    #     "hp": 72, "dmg": 19,
+    #     "weakness": "Baby",
+    #     "abilities": [
+    #         {"name": "Ho Ho Ho", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Jolly laugh"},
+    #         {"name": "Gift Strike", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Present-powered attack"},
+    #         {"name": "Santa's Blessing", "power_cost": 4, "damage_mult": 2.4, "requires_flip": False, "desc": "Holiday magic strike"}
+    #     ]
+    # },
+    # "Elf": {
+    #     "hp": 70, "dmg": 18,
+    #     "weakness": "Rickroll",
+    #     "abilities": [
+    #         {"name": "Elf Kick", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Quick elf attack"},
+    #         {"name": "Workshop Tactics", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Strategic strike"},
+    #         {"name": "Magic Hammer", "power_cost": 3, "damage_mult": 2.5, "requires_flip": False, "desc": "Enchanted blow"}
+    #     ]
+    # },
+    # "Snowman": {
+    #     "hp": 68, "dmg": 16,
+    #     "weakness": "Fire",
+    #     "abilities": [
+    #         {"name": "Snowball", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Icy projectile"},
+    #         {"name": "Blizzard", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Cold storm"},
+    #         {"name": "Frostbite", "power_cost": 3, "damage_mult": 2.3, "requires_flip": True, "desc": "50% chance for freezing damage"}
+    #     ]
+    # },
+    # "ChristmasTree": {
+    #     "hp": 75, "dmg": 20,
+    #     "weakness": "Water",
+    #     "abilities": [
+    #         {"name": "Branch Swat", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Branch strike"},
+    #         {"name": "Ornament Barrage", "power_cost": 2, "damage_mult": 1.9, "requires_flip": False, "desc": "Festive projectiles"},
+    #         {"name": "Star Burst", "power_cost": 4, "damage_mult": 2.6, "requires_flip": False, "desc": "Radiant explosion"}
+    #     ]
+    # },
     "Gingerbread": {
         "hp": 65, "dmg": 14,
         "weakness": "Chef",
@@ -518,15 +520,15 @@ ITEM_PRICES = {
     # Food
     "dogtreat": {"I": 120},
     "pancakes": {"I": 5000},
-    # Christmas items
-    "candy_cane": {"I": 150},
-    "gingerbread": {"I": 180},
-    "hot_cocoa": {"I": 200},
-    "present": {"I": 250},
-    "ornament": {"I": 180},
-    "festive_toy": {"I": 200, "II": 500},
-    "snowglobe": {"I": 220},
-    "christmas_spawn": {"I": 500, "II": 1200, "III": 3000},
+    # Christmas items (disabled until next year)
+    # "candy_cane": {"I": 150},
+    # "gingerbread": {"I": 180},
+    # "hot_cocoa": {"I": 200},
+    # "present": {"I": 250},
+    # "ornament": {"I": 180},
+    # "festive_toy": {"I": 200, "II": 500},
+    # "snowglobe": {"I": 220},
+    # "christmas_spawn": {"I": 500, "II": 1200, "III": 3000},
 }
 
 # Human-readable item definitions
@@ -596,39 +598,40 @@ SHOP_ITEMS = {
             "I": {"desc": "Warm & cozy — +30 bond (one-time)", "bond": 30},
         },
     },
-    "present": {
-        "title": "🎁 Wrapped Present",
-        "tiers": {
-            "I": {"desc": "Mystery gift — random 15-50 bond (one-time)", "bond": 30},
-        },
-    },
-    "ornament": {
-        "title": "⛄ Christmas Ornament",
-        "tiers": {
-            "I": {"desc": "Pretty ornament — +10 bond per use (8 uses)", "uses": 8, "bond": 10},
-        },
-    },
-    "festive_toy": {
-        "title": "🎄 Festive Toy",
-        "tiers": {
-            "I": {"desc": "Holiday toy — +12 bond per use (6 uses)", "uses": 6, "bond": 12},
-            "II": {"desc": "Premium Holiday Toy — +18 bond per use (6 uses)", "uses": 6, "bond": 18},
-        },
-    },
-    "snowglobe": {
-        "title": "❄️ Snow Globe",
-        "tiers": {
-            "I": {"desc": "Magical snow globe — +15 bond per use (10 uses)", "uses": 10, "bond": 15},
-        },
-    },
-    "christmas_spawn": {
-        "title": "🎄 Christmas Cat Spawner",
-        "tiers": {
-            "I": {"desc": "Spawns a random Christmas cat (low luck)", "christmas_luck": 1},
-            "II": {"desc": "Spawns a random Christmas cat (medium luck)", "christmas_luck": 2},
-            "III": {"desc": "Spawns a random Christmas cat (high luck - may have modifiers)", "christmas_luck": 3},
-        },
-    },
+    # Christmas items (disabled until next year)
+    # "present": {
+    #     "title": "🎁 Wrapped Present",
+    #     "tiers": {
+    #         "I": {"desc": "Mystery gift — random 15-50 bond (one-time)", "bond": 30},
+    #     },
+    # },
+    # "ornament": {
+    #     "title": "⛄ Christmas Ornament",
+    #     "tiers": {
+    #         "I": {"desc": "Pretty ornament — +10 bond per use (8 uses)", "uses": 8, "bond": 10},
+    #     },
+    # },
+    # "festive_toy": {
+    #     "title": "🎄 Festive Toy",
+    #     "tiers": {
+    #         "I": {"desc": "Holiday toy — +12 bond per use (6 uses)", "uses": 6, "bond": 12},
+    #         "II": {"desc": "Premium Holiday Toy — +18 bond per use (6 uses)", "uses": 6, "bond": 18},
+    #     },
+    # },
+    # "snowglobe": {
+    #     "title": "❄️ Snow Globe",
+    #     "tiers": {
+    #         "I": {"desc": "Magical snow globe — +15 bond per use (10 uses)", "uses": 10, "bond": 15},
+    #     },
+    # },
+    # "christmas_spawn": {
+    #     "title": "🎄 Christmas Cat Spawner",
+    #     "tiers": {
+    #         "I": {"desc": "Spawns a random Christmas cat (low luck)", "christmas_luck": 1},
+    #         "II": {"desc": "Spawns a random Christmas cat (medium luck)", "christmas_luck": 2},
+    #         "III": {"desc": "Spawns a random Christmas cat (high luck - may have modifiers)", "christmas_luck": 3},
+    #     },
+    # },
 }
 
 # In-memory temporary buffs applied by using potions. Keyed by string "{guild}_{user}".
@@ -1413,10 +1416,12 @@ async def auto_sync_cat_instances(profile: Profile, cat_type: str = None, enchan
                 modifiers_text = f" ({', '.join(modifiers)})" if modifiers else ""
                 print(f"[AUTO-SYNC] Created 1x {ct} instance{modifiers_text} for user {user_id} (guild {guild_id})", flush=True)
                 if cat_type is not None:
-                    try:
-                        await track_festive_catch(user_id, guild_id)
-                    except Exception:
-                        pass
+                    # Christmas tracking disabled
+                    # try:
+                    #     await track_festive_catch(user_id, guild_id)
+                    # except Exception:
+                    #     pass
+                    pass
         else:
             # For regular cats, check DB count vs instances
             try:
@@ -1701,26 +1706,27 @@ async def bot_perform_attack(s, attacker_id: int, atk_cat: dict, defender_id: in
                 except Exception:
                     pass
                 
+                # Christmas tracking disabled
                 # Track battle win for champion ornament (for the attacker who won)
-                try:
-                    # Get guild_id from the session context
-                    guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
-                    if guild_id:
-                        await track_team_battle_win(attacker_id, guild_id)
-                except Exception:
-                    pass
+                # try:
+                #     # Get guild_id from the session context
+                #     guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
+                #     if guild_id:
+                #         await track_team_battle_win(attacker_id, guild_id)
+                # except Exception:
+                #     pass
                 
                 # Track winter battles for ice crystal ornament
-                christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                try:
-                    guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
-                    if guild_id:
-                        for cat in s.challenger_team + s.opponent_team:
-                            if cat.get('type') in christmas_cats:
-                                await track_winter_battle(attacker_id, guild_id)
-                                break
-                except Exception:
-                    pass
+                # christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                # try:
+                #     guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
+                #     if guild_id:
+                #         for cat in s.challenger_team + s.opponent_team:
+                #             if cat.get('type') in christmas_cats:
+                #                 await track_winter_battle(attacker_id, guild_id)
+                #                 break
+                # except Exception:
+                #     pass
                 
                 try:
                     if s.channel.id in FIGHT_SESSIONS:
@@ -3043,20 +3049,21 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                         except Exception:
                                             pass
                                         
+                                        # Christmas tracking disabled
                                         # Track battle win for champion ornament
-                                        try:
-                                            await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
-                                        except Exception:
-                                            pass
+                                        # try:
+                                        #     await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
+                                        # except Exception:
+                                        #     pass
                                         
                                         # Track winter battles for ice crystal ornament
-                                        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                                        try:
-                                            # Check if any cats in the battle were winter/Christmas themed
-                                            for cat in s2.challenger_team + s2.opponent_team:
-                                                if cat.get('type') in christmas_cats:
-                                                    await track_winter_battle(interaction2.user.id, interaction2.guild.id)
-                                                    break
+                                        # christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                                        # try:
+                                        #     # Check if any cats in the battle were winter/Christmas themed
+                                        #     for cat in s2.challenger_team + s2.opponent_team:
+                                        #         if cat.get('type') in christmas_cats:
+                                        #             await track_winter_battle(interaction2.user.id, interaction2.guild.id)
+                                        #             break
                                         except Exception:
                                             pass
                                         
@@ -3263,20 +3270,21 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                         except Exception:
                             pass
                         
+                        # Christmas tracking disabled
                         # Track battle win for champion ornament (for the winner who didn't surrender)
-                        try:
-                            await track_team_battle_win(other.id, it.guild.id)
-                        except Exception:
-                            pass
+                        # try:
+                        #     await track_team_battle_win(other.id, it.guild.id)
+                        # except Exception:
+                        #     pass
                         
                         # Track winter battles for ice crystal ornament
-                        christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                        try:
-                            for cat in s.challenger_team + s.opponent_team:
-                                if cat.get('type') in christmas_cats:
-                                    await track_winter_battle(other.id, it.guild.id)
-                                    break
-                        except Exception:
+                        # christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                        # try:
+                        #     for cat in s.challenger_team + s.opponent_team:
+                        #         if cat.get('type') in christmas_cats:
+                        #             await track_winter_battle(other.id, it.guild.id)
+                        #             break
+                        # except Exception:
                             pass
                         
                         # cleanup
@@ -3710,21 +3718,22 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                                     except Exception:
                                         pass
                                     
+                                    # Christmas tracking disabled
                                     # Track battle win for champion ornament
-                                    try:
-                                        await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
-                                    except Exception:
-                                        pass
+                                    # try:
+                                    #     await track_team_battle_win(interaction2.user.id, interaction2.guild.id)
+                                    # except Exception:
+                                    #     pass
                                     
                                     # Track winter battles for ice crystal ornament
-                                    christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                                    try:
-                                        for cat in s2.challenger_team + s2.opponent_team:
-                                            if cat.get('type') in christmas_cats:
-                                                await track_winter_battle(interaction2.user.id, interaction2.guild.id)
-                                                break
-                                    except Exception:
-                                        pass
+                                    # christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                                    # try:
+                                    #     for cat in s2.challenger_team + s2.opponent_team:
+                                    #         if cat.get('type') in christmas_cats:
+                                    #             await track_winter_battle(interaction2.user.id, interaction2.guild.id)
+                                    #             break
+                                    # except Exception:
+                                    #     pass
                                     
                                     try:
                                         if s2.channel.id in FIGHT_SESSIONS:
@@ -3837,19 +3846,20 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                     except Exception:
                         pass
                     
+                    # Christmas tracking disabled
                     # Track battle win for champion ornament (for the winner who didn't surrender)
-                    try:
-                        await track_team_battle_win(other.id, it.guild.id)
-                    except Exception:
-                        pass
+                    # try:
+                    #     await track_team_battle_win(other.id, it.guild.id)
+                    # except Exception:
+                    #     pass
                     
                     # Track winter battles for ice crystal ornament
-                    christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-                    try:
-                        for cat in s.challenger_team + s.opponent_team:
-                            if cat.get('type') in christmas_cats:
-                                await track_winter_battle(other.id, it.guild.id)
-                                break
+                    # christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
+                    # try:
+                    #     for cat in s.challenger_team + s.opponent_team:
+                    #         if cat.get('type') in christmas_cats:
+                    #             await track_winter_battle(other.id, it.guild.id)
+                    #             break
                     except Exception:
                         pass
                     
@@ -12139,11 +12149,12 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
                         # Create the cat instance directly
                         await _create_instances_only(parent_inter.guild.id, parent_inter.user.id, cat_type, 1, modifiers=modifiers)
                         
+                        # Christmas tracking disabled
                         # Track festive catch for ornament #1
-                        try:
-                            await track_festive_catch(parent_inter.user.id, parent_inter.guild.id, 1)
-                        except Exception:
-                            pass
+                        # try:
+                        #     await track_festive_catch(parent_inter.user.id, parent_inter.guild.id, 1)
+                        # except Exception:
+                        #     pass
                         
                         # Send confirmation message
                         if modifiers:
@@ -13672,10 +13683,11 @@ class PacksView(discord.ui.View):
         if chosen_type in christmas_cats:
             # Create instances for Christmas cats
             await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
-            try:
-                await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
-            except Exception:
-                pass
+            # Christmas tracking disabled
+            # try:
+            #     await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
+            # except Exception:
+            #     pass
         else:
             # Regular cats increment the field
             self.user[f"cat_{chosen_type}"] += cat_amount
@@ -13688,13 +13700,15 @@ class PacksView(discord.ui.View):
         
         festive_progress = 0
         if pack_name.lower() == "festive":
-            try:
-                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
-                self.user.pack_festive_opened = festive_progress
-                if festive_progress >= 15:
-                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
-            except Exception:
-                pass
+            # Christmas tracking disabled
+            # try:
+            #     festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
+            #     self.user.pack_festive_opened = festive_progress
+            #     if festive_progress >= 15:
+            #         await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            # except Exception:
+            #     pass
+            pass
         
         # Handle item rewards
         if item_reward:
@@ -13787,10 +13801,11 @@ class PacksView(discord.ui.View):
             if cat_type in christmas_cats:
                 # Create instances for Christmas cats
                 await _create_instances_only(self.user.guild_id, self.user.user_id, cat_type, total_cats)
-                try:
-                    await track_festive_catch(self.user.user_id, self.user.guild_id, total_cats)
-                except Exception:
-                    pass
+                # Christmas tracking disabled
+                # try:
+                #     await track_festive_catch(self.user.user_id, self.user.guild_id, total_cats)
+                # except Exception:
+                #     pass
             else:
                 # Regular cats increment the field
                 self.user[f"cat_{cat_type}"] += total_cats
@@ -13808,13 +13823,15 @@ class PacksView(discord.ui.View):
             await save_user_items(self.user.guild_id, self.user.user_id, items_data)
 
         if festive_packs_opened > 0:
-            try:
-                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, festive_packs_opened)
-                self.user.pack_festive_opened = festive_progress
-                if festive_progress >= 15:
-                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
-            except Exception:
-                pass
+            # Christmas tracking disabled
+            # try:
+            #     festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, festive_packs_opened)
+            #     self.user.pack_festive_opened = festive_progress
+            #     if festive_progress >= 15:
+            #         await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            # except Exception:
+            #     pass
+            pass
         
         # Build description with pack counts and rewards
         description = f"**Opened:**\n" + "\n".join(pack_results)
@@ -13949,18 +13966,25 @@ class PacksView(discord.ui.View):
         # Item rewards - all packs have a chance
         # Festive packs get Christmas items, others get regular items
         if random.random() < 0.30:  # 30% chance for item reward
-            if is_festive:
-                # Christmas items
-                christmas_items = ["candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"]
-                item_name = random.choice(christmas_items)
-                item_tier = random.choice(["I", "II"]) if item_name == "festive_toy" else "I"
-                item_count = 1
-            else:
-                # Regular items
-                regular_items = ["ball", "dogtreat", "pancakes"]
-                item_name = random.choice(regular_items)
-                item_tier = random.choice(["I", "II", "III"]) if item_name == "ball" else "I"
-                item_count = 1
+            # Christmas items disabled - festive packs now give regular items
+            # if is_festive:
+            #     # Christmas items
+            #     christmas_items = ["candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"]
+            #     item_name = random.choice(christmas_items)
+            #     item_tier = random.choice(["I", "II"]) if item_name == "festive_toy" else "I"
+            #     item_count = 1
+            # else:
+            #     # Regular items
+            #     regular_items = ["ball", "dogtreat", "pancakes"]
+            #     item_name = random.choice(regular_items)
+            #     item_tier = random.choice(["I", "II", "III"]) if item_name == "ball" else "I"
+            #     item_count = 1
+            
+            # All packs now give regular items
+            regular_items = ["ball", "dogtreat", "pancakes"]
+            item_name = random.choice(regular_items)
+            item_tier = random.choice(["I", "II", "III"]) if item_name == "ball" else "I"
+            item_count = 1
             
             item_reward = {"name": item_name, "tier": item_tier, "count": item_count}
             
@@ -14019,10 +14043,11 @@ class PacksView(discord.ui.View):
         if chosen_type in christmas_cats:
             # Create instances for Christmas cats
             await _create_instances_only(self.user.guild_id, self.user.user_id, chosen_type, cat_amount)
-            try:
-                await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
-            except Exception:
-                pass
+            # Christmas tracking disabled
+            # try:
+            #     await track_festive_catch(self.user.user_id, self.user.guild_id, cat_amount)
+            # except Exception:
+            #     pass
         else:
             # Regular cats increment the field
             self.user[f"cat_{chosen_type}"] += cat_amount
@@ -14034,13 +14059,15 @@ class PacksView(discord.ui.View):
             self.user.kibble += kibble
         
         if pack_name.lower() == "festive":
-            try:
-                festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
-                self.user.pack_festive_opened = festive_progress
-                if festive_progress >= 15:
-                    await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
-            except Exception:
-                pass
+            # Christmas tracking disabled
+            # try:
+            #     festive_progress = await increment_festive_pack_progress(self.user.user_id, self.user.guild_id, 1)
+            #     self.user.pack_festive_opened = festive_progress
+            #     if festive_progress >= 15:
+            #         await check_tree_ornament_unlock(self.user.user_id, self.user.guild_id, 4)
+            # except Exception:
+            #     pass
+            pass
 
         # Handle item rewards
         if item_reward:
@@ -14247,15 +14274,16 @@ async def packs(message: discord.Interaction):
             if kibble:
                 user.kibble += kibble
             
+            # Christmas tracking disabled
             # Track festive pack opens for ornament #4
-            if pack.lower() == "festive":
-                try:
-                    new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, 1)
-                    user.pack_festive_opened = new_progress
-                    if new_progress >= 15:
-                        await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
-                except Exception:
-                    pass
+            # if pack.lower() == "festive":
+            #     try:
+            #         new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, 1)
+            #         user.pack_festive_opened = new_progress
+            #         if new_progress >= 15:
+            #             await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
+            #     except Exception:
+            #         pass
             
             await user.save()
             # after single-pack open save: check for full stack / huzzful
@@ -14319,15 +14347,16 @@ async def packs(message: discord.Interaction):
             user[f"cat_{cat_type}"] += cat_amount
         await user.save()
         
+        # Christmas tracking disabled
         # Track festive pack opens for ornament #4
-        if festive_packs_opened > 0:
-            try:
-                new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, festive_packs_opened)
-                user.pack_festive_opened = new_progress
-                if new_progress >= 15:
-                    await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
-            except Exception:
-                pass
+        # if festive_packs_opened > 0:
+        #     try:
+        #         new_progress = await increment_festive_pack_progress(message.user.id, message.guild.id, festive_packs_opened)
+        #         user.pack_festive_opened = new_progress
+        #         if new_progress >= 15:
+        #             await check_tree_ornament_unlock(message.user.id, message.guild.id, 4)
+        #     except Exception:
+        #         pass
         
         # after bulk packs save: award Full Stack if any cat crossed the 64 threshold
         try:
@@ -15352,12 +15381,13 @@ async def gift(
             await user.save()
             await reciever.save()
             
+            # Christmas tracking disabled
             # Track gift for ornament #2 and nice score
-            try:
-                await update_nice_score(message.user.id, message.guild.id, 1)
-                await track_gift_given(message.user.id, message.guild.id, amount)
-            except Exception:
-                pass
+            # try:
+            #     await update_nice_score(message.user.id, message.guild.id, 1)
+            #     await track_gift_given(message.user.id, message.guild.id, amount)
+            # except Exception:
+            #     pass
             
             content = f"Successfully transfered {amount:,} {cat_type} cats from {message.user.mention} to <@{person_id}>!"
 
@@ -15576,90 +15606,91 @@ def format_cosmetic_display(profile):
 # Owner-only commands
 OWNER_IDS = {726686526133501952}  # Add your Discord user ID here
 
-@bot.tree.command(name="nicescore", description="(Owner) View a user's nice/naughty score")
-@discord.app_commands.describe(user="User to inspect")
-async def nicescore(message: discord.Interaction, user: discord.User):
-    """Owner-only command to view and verify nice/naughty scores"""
-    if message.user.id not in OWNER_IDS:
-        await message.response.send_message("❌ This command is owner-only.", ephemeral=True)
-        return
-    
-    await message.response.defer(ephemeral=True)
-    
-    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=user.id)
-    
-    nice = profile.nice_score or 0
-    naughty = profile.naughty_score or 0
-    santa_banned = profile.santa_banned or False
-    
-    # Ornament progress
-    ornaments = []
-    if profile.tree_ornaments:
-        ornaments = [int(o) for o in profile.tree_ornaments.split(",") if o]
-    
-    # Achievement flags
-    achievements = []
-    if profile.christmas_spirit:
-        achievements.append("🎄 Christmas Spirit")
-    if profile.advent_master:
-        achievements.append("⭐ Advent Master")
-    if profile.gift_giver:
-        achievements.append("🎁 Gift Giver")
-    if profile.nice_list:
-        achievements.append("😇 Nice List")
-    if profile.naughty_list:
-        achievements.append("😈 Naughty List")
-    if profile.festive_collector:
-        achievements.append("🎅 Festive Collector")
-    if profile.tree_decorated:
-        achievements.append("🎄 Tree Master")
-    
-    embed = discord.Embed(
-        title=f"🎅 Christmas Status: {user.name}",
-        color=0xC41E3A if naughty > nice else 0x2ECC71
-    )
-    
-    embed.add_field(
-        name="😇 Nice Score",
-        value=str(nice),
-        inline=True
-    )
-    
-    embed.add_field(
-        name="😈 Naughty Score",
-        value=str(naughty),
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎅 Santa Status",
-        value="🚫 BANNED" if santa_banned else "✅ Good Standing",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎄 Tree Ornaments",
-        value=f"{len(ornaments)}/8 collected",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🏆 Christmas Achievements",
-        value="\n".join(achievements) if achievements else "None yet",
-        inline=False
-    )
-    
-    # Advent progress
-    claimed_days = []
-    if profile.advent_claimed:
-        claimed_days = [int(d) for d in profile.advent_claimed.split(",") if d]
-    embed.add_field(
-        name="📅 Advent Calendar",
-        value=f"{len(claimed_days)}/25 days claimed",
-        inline=True
-    )
-    
-    await message.followup.send(embed=embed, ephemeral=True)
+# Christmas command disabled until next year
+# @bot.tree.command(name="nicescore", description="(Owner) View a user's nice/naughty score")
+# @discord.app_commands.describe(user="User to inspect")
+# async def nicescore(message: discord.Interaction, user: discord.User):
+#     """Owner-only command to view and verify nice/naughty scores"""
+#     if message.user.id not in OWNER_IDS:
+#         await message.response.send_message("❌ This command is owner-only.", ephemeral=True)
+#         return
+#     
+#     await message.response.defer(ephemeral=True)
+#     
+#     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=user.id)
+#     
+#     nice = profile.nice_score or 0
+#     naughty = profile.naughty_score or 0
+#     santa_banned = profile.santa_banned or False
+#     
+#     # Ornament progress
+#     ornaments = []
+#     if profile.tree_ornaments:
+#         ornaments = [int(o) for o in profile.tree_ornaments.split(",") if o]
+#     
+#     # Achievement flags
+#     achievements = []
+#     if profile.christmas_spirit:
+#         achievements.append("🎄 Christmas Spirit")
+#     if profile.advent_master:
+#         achievements.append("⭐ Advent Master")
+#     if profile.gift_giver:
+#         achievements.append("🎁 Gift Giver")
+#     if profile.nice_list:
+#         achievements.append("😇 Nice List")
+#     if profile.naughty_list:
+#         achievements.append("😈 Naughty List")
+#     if profile.festive_collector:
+#         achievements.append("🎅 Festive Collector")
+#     if profile.tree_decorated:
+#         achievements.append("🎄 Tree Master")
+#     
+#     embed = discord.Embed(
+#         title=f"🎅 Christmas Status: {user.name}",
+#         color=0xC41E3A if naughty > nice else 0x2ECC71
+#     )
+#     
+#     embed.add_field(
+#         name="😇 Nice Score",
+#         value=str(nice),
+#         inline=True
+#     )
+#     
+#     embed.add_field(
+#         name="😈 Naughty Score",
+#         value=str(naughty),
+#         inline=True
+#     )
+#     
+#     embed.add_field(
+#         name="🎅 Santa Status",
+#         value="🚫 BANNED" if santa_banned else "✅ Good Standing",
+#         inline=True
+#     )
+#     
+#     embed.add_field(
+#         name="🎄 Tree Ornaments",
+#         value=f"{len(ornaments)}/8 collected",
+#         inline=True
+#     )
+#     
+#     embed.add_field(
+#         name="🏆 Christmas Achievements",
+#         value="\\n".join(achievements) if achievements else "None yet",
+#         inline=False
+#     )
+#     
+#     # Advent progress
+#     claimed_days = []
+#     if profile.advent_claimed:
+#         claimed_days = [int(d) for d in profile.advent_claimed.split(",") if d]
+#     embed.add_field(
+#         name="📅 Advent Calendar",
+#         value=f"{len(claimed_days)}/25 days claimed",
+#         inline=True
+#     )
+#     
+#     await message.followup.send(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(description="cosmetics shop! buy badges, titles, and more")
@@ -15938,12 +15969,13 @@ async def cosmetics(message: discord.Interaction):
                     add_owned_cosmetic(fresh_user, item_id)
                     await fresh_user.save()
                     
+                    # Christmas tracking disabled
                     # Track santa hat purchase for ornament #6
-                    if item_id == "santa_hat":
-                        try:
-                            await track_cosmetic_unlock(fresh_user.user_id, fresh_user.guild_id)
-                        except Exception:
-                            pass
+                    # if item_id == "santa_hat":
+                    #     try:
+                    #         await track_cosmetic_unlock(fresh_user.user_id, fresh_user.guild_id)
+                    #     except Exception:
+                    #         pass
                     
                     # Update global user reference
                     user = fresh_user
@@ -20357,23 +20389,24 @@ async def breed(
 # CHRISTMAS FEATURES
 # ============================================================================
 
-@bot.tree.command(name="advent", description="Open the advent calendar and claim daily rewards!")
-async def advent_cmd(interaction: discord.Interaction):
-    """Advent calendar - claim daily rewards"""
-    await advent_command(interaction)
+# Christmas commands disabled until next year
+# @bot.tree.command(name="advent", description="Open the advent calendar and claim daily rewards!")
+# async def advent_cmd(interaction: discord.Interaction):
+#     """Advent calendar - claim daily rewards"""
+#     await advent_command(interaction)
 
 
-@bot.tree.command(name="tree", description="View your Christmas tree decorations!")
-async def tree_cmd(interaction: discord.Interaction):
-    """View Christmas tree with ornaments"""
-    await tree_view_command(interaction)
+# @bot.tree.command(name="tree", description="View your Christmas tree decorations!")
+# async def tree_cmd(interaction: discord.Interaction):
+#     """View Christmas tree with ornaments"""
+#     await tree_view_command(interaction)
 
 
-@bot.tree.command(name="tree_ornament", description="Learn about a specific ornament!")
-@discord.app_commands.describe(number="Ornament number (1-8)")
-async def tree_ornament_cmd(interaction: discord.Interaction, number: int):
-    """View details about a specific ornament"""
-    await tree_ornament_info_command(interaction, number)
+# @bot.tree.command(name="tree_ornament", description="Learn about a specific ornament!")
+# @discord.app_commands.describe(number="Ornament number (1-8)")
+# async def tree_ornament_cmd(interaction: discord.Interaction, number: int):
+#     """View details about a specific ornament"""
+#     await tree_ornament_info_command(interaction, number)
 
 
 # ============================================================================
