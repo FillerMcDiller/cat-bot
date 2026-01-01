@@ -18223,24 +18223,87 @@ async def run_scheduled_race():
     race_cats = next_race["cats"]
     race_names = next_race["names"]
     
-    # Simulate race
+    # Send initial race start messages to all channels and store message references
+    race_messages = {}  # {guild_id: message}
+    
+    for guild_id, channel_id in list(race_channels.items()):
+        try:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                # Build initial lanes display
+                lanes_display = ""
+                for i, cat in enumerate(race_cats, 1):
+                    emoji = get_cat_emoji(cat)
+                    lanes_display += f"**Lane {i}:** {emoji} **{race_names[i-1]}** ({cat})\n"
+                
+                embed = discord.Embed(
+                    title="🏁 Cat Racing Track 🏁",
+                    description=f"{lanes_display}\n**Race starting now!**",
+                    color=Colors.blue,
+                )
+                msg = await channel.send(embed=embed)
+                race_messages[guild_id] = msg
+        except Exception:
+            pass
+    
+    await asyncio.sleep(1)
+    
+    # Simulate race with live updates
     positions = [0, 0, 0, 0, 0]
     race_length = 100
     winner = None
     frames = 0
+    race_ongoing = True
     
-    while winner is None and frames < 30:
+    while race_ongoing:
         frames += 1
+        
+        # Each cat moves forward
         for i in range(5):
             base_speed = CAT_SPEEDS.get(race_cats[i], 1.0)
             random_factor = random.uniform(0.7, 1.3)
             movement = random.randint(3, 8) * base_speed * random_factor
             positions[i] += movement
             
+            # Check for winner
             if positions[i] >= race_length and winner is None:
                 winner = i
-                break
+                race_ongoing = False
+        
+        # Build race visualization
+        track = ""
+        for i in range(5):
+            emoji = get_cat_emoji(race_cats[i])
+            progress = min(positions[i], race_length)
+            progress_bars = int((progress / race_length) * 20)
+            empty_bars = 20 - progress_bars
+            
+            # Show cat position on track
+            track_visual = "▬" * progress_bars + emoji + "░" * empty_bars
+            track += f"`{race_names[i][:20]:20}` {track_visual}\n"
+        
+        # Update all race messages
+        embed = discord.Embed(
+            title="🏁 Cat Racing Track 🏁",
+            description=track,
+            color=Colors.blue,
+        )
+        
+        for guild_id, msg in race_messages.items():
+            try:
+                await msg.edit(embed=embed)
+            except Exception:
+                pass
+        
+        await asyncio.sleep(0.6)
+        
+        # Safety: max 30 frames (~18 seconds)
+        if frames >= 30:
+            # Find cat with most progress
+            winner = positions.index(max(positions))
+            break
     
+    # Race finished!
     if winner is None:
         winner = positions.index(max(positions))
     
@@ -18249,7 +18312,7 @@ async def run_scheduled_race():
     winner_name = race_names[winner]
     winner_emoji = get_cat_emoji(winner_cat)
     
-    # Build result embed
+    # Build final result embed
     track = ""
     for i in range(5):
         emoji = get_cat_emoji(race_cats[i])
@@ -18290,12 +18353,10 @@ async def run_scheduled_race():
         color=Colors.green,
     )
     
-    # Send results to all channels
-    for guild_id, channel_id in list(race_channels.items()):
+    # Update all race messages with final results
+    for guild_id, msg in race_messages.items():
         try:
-            channel = bot.get_channel(channel_id)
-            if channel:
-                await channel.send(embed=embed)
+            await msg.edit(embed=embed)
         except Exception:
             pass
     
