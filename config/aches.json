@@ -25,6 +25,7 @@
   "balling": {"title": "Balling", "description": "ball ball ball ball ball ball ball ball", "is_hidden": false, "category": "Commands"},
   "slots": {"title": "More gambling??", "description": "spin the /slots machine", "is_hidden": false, "category": "Commands"},
   "win_slots": {"title": "Pro Gambler", "description": "win at the /slots machine", "is_hidden": false, "category": "Commands"},
+  "race_winner": {"title": "Speed Racer", "description": "win a cat race bet", "is_hidden": false, "category": "Commands"},
   "define": {"title": "Definer", "description": "find out a definition of a word", "is_hidden": false, "category": "Commands"},
   "cookieclicker": {"title": "Cookie Clicker", "description": "click a cookie", "is_hidden": false, "category": "Commands"},
 
