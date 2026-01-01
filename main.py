@@ -40,7 +40,7 @@ import emoji
 import psutil
 from aiohttp import web
 from discord import ButtonStyle
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ui import Button, View
 from PIL import Image
 # use aiohttp's web server for in-process webhook to avoid uvicorn thread/signal issues
@@ -5584,6 +5584,7 @@ class Colors:
     demonic = 0xC12929
     rose = 0xFF81C6
     red = 0xFF0000
+    blue = 0x3498db
 
 
 # rain shill message for footers
@@ -5621,6 +5622,10 @@ daily_reminded = {}
 casino_lock = []
 slots_lock = []
 race_lock = []
+
+# Scheduled race system
+next_race = None  # Will store {cats, names, start_time, channel_id, message_id, bets: {user_id: {lane, amount}}}
+race_channels = {}  # {guild_id: channel_id} - guilds that have opted into auto-races
 
 # ???
 rigged_users = []
@@ -5699,6 +5704,25 @@ def get_emoji(name):
         return name
     else:
         return "🔳"
+
+
+def get_cat_emoji(cat_type):
+    """Get cat emoji with fallback for different naming conventions"""
+    global emojis
+    # Try various formats for compound names
+    attempts = [
+        cat_type.lower() + "cat",  # Standard format: "donutcat"
+        cat_type.lower(),  # Without suffix: "donut"
+        cat_type + "cat",  # Original case: "Donutcat"
+        cat_type,  # Original case without suffix: "Donut"
+    ]
+    
+    for attempt in attempts:
+        if attempt in emojis:
+            return emojis[attempt]
+    
+    # Fallback to regular get_emoji
+    return get_emoji(cat_type.lower() + "cat")
 
 
 async def check_global_cooldown(user_id: int, cooldown_seconds: int = 5) -> bool:
@@ -7224,6 +7248,13 @@ async def on_ready():
     
     # Start the daily random rain task
     bot.loop.create_task(schedule_daily_rain())
+    
+    # Start the auto race scheduler and generate first race
+    global next_race
+    if next_race is None:
+        next_race = generate_race_data()
+    if not auto_race_scheduler.is_running():
+        auto_race_scheduler.start()
     
     # Note: background_index_all_cats is started in setup() function, not here
 
@@ -18079,8 +18110,351 @@ async def slots(message: discord.Interaction):
     await message.response.send_message(embed=embed, view=myview)
 
 
+# ==================== CAT RACING SYSTEM ====================
+
+# Racing names (like racehorses)
+RACING_NAMES = [
+    "Thunder Paws", "Speedy Whiskers", "Lightning Strike", "Turbo Tail", "Zoom Zoom",
+    "Flash Gordon", "Sonic Boom", "Quick Silver", "Rapid Fire", "Fast Lane",
+    "Nitro Boost", "Hyper Drive", "Sprint Master", "Dash Attack", "Velocity",
+    "Bullet Train", "Speed Demon", "Rocket Cat", "Blaze Runner", "Swift Justice",
+    "Mach Five", "Jet Stream", "Wind Walker", "Storm Chaser", "Sky Rocket",
+    "Hot Rod", "Turbo Charged", "Nitrous Oxide", "Speed Racer", "Quick Draw",
+    "Rapid Transit", "Express Lane", "Fast Forward", "Quick Step", "Light Speed",
+    "Warp Drive", "Hyper Sonic", "Mega Blast", "Ultra Zoom", "Super Sonic",
+    "Lazy Bones", "Slow Poke", "Chill Vibes", "Nap Time", "Couch Potato",
+    "Mr. Wobbles", "Sir Trips-a-lot", "Captain Stumble", "Professor Slowmo", "Duke Lazington",
+    "Butterfingers", "Clumsy Carl", "Sleepy Joe", "Tired Tom", "Yawn Master",
+    "Sir Snooze", "Lord Lazy", "Baron Bedtime", "Count Nap", "Prince Pillow",
+    "Dizzy Lizzy", "Wobbly Bob", "Shaky Jake", "Derpy Dave", "Goofy Gary",
+    "Silly Sally", "Wacky Walter", "Bonkers Betty", "Crazy Cathy", "Mad Max",
+    "Fluffy McFluffface", "Whisker Tickler", "Paw Patrol", "Meow Mix", "Furry Fury",
+    "Kitty Litter", "Cat Scratch Fever", "Nine Lives", "Purr Machine", "Feline Fine",
+    "Tom Cat", "Alley Cat", "Cool Cat", "Scaredy Cat", "Fat Cat",
+    "Copy Cat", "Top Cat", "Wild Cat", "Black Cat", "Lucky Cat",
+]
+
+CAT_SPEEDS = {
+    "Fine": 1.0,
+    "Nice": 1.05,
+    "Good": 1.1,
+    "Rare": 1.15,
+    "Wild": 1.25,
+    "Epic": 1.2,
+    "Brave": 1.3,
+    "Rickroll": 0.8,
+    "Sus": 0.9,
+    "Superior": 1.35,
+    "Legendary": 1.4,
+    "8bit": 1.1,
+    "Cat": 1.5,
+    "Real": 1.45,
+    "Professor": 0.95,
+    "Divine": 1.5,
+    "Mythic": 1.55,
+    "Ultimate": 1.6,
+    "eGirl": 0.85,
+    "Corrupt": 1.3,
+    "TV": 0.7,
+    "Donut": 0.75,
+    "Santa": 0.8,
+    "Elf": 1.2,
+    "Snowman": 0.6,
+    "ChristmasTree": 0.5,
+    "Gingerbread": 0.9,
+    "Cocoa": 1.0,
+    "Present": 0.95,
+}
+
+
+def generate_race_data():
+    """Generate a new race with 5 random cats and names"""
+    race_cats = random.sample(cattypes, 5)
+    race_names = random.sample(RACING_NAMES, 5)
+    return {
+        "cats": race_cats,
+        "names": race_names,
+        "start_time": time.time() + 600,  # 10 minutes from now
+        "bets": {},  # {user_id: {lane, amount, guild_id}}
+    }
+
+
+@tasks.loop(minutes=10)
+async def auto_race_scheduler():
+    """Automatically schedule and run races every 10 minutes"""
+    global next_race
+    
+    # Generate next race
+    next_race = generate_race_data()
+    
+    # Wait until 30 seconds before race
+    wait_time = next_race["start_time"] - time.time() - 30
+    if wait_time > 0:
+        await asyncio.sleep(wait_time)
+    
+    # Send "Race starting soon" notification to all channels
+    for guild_id, channel_id in list(race_channels.items()):
+        try:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                embed = discord.Embed(
+                    title="🏁 RACE STARTING IN 30 SECONDS! 🏁",
+                    description="Use `/race` now to place your bets!",
+                    color=Colors.yellow,
+                )
+                await channel.send(embed=embed)
+        except Exception:
+            pass
+    
+    # Wait 30 seconds
+    await asyncio.sleep(30)
+    
+    # Run the race
+    await run_scheduled_race()
+
+
+async def run_scheduled_race():
+    """Execute the scheduled race and payout bets"""
+    global next_race
+    
+    if not next_race:
+        return
+    
+    race_cats = next_race["cats"]
+    race_names = next_race["names"]
+    
+    # Simulate race
+    positions = [0, 0, 0, 0, 0]
+    race_length = 100
+    winner = None
+    frames = 0
+    
+    while winner is None and frames < 30:
+        frames += 1
+        for i in range(5):
+            base_speed = CAT_SPEEDS.get(race_cats[i], 1.0)
+            random_factor = random.uniform(0.7, 1.3)
+            movement = random.randint(3, 8) * base_speed * random_factor
+            positions[i] += movement
+            
+            if positions[i] >= race_length and winner is None:
+                winner = i
+                break
+    
+    if winner is None:
+        winner = positions.index(max(positions))
+    
+    winner_lane = winner + 1
+    winner_cat = race_cats[winner]
+    winner_name = race_names[winner]
+    winner_emoji = get_cat_emoji(winner_cat)
+    
+    # Build result embed
+    track = ""
+    for i in range(5):
+        emoji = get_cat_emoji(race_cats[i])
+        if i == winner:
+            track += f"`{race_names[i][:20]:20}` {'▬' * 20}{emoji} 🏆 **WINNER!**\n"
+        else:
+            progress = min(positions[i], race_length)
+            progress_bars = int((progress / race_length) * 20)
+            empty_bars = 20 - progress_bars
+            track_visual = "▬" * progress_bars + emoji + "░" * empty_bars
+            track += f"`{race_names[i][:20]:20}` {track_visual}\n"
+    
+    result_text = f"\n🏆 **WINNER: {winner_emoji} {winner_name}!** (Lane {winner_lane})\n*({winner_cat} cat)*"
+    
+    # Process all bets
+    winners_text = "\n\n**Winners:**"
+    had_winners = False
+    
+    for user_id, bet_data in next_race["bets"].items():
+        if bet_data["lane"] == winner_lane:
+            try:
+                profile = await Profile.get_or_create(guild_id=bet_data["guild_id"], user_id=user_id)
+                winnings = bet_data["amount"] * 4
+                profit = winnings - bet_data["amount"]
+                profile.kibble += winnings
+                await profile.save()
+                winners_text += f"\n<@{user_id}>: +{profit:,} kibble profit!"
+                had_winners = True
+            except Exception:
+                pass
+    
+    if not had_winners:
+        winners_text = "\n\n*No winners this time!*"
+    
+    embed = discord.Embed(
+        title="🏁 Race Results! 🏁",
+        description=f"{track}{result_text}{winners_text}",
+        color=Colors.green,
+    )
+    
+    # Send results to all channels
+    for guild_id, channel_id in list(race_channels.items()):
+        try:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                await channel.send(embed=embed)
+        except Exception:
+            pass
+    
+    # Clear race data
+    next_race = None
+
+
+class RaceBettingView(View):
+    def __init__(self, race_data):
+        super().__init__(timeout=None)
+        self.race_data = race_data
+        
+        # Add lane buttons
+        for i in range(1, 6):
+            button = Button(
+                label=f"Lane {i}",
+                style=ButtonStyle.blurple,
+                custom_id=f"race_lane_{i}",
+            )
+            button.callback = self.make_lane_callback(i)
+            self.add_item(button)
+    
+    def make_lane_callback(self, lane):
+        async def callback(interaction: discord.Interaction):
+            # Show modal for bet amount
+            modal = BetAmountModal(lane, self.race_data)
+            await interaction.response.send_modal(modal)
+        return callback
+
+
+class BetAmountModal(discord.ui.Modal, title="Place Your Bet"):
+    bet_amount = discord.ui.TextInput(
+        label="Bet Amount (kibble)",
+        placeholder="Enter amount (10-10000)",
+        required=True,
+        max_length=5,
+    )
+    
+    def __init__(self, lane, race_data):
+        super().__init__()
+        self.lane = lane
+        self.race_data = race_data
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("Invalid amount! Must be a number.", ephemeral=True)
+            return
+        
+        if amount < 10:
+            await interaction.response.send_message("Minimum bet is 10 kibble!", ephemeral=True)
+            return
+        
+        if amount > 10000:
+            await interaction.response.send_message("Maximum bet is 10,000 kibble!", ephemeral=True)
+            return
+        
+        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+        
+        if profile.kibble < amount:
+            await interaction.response.send_message(f"You only have {profile.kibble:,} kibble!", ephemeral=True)
+            return
+        
+        # Check if user already has a bet
+        if interaction.user.id in self.race_data["bets"]:
+            old_bet = self.race_data["bets"][interaction.user.id]
+            # Refund old bet
+            profile.kibble += old_bet["amount"]
+        
+        # Place new bet
+        profile.kibble -= amount
+        await profile.save()
+        
+        self.race_data["bets"][interaction.user.id] = {
+            "lane": self.lane,
+            "amount": amount,
+            "guild_id": interaction.guild.id,
+        }
+        
+        cat_name = self.race_data["names"][self.lane - 1]
+        cat_type = self.race_data["cats"][self.lane - 1]
+        emoji = get_cat_emoji(cat_type)
+        
+        await interaction.response.send_message(
+            f"✅ Bet placed! {amount:,} kibble on Lane {self.lane}: {emoji} **{cat_name}** ({cat_type})\n"
+            f"Your remaining kibble: {profile.kibble:,}",
+            ephemeral=True,
+        )
+
+
+@bot.tree.command(description="View the upcoming race and place bets!")
+async def race(message: discord.Interaction):
+    """
+    View the scheduled cat race and place your bets!
+    Races happen automatically every 10 minutes.
+    """
+    global next_race
+    
+    if not next_race:
+        await message.response.send_message("No race scheduled yet! Check back soon.", ephemeral=True)
+        return
+    
+    time_until_race = next_race["start_time"] - time.time()
+    
+    if time_until_race < 0:
+        await message.response.send_message("Race is about to start! Wait for results...", ephemeral=True)
+        return
+    
+    minutes = int(time_until_race // 60)
+    seconds = int(time_until_race % 60)
+    
+    # Build lanes display
+    lanes_display = ""
+    for i, cat in enumerate(next_race["cats"], 1):
+        emoji = get_cat_emoji(cat)
+        lanes_display += f"**Lane {i}:** {emoji} **{next_race['names'][i-1]}** ({cat})\n"
+    
+    # Show user's current bet if any
+    user_bet_text = ""
+    if message.user.id in next_race["bets"]:
+        bet = next_race["bets"][message.user.id]
+        bet_cat = next_race["cats"][bet["lane"] - 1]
+        bet_name = next_race["names"][bet["lane"] - 1]
+        bet_emoji = get_cat_emoji(bet_cat)
+        user_bet_text = f"\n\n💰 **Your current bet:** {bet['amount']:,} kibble on Lane {bet['lane']}: {bet_emoji} {bet_name}"
+    
+    embed = discord.Embed(
+        title="🏁 Upcoming Cat Race! 🏁",
+        description=f"{lanes_display}\n⏰ **Race starts in:** {minutes}m {seconds}s\n\n"
+                   f"Click a lane button below to place your bet!\n"
+                   f"**Win = 4x payout** (3x profit + original bet){user_bet_text}",
+        color=Colors.blue,
+    )
+    
+    view = RaceBettingView(next_race)
+    await message.response.send_message(embed=embed, view=view)
+
+
+@bot.tree.command(description="Set this channel for automatic race announcements (Admin only)")
+async def setracechannel(message: discord.Interaction):
+    """Set the current channel to receive automatic race announcements every 10 minutes"""
+    # Check if user has admin permissions
+    if not message.user.guild_permissions.administrator:
+        await message.response.send_message("You need administrator permissions to use this command!", ephemeral=True)
+        return
+    
+    global race_channels
+    race_channels[message.guild.id] = message.channel.id
+    
+    await message.response.send_message(
+        f"✅ This channel will now receive automatic race announcements every 10 minutes!\n"
+        f"Users can use `/race` to view and bet on upcoming races.",
+        ephemeral=False,
+    )
+
+
 @bot.tree.command(description="Watch cats race and bet kibble on the winner!")
-async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optional[int] = None):
+async def oldrace(message: discord.Interaction, bet_amount: int = 50, bet_on: Optional[int] = None):
     """
     Cat racing mini-game where users bet kibble on which cat will win.
     bet_amount: Amount of kibble to bet (10-10000)
@@ -18110,64 +18484,9 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
             await message.response.send_message("Choose a lane between 1 and 5!", ephemeral=True)
             return
 
-    # Racing names (like racehorses)
-    racing_names = [
-        "Thunder Paws", "Speedy Whiskers", "Lightning Strike", "Turbo Tail", "Zoom Zoom",
-        "Flash Gordon", "Sonic Boom", "Quick Silver", "Rapid Fire", "Fast Lane",
-        "Nitro Boost", "Hyper Drive", "Sprint Master", "Dash Attack", "Velocity",
-        "Bullet Train", "Speed Demon", "Rocket Cat", "Blaze Runner", "Swift Justice",
-        "Mach Five", "Jet Stream", "Wind Walker", "Storm Chaser", "Sky Rocket",
-        "Hot Rod", "Turbo Charged", "Nitrous Oxide", "Speed Racer", "Quick Draw",
-        "Rapid Transit", "Express Lane", "Fast Forward", "Quick Step", "Light Speed",
-        "Warp Drive", "Hyper Sonic", "Mega Blast", "Ultra Zoom", "Super Sonic",
-        "Lazy Bones", "Slow Poke", "Chill Vibes", "Nap Time", "Couch Potato",
-        "Mr. Wobbles", "Sir Trips-a-lot", "Captain Stumble", "Professor Slowmo", "Duke Lazington",
-        "Butterfingers", "Clumsy Carl", "Sleepy Joe", "Tired Tom", "Yawn Master",
-        "Sir Snooze", "Lord Lazy", "Baron Bedtime", "Count Nap", "Prince Pillow",
-        "Dizzy Lizzy", "Wobbly Bob", "Shaky Jake", "Derpy Dave", "Goofy Gary",
-        "Silly Sally", "Wacky Walter", "Bonkers Betty", "Crazy Cathy", "Mad Max",
-        "Fluffy McFluffface", "Whisker Tickler", "Paw Patrol", "Meow Mix", "Furry Fury",
-        "Kitty Litter", "Cat Scratch Fever", "Nine Lives", "Purr Machine", "Feline Fine",
-        "Tom Cat", "Alley Cat", "Cool Cat", "Scaredy Cat", "Fat Cat",
-        "Copy Cat", "Top Cat", "Wild Cat", "Black Cat", "Lucky Cat",
-    ]
-    
     # Select 5 random cat types for the race and assign them random names
     race_cats = random.sample(cattypes, 5)
-    race_names = random.sample(racing_names, 5)
-    
-    # Cat speed modifiers (some cats are naturally faster/slower)
-    cat_speeds = {
-        "Fine": 1.0,
-        "Nice": 1.05,
-        "Good": 1.1,
-        "Rare": 1.15,
-        "Wild": 1.25,
-        "Epic": 1.2,
-        "Brave": 1.3,
-        "Rickroll": 0.8,  # Gets distracted
-        "Sus": 0.9,
-        "Superior": 1.35,
-        "Legendary": 1.4,
-        "8bit": 1.1,
-        "Cat": 1.5,  # The "Cat" cat is speedy
-        "Real": 1.45,
-        "Professor": 0.95,  # Too smart, overthinks running
-        "Divine": 1.5,
-        "Mythic": 1.55,
-        "Ultimate": 1.6,
-        "eGirl": 0.85,  # Stops to take selfies
-        "Corrupt": 1.3,
-        "TV": 0.7,  # It's a TV, hard to race
-        "Donut": 0.75,  # It's round but rolls slowly
-        "Santa": 0.8,  # Too heavy
-        "Elf": 1.2,
-        "Snowman": 0.6,  # Melts slowly across finish
-        "ChristmasTree": 0.5,  # Literally a tree
-        "Gingerbread": 0.9,
-        "Cocoa": 1.0,  # Liquid speed
-        "Present": 0.95,
-    }
+    race_names = random.sample(RACING_NAMES, 5)
     
     # Initialize race positions (0-100, 100 = finish line)
     positions = [0, 0, 0, 0, 0]
@@ -18184,7 +18503,7 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
     
     lanes_display = ""
     for i, cat in enumerate(race_cats, 1):
-        emoji = get_emoji(cat.lower() + "cat")
+        emoji = get_cat_emoji(cat)
         lanes_display += f"**Lane {i}:** {emoji} **{race_names[i-1]}** ({cat})\n"
     
     embed = discord.Embed(
@@ -18206,7 +18525,7 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
         
         # Each cat moves forward by a random amount modified by their speed
         for i in range(5):
-            base_speed = cat_speeds.get(race_cats[i], 1.0)
+            base_speed = CAT_SPEEDS.get(race_cats[i], 1.0)
             # Random movement between 3-8, modified by cat speed, with occasional stumbles/boosts
             random_factor = random.uniform(0.7, 1.3)
             movement = random.randint(3, 8) * base_speed * random_factor
@@ -18220,7 +18539,7 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
         # Build race visualization
         track = ""
         for i in range(5):
-            emoji = get_emoji(race_cats[i].lower() + "cat")
+            emoji = get_cat_emoji(race_cats[i])
             progress = min(positions[i], race_length)
             progress_bars = int((progress / race_length) * 20)
             empty_bars = 20 - progress_bars
@@ -18251,7 +18570,7 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
     # Race finished!
     winner_cat = race_cats[winner]
     winner_name = race_names[winner]
-    winner_emoji = get_emoji(winner_cat.lower() + "cat")
+    winner_emoji = get_cat_emoji(winner_cat)
     winner_lane = winner + 1
     
     # Calculate winnings
@@ -18274,7 +18593,7 @@ async def race(message: discord.Interaction, bet_amount: int = 50, bet_on: Optio
     # Final visualization
     track = ""
     for i in range(5):
-        emoji = get_emoji(race_cats[i].lower() + "cat")
+        emoji = get_cat_emoji(race_cats[i])
         if i == winner:
             track += f"`{race_names[i][:20]:20}` {'▬' * 20}{emoji} 🏆 **WINNER!**\n"
         else:
