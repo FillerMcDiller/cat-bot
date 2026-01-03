@@ -155,10 +155,23 @@ type_dict = {
     "Present": 0,
 }
 
+# Christmas cat rarities when they're active (used for pack calculations)
+christmas_cat_weights = {
+    "Santa": 40,
+    "Elf": 30,
+    "Snowman": 22,
+    "ChristmasTree": 20,
+    "Gingerbread": 18,
+    "Cocoa": 8,
+    "Present": 4,
+}
+
 # this list stores unique non-duplicate cattypes
 cattypes = list(type_dict.keys())
 # cattypes that can spawn naturally (excludes 0-weight cats)
 spawnable_cattypes = [cat for cat, weight in type_dict.items() if weight > 0]
+# sum of all spawnable cat weights (for value calculations)
+spawnable_weight_sum = sum(type_dict[cat] for cat in spawnable_cattypes)
 
 # Cat battle stats, abilities, and weaknesses
 # Format: "Type": {"hp": int, "dmg": int, "weakness": "Type", "abilities": [...]}
@@ -11098,7 +11111,7 @@ async def catalogue(message: discord.Interaction):
 
     fields = []
     christmas_fields = []
-    total_weight = sum(type_dict.values())
+    total_weight = spawnable_weight_sum
     
     # Get all cat instances for the user to count discovered Christmas cats
     all_cats = await get_user_cats(message.guild.id, message.user.id) or []
@@ -11117,8 +11130,13 @@ async def catalogue(message: discord.Interaction):
             in_server = 0
             title = f"{get_emoji('mysterycat')} ???"
 
-        title += f" ({round((type_dict[cat_type] / total_weight) * 100, 2)}%)"
-        value = f"{round(total_weight / type_dict[cat_type], 2)} value\n{in_server:,} in this server"
+        # Handle 0-weight cats (seasonal cats not currently spawning)
+        if type_dict[cat_type] > 0:
+            title += f" ({round((type_dict[cat_type] / total_weight) * 100, 2)}%)"
+            value = f"{round(total_weight / type_dict[cat_type], 2)} value\n{in_server:,} in this server"
+        else:
+            title += " (Seasonal - Not spawning)"
+            value = f"Special seasonal cat\n{in_server:,} in this server"
         
         # Separate Christmas cats into their own list
         if cat_type in christmas_cat_types:
@@ -11207,13 +11225,18 @@ async def catpedia(message: discord.Interaction, catname: str):
         return
 
     # Build embed data
-    total_weight = sum(type_dict.values())
-    rarity_pct = round((type_dict.get(match, 0) / total_weight) * 100, 2) if total_weight else 0
-    value = round(total_weight / type_dict.get(match, 1), 2) if type_dict.get(match, 0) else "N/A"
+    total_weight = spawnable_weight_sum
+    cat_weight = type_dict.get(match, 0)
+    if cat_weight > 0:
+        rarity_pct = round((cat_weight / total_weight) * 100, 2) if total_weight else 0
+        value = round(total_weight / cat_weight, 2)
+    else:
+        rarity_pct = 0
+        value = "Seasonal"
 
     # Base stats placeholders — adjust as you design combat balancing
-    base_hp = math.ceil(type_dict.get(match, 100) / 10)  # example formula
-    base_dmg = max(1, math.ceil(type_dict.get(match, 100) / 50))
+    base_hp = math.ceil(type_dict.get(match, 100) / 10) if type_dict.get(match, 0) > 0 else 50  # example formula
+    base_dmg = max(1, math.ceil(type_dict.get(match, 100) / 50)) if type_dict.get(match, 0) > 0 else 5
 
     # Image path: tries images/spawn/<lower>_cat.png, else fallback to images/<lower>.png
     img_path = None
@@ -12691,7 +12714,9 @@ async def gen_inventory(message, person_id):
             debt = True
         if cat_num != 0:
             total += cat_num
-            valuenum += (sum(type_dict.values()) / type_dict[i]) * cat_num
+            # Skip value calculation for 0-weight cats (seasonal cats that aren't spawning)
+            if type_dict[i] > 0:
+                valuenum += (spawnable_weight_sum / type_dict[i]) * cat_num
             enchanted_num = enchanted_counts.get(i, 0)
             if i == adventuring_cat:
                 if enchanted_num > 0:
@@ -13955,11 +13980,15 @@ class PacksView(discord.ui.View):
         if is_festive:
             christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
             chosen_type = random.choice(christmas_cats)
+            # Use Christmas cat weights for value calculation
+            christmas_weight_sum = sum(christmas_cat_weights.values())
+            cat_emoji = get_emoji(chosen_type.lower() + "cat")
+            pre_cat_amount = goal_value / (christmas_weight_sum / christmas_cat_weights[chosen_type])
         else:
-            chosen_type = random.choice(cattypes)
+            chosen_type = random.choice(spawnable_cattypes)  # Only choose spawnable cats
+            cat_emoji = get_emoji(chosen_type.lower() + "cat")
+            pre_cat_amount = goal_value / (spawnable_weight_sum / type_dict[chosen_type])
             
-        cat_emoji = get_emoji(chosen_type.lower() + "cat")
-        pre_cat_amount = goal_value / (sum(type_dict.values()) / type_dict[chosen_type])
         # Apply active luck buff (if any) to increase chance of better rewards
         try:
             buffs = get_active_buffs(self.user.guild_id, self.user.user_id)
@@ -14231,9 +14260,9 @@ async def packs(message: discord.Interaction):
 
         # select cat type
         goal_value = final_level["value"]
-        chosen_type = random.choice(cattypes)
+        chosen_type = random.choice(spawnable_cattypes)  # Only choose spawnable cats
         cat_emoji = get_emoji(chosen_type.lower() + "cat")
-        pre_cat_amount = goal_value / (sum(type_dict.values()) / type_dict[chosen_type])
+        pre_cat_amount = goal_value / (spawnable_weight_sum / type_dict[chosen_type])
 
         # apply luck buff if present (module-level persistent buffs)
         try:
@@ -16905,14 +16934,15 @@ async def trade(message: discord.Interaction, person_id: discord.User):
                     # prisms
                     valuestr += f"{get_emoji('prism')} {k}\n"
                     for v2 in type_dict.values():
-                        valuenum += sum(type_dict.values()) / v2
+                        valuenum += spawnable_weight_sum / v2
                 elif k == "rains":
                     # rains
                     valuestr += f"☔ {v:,}m of Cat Rains\n"
                     valuenum += 900 * v
                 elif k in cattypes:
                     # cats
-                    valuenum += (sum(type_dict.values()) / type_dict[k]) * v
+                    if type_dict[k] > 0:  # Skip 0-weight seasonal cats
+                        valuenum += (spawnable_weight_sum / type_dict[k]) * v
                     total += v
                     aicon = get_emoji(k.lower() + "cat")
                     valuestr += f"{aicon} {k} {v:,}\n"
@@ -17412,7 +17442,11 @@ async def atm(message: discord.Interaction):
             for cat in cats_to_convert:
                 cat_type = cat.get('type')
                 try:
-                    per_value = sum(type_dict.values()) / type_dict.get(cat_type, 100)
+                    cat_weight = type_dict.get(cat_type, 100)
+                    if cat_weight > 0:
+                        per_value = spawnable_weight_sum / cat_weight
+                    else:
+                        per_value = 100  # Default for 0-weight seasonal cats
                 except Exception:
                     per_value = 100
                 kib_per = max(1, int(round(per_value)))
@@ -19581,8 +19615,9 @@ async def leaderboards(
             for cat_type in cattypes:
                 if not cat_type:
                     continue
-                weight = sum(type_dict.values()) / type_dict[cat_type]
-                sums.append(f'({weight}) * "cat_{cat_type}"')
+                if type_dict[cat_type] > 0:  # Only include spawnable cats in leaderboard
+                    weight = spawnable_weight_sum / type_dict[cat_type]
+                    sums.append(f'({weight}) * "cat_{cat_type}"')
             total_sum_expr = RawSQL("(" + " + ".join(sums) + ") AS final_value")
             if is_global:
                 result = await Profile.collect_limit(["user_id", total_sum_expr], f"{scope_condition} ORDER BY final_value DESC", *scope_params)
