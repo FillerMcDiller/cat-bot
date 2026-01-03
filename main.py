@@ -145,14 +145,14 @@ type_dict = {
     "eGirl": 2,
     "TV": 1,
     "Donut": 0.5,
-    # Christmas cats (Dec only in original, now always available)
-    "Santa": 40,
-    "Elf": 30,
-    "Snowman": 22,
-    "ChristmasTree": 20,
-    "Gingerbread": 18,
-    "Cocoa": 8,
-    "Present": 4,
+    # Christmas cats (disabled until next December)
+    # "Santa": 40,
+    # "Elf": 30,
+    # "Snowman": 22,
+    # "ChristmasTree": 20,
+    # "Gingerbread": 18,
+    # "Cocoa": 8,
+    # "Present": 4,
 }
 
 # this list stores unique non-duplicate cattypes
