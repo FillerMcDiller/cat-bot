@@ -145,18 +145,20 @@ type_dict = {
     "eGirl": 2,
     "TV": 1,
     "Donut": 0.5,
-    # Christmas cats (disabled until next December)
-    # "Santa": 40,
-    # "Elf": 30,
-    # "Snowman": 22,
-    # "ChristmasTree": 20,
-    # "Gingerbread": 18,
-    # "Cocoa": 8,
-    # "Present": 4,
+    # Christmas cats (weight 0 = won't spawn naturally, but available for packs/features)
+    "Santa": 0,
+    "Elf": 0,
+    "Snowman": 0,
+    "ChristmasTree": 0,
+    "Gingerbread": 0,
+    "Cocoa": 0,
+    "Present": 0,
 }
 
 # this list stores unique non-duplicate cattypes
 cattypes = list(type_dict.keys())
+# cattypes that can spawn naturally (excludes 0-weight cats)
+spawnable_cattypes = [cat for cat, weight in type_dict.items() if weight > 0]
 
 # Cat battle stats, abilities, and weaknesses
 # Format: "Type": {"hp": int, "dmg": int, "weakness": "Type", "abilities": [...]}
@@ -441,43 +443,43 @@ CAT_BATTLE_STATS = {
             {"name": "Homer's Revenge", "power_cost": 3, "damage_mult": 3.2, "requires_flip": True, "desc": "50% chance for D'oh! damage"}
         ]
     },
-    # Christmas Cats (disabled until next year)
-    # "Santa": {
-    #     "hp": 72, "dmg": 19,
-    #     "weakness": "Baby",
-    #     "abilities": [
-    #         {"name": "Ho Ho Ho", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Jolly laugh"},
-    #         {"name": "Gift Strike", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Present-powered attack"},
-    #         {"name": "Santa's Blessing", "power_cost": 4, "damage_mult": 2.4, "requires_flip": False, "desc": "Holiday magic strike"}
-    #     ]
-    # },
-    # "Elf": {
-    #     "hp": 70, "dmg": 18,
-    #     "weakness": "Rickroll",
-    #     "abilities": [
-    #         {"name": "Elf Kick", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Quick elf attack"},
-    #         {"name": "Workshop Tactics", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Strategic strike"},
-    #         {"name": "Magic Hammer", "power_cost": 3, "damage_mult": 2.5, "requires_flip": False, "desc": "Enchanted blow"}
-    #     ]
-    # },
-    # "Snowman": {
-    #     "hp": 68, "dmg": 16,
-    #     "weakness": "Fire",
-    #     "abilities": [
-    #         {"name": "Snowball", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Icy projectile"},
-    #         {"name": "Blizzard", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Cold storm"},
-    #         {"name": "Frostbite", "power_cost": 3, "damage_mult": 2.3, "requires_flip": True, "desc": "50% chance for freezing damage"}
-    #     ]
-    # },
-    # "ChristmasTree": {
-    #     "hp": 75, "dmg": 20,
-    #     "weakness": "Water",
-    #     "abilities": [
-    #         {"name": "Branch Swat", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Branch strike"},
-    #         {"name": "Ornament Barrage", "power_cost": 2, "damage_mult": 1.9, "requires_flip": False, "desc": "Festive projectiles"},
-    #         {"name": "Star Burst", "power_cost": 4, "damage_mult": 2.6, "requires_flip": False, "desc": "Radiant explosion"}
-    #     ]
-    # },
+    # Christmas Cats (available in type_dict with 0 weight, so they exist but don't spawn naturally)
+    "Santa": {
+        "hp": 72, "dmg": 19,
+        "weakness": "Baby",
+        "abilities": [
+            {"name": "Ho Ho Ho", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Jolly laugh"},
+            {"name": "Gift Strike", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Present-powered attack"},
+            {"name": "Santa's Blessing", "power_cost": 4, "damage_mult": 2.4, "requires_flip": False, "desc": "Holiday magic strike"}
+        ]
+    },
+    "Elf": {
+        "hp": 70, "dmg": 18,
+        "weakness": "Rickroll",
+        "abilities": [
+            {"name": "Elf Kick", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Quick elf attack"},
+            {"name": "Workshop Tactics", "power_cost": 2, "damage_mult": 1.7, "requires_flip": False, "desc": "Strategic strike"},
+            {"name": "Magic Hammer", "power_cost": 3, "damage_mult": 2.5, "requires_flip": False, "desc": "Enchanted blow"}
+        ]
+    },
+    "Snowman": {
+        "hp": 68, "dmg": 16,
+        "weakness": "Fire",
+        "abilities": [
+            {"name": "Snowball", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Icy projectile"},
+            {"name": "Blizzard", "power_cost": 2, "damage_mult": 1.8, "requires_flip": False, "desc": "Cold storm"},
+            {"name": "Frostbite", "power_cost": 3, "damage_mult": 2.3, "requires_flip": True, "desc": "50% chance for freezing damage"}
+        ]
+    },
+    "ChristmasTree": {
+        "hp": 75, "dmg": 20,
+        "weakness": "Water",
+        "abilities": [
+            {"name": "Branch Swat", "power_cost": 0, "damage_mult": 1.0, "requires_flip": False, "desc": "Branch strike"},
+            {"name": "Ornament Barrage", "power_cost": 2, "damage_mult": 1.9, "requires_flip": False, "desc": "Festive projectiles"},
+            {"name": "Star Burst", "power_cost": 4, "damage_mult": 2.6, "requires_flip": False, "desc": "Radiant explosion"}
+        ]
+    },
     "Gingerbread": {
         "hp": 65, "dmg": 14,
         "weakness": "Chef",
@@ -6486,7 +6488,8 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, modifiers=None):
         return
 
     if not localcat:
-        localcat = random.choices(cattypes, weights=type_dict.values())[0]
+        # Only spawn cats with weight > 0 (excludes disabled seasonal cats)
+        localcat = random.choices(spawnable_cattypes, weights=[type_dict[cat] for cat in spawnable_cattypes])[0]
     
     # Default to empty modifiers list
     if modifiers is None:
