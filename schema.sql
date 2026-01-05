@@ -30,7 +30,12 @@ CREATE TABLE IF NOT EXISTS public.channel (
     forcespawned boolean DEFAULT false,
     cattype character varying(20) DEFAULT ''::character varying,
     cat_rains bigint DEFAULT 0,
-    enchanted boolean DEFAULT false
+    enchanted boolean DEFAULT false,
+    race_channel_id bigint DEFAULT NULL,
+    race_frequency bigint DEFAULT 600,
+    spawn_luck_multiplier double precision DEFAULT 1.0,
+    disabled_cats text DEFAULT '',
+    pack_luck_multiplier double precision DEFAULT 1.0
 );
 
 

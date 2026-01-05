@@ -6466,16 +6466,23 @@ def alnum(string):
     return "".join(item for item in string.lower() if item.isalnum())
 
 
-def get_random_spawn_modifiers():
+def get_random_spawn_modifiers(luck_multiplier=1.0):
     """Determine which modifiers to apply to a naturally spawned cat.
-    - 1/3 chance for enchanted modifier
+    - Base 1/3 chance for enchanted modifier (affected by luck_multiplier)
     - During Christmas (Dec 1-31), additional chance for snowy modifier
     - Can have both snowy and enchanted modifiers
+    
+    Args:
+        luck_multiplier: Multiplier for enchanted spawn chance (1x-100x)
     """
     modifiers = []
     
-    # Check for enchanted modifier (1/3 chance)
-    if random.randint(1, 3) == 1:
+    # Check for enchanted modifier with luck multiplier
+    # Base chance is 1/3 (33.33%), multiplied by luck_multiplier
+    base_chance = 1.0 / 3.0
+    enchanted_chance = min(base_chance * luck_multiplier, 1.0)  # Cap at 100%
+    
+    if random.random() < enchanted_chance:
         modifiers.append("enchanted")
     
     # Check if it's Christmas time (Dec 1-31)
@@ -6501,8 +6508,19 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, modifiers=None):
         return
 
     if not localcat:
-        # Only spawn cats with weight > 0 (excludes disabled seasonal cats)
-        localcat = random.choices(spawnable_cattypes, weights=[type_dict[cat] for cat in spawnable_cattypes])[0]
+        # Get channel-specific disabled cats
+        disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
+        disabled_cats = {cat for cat in disabled_cats if cat}  # Remove empty strings
+        
+        # Filter spawnable cats to exclude disabled ones
+        available_cats = [cat for cat in spawnable_cattypes if cat not in disabled_cats]
+        
+        if not available_cats:
+            # If all cats are disabled, fall back to all spawnable cats
+            available_cats = spawnable_cattypes
+        
+        # Only spawn cats with weight > 0 (excludes disabled seasonal cats) and not in disabled list
+        localcat = random.choices(available_cats, weights=[type_dict[cat] for cat in available_cats])[0]
     
     # Default to empty modifiers list
     if modifiers is None:
@@ -6618,8 +6636,9 @@ async def maintaince_loop():
 
     # revive dead catch loops
     async for channel in Channel.limit(["channel_id"], "yet_to_spawn < $1 AND cat = 0", time.time(), refetch=False):
-        # Determine random modifiers for natural spawn
-        modifiers = get_random_spawn_modifiers()
+        # Determine random modifiers for natural spawn with channel luck multiplier
+        luck = getattr(channel, 'spawn_luck_multiplier', 1.0) or 1.0
+        modifiers = get_random_spawn_modifiers(luck_multiplier=luck)
         await spawn_cat(str(channel.channel_id), modifiers=modifiers)
         await asyncio.sleep(0.1)
 
@@ -7139,8 +7158,9 @@ async def maintaince_loop():
                     channel_db.cat_rains = time.time() + (rain_length * 60)
                     channel_db.yet_to_spawn = 0
                     await channel_db.save()
-                    # spawn initial cat immediately
-                    modifiers = get_random_spawn_modifiers()
+                    # spawn initial cat immediately with channel luck multiplier
+                    luck = getattr(channel_db, 'spawn_luck_multiplier', 1.0) or 1.0
+                    modifiers = get_random_spawn_modifiers(luck_multiplier=luck)
                     await spawn_cat(str(chosen), modifiers=modifiers)
                     last_random_rain_time = time.time()
                     try:
@@ -7265,14 +7285,34 @@ async def on_ready():
     # Start the daily random rain task
     bot.loop.create_task(schedule_daily_rain())
     
+    # Load race channels from database
+    await load_race_channels_from_db()
+    
     # Start the auto race scheduler and generate first race
     global next_race
     if next_race is None:
-        next_race = generate_race_data()
+        next_race = await generate_race_data()
     if not auto_race_scheduler.is_running():
         auto_race_scheduler.start()
     
     # Note: background_index_all_cats is started in setup() function, not here
+
+
+async def load_race_channels_from_db():
+    """Load all channels with race_channel_id set into the global race_channels dict"""
+    global race_channels
+    try:
+        # Query all channels that have races enabled
+        async for channel in Channel.limit(["channel_id", "race_channel_id"], "race_channel_id IS NOT NULL", refetch=False):
+            if channel.race_channel_id:
+                # We need to find the guild_id for this channel
+                discord_channel = bot.get_channel(channel.channel_id)
+                if discord_channel and hasattr(discord_channel, 'guild'):
+                    race_channels[discord_channel.guild.id] = channel.channel_id
+        print(f"[RACES] Loaded {len(race_channels)} race channels from database")
+    except Exception as e:
+        print(f"[RACES] Failed to load race channels: {e}")
+
 
 async def schedule_daily_rain():
     """Daily random rain task - picks a random channel and starts a 5-minute rain once per day."""
@@ -7998,6 +8038,18 @@ async def on_message(message: discord.Message):
         except Exception:
             pass
 
+    if "love you" in text.lower():
+        try:
+            if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                # Try to send with heart.gif if it exists, otherwise just send emoji
+                try:
+                    file = discord.File("images/heart.gif", filename="heart.gif")
+                    await message.reply(file=file)
+                except FileNotFoundError:
+                    await message.reply("❤️")
+        except Exception:
+            pass
+
     try:
         if (
             ("sus" in text.lower() or "amog" in text.lower() or "among" in text.lower() or "impost" in text.lower() or "report" in text.lower())
@@ -8544,8 +8596,9 @@ async def on_message(message: discord.Message):
                         temp_catches_storage.remove(pls_remove_me_later_k_thanks)
                     except Exception:
                         pass
-                    # 1 in 3 chance to spawn an enchanted cat
-                    modifiers = get_random_spawn_modifiers()
+                    # Spawn cat with channel luck multiplier
+                    luck = getattr(channel, 'spawn_luck_multiplier', 1.0) or 1.0
+                    modifiers = get_random_spawn_modifiers(luck_multiplier=luck)
                     await spawn_cat(str(message.channel.id), modifiers=modifiers)
                 else:
                     try:
@@ -10096,8 +10149,9 @@ async def give_rain(channel, duration):
     channel_data.cat_rains = time.time() + (duration * 60)
     channel_data.yet_to_spawn = 0
     await channel_data.save()
-    # 1 in 3 chance to spawn an enchanted cat
-    modifiers = get_random_spawn_modifiers()
+    # Spawn cat with channel luck multiplier
+    luck = getattr(channel_data, 'spawn_luck_multiplier', 1.0) or 1.0
+    modifiers = get_random_spawn_modifiers(luck_multiplier=luck)
     await spawn_cat(str(channel.id), modifiers=modifiers)
     # Notify the channel that a rain event has started
     try:
@@ -13380,8 +13434,9 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
         channel.cat_rains = time.time() + (rain_length * 60)
         channel.yet_to_spawn = 0
         await channel.save()
-        # 1 in 3 chance to spawn an enchanted cat
-        modifiers = get_random_spawn_modifiers()
+        # Spawn cat with channel luck multiplier
+        luck = getattr(channel, 'spawn_luck_multiplier', 1.0) or 1.0
+        modifiers = get_random_spawn_modifiers(luck_multiplier=luck)
         await spawn_cat(str(message.channel.id), modifiers=modifiers)
         if profile.rain_minutes:
             if rain_length > profile.rain_minutes:
@@ -18204,50 +18259,72 @@ CAT_SPEEDS = {
 }
 
 
-def generate_race_data():
+async def generate_race_data():
     """Generate a new race with 5 random cats and names"""
     race_cats = random.sample(cattypes, 5)
     race_names = random.sample(RACING_NAMES, 5)
+    
+    # Dynamic race frequency: get minimum race_frequency from all active race channels
+    min_frequency = None
+    for guild_id, channel_id in race_channels.items():
+        try:
+            channel_obj = bot.get_channel(channel_id)
+            if channel_obj:
+                channel_db = await Channel.get_or_none(channel_id=channel_id)
+                if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None:
+                    if min_frequency is None:
+                        min_frequency = channel_db.race_frequency
+                    else:
+                        min_frequency = min(min_frequency, channel_db.race_frequency)
+        except Exception:
+            pass
+    
+    # Default to 10 minutes if no valid frequency found
+    if min_frequency is None:
+        min_frequency = 600
+    
     return {
         "cats": race_cats,
         "names": race_names,
-        "start_time": time.time() + 600,  # 10 minutes from now
+        "start_time": time.time() + min_frequency,
         "bets": {},  # {user_id: {lane, amount, guild_id}}
     }
 
 
-@tasks.loop(minutes=10)
+@tasks.loop(seconds=60)  # Check every minute instead of fixed 10 minutes
 async def auto_race_scheduler():
-    """Automatically schedule and run races every 10 minutes"""
+    """Automatically schedule and run races at configurable intervals"""
     global next_race
     
-    # Generate next race
-    next_race = generate_race_data()
+    # Generate initial race if none exists
+    if next_race is None:
+        next_race = await generate_race_data()
+        return
     
-    # Wait until 30 seconds before race
-    wait_time = next_race["start_time"] - time.time() - 30
-    if wait_time > 0:
-        await asyncio.sleep(wait_time)
-    
-    # Send "Race starting soon" notification to all channels
-    for guild_id, channel_id in list(race_channels.items()):
-        try:
-            channel = bot.get_channel(channel_id)
-            if channel:
-                embed = discord.Embed(
-                    title="🏁 RACE STARTING IN 30 SECONDS! 🏁",
-                    description="Use `/race` now to place your bets!",
-                    color=Colors.yellow,
-                )
-                await channel.send(embed=embed)
-        except Exception:
-            pass
-    
-    # Wait 30 seconds
-    await asyncio.sleep(30)
-    
-    # Run the race
-    await run_scheduled_race()
+    # Check if it's time for the race (30 seconds before start)
+    if time.time() >= next_race["start_time"] - 30:
+        # Send "Race starting soon" notification to all channels
+        for guild_id, channel_id in list(race_channels.items()):
+            try:
+                channel = bot.get_channel(channel_id)
+                if channel:
+                    embed = discord.Embed(
+                        title="🏁 RACE STARTING IN 30 SECONDS! 🏁",
+                        description="Use `/race` now to place your bets!",
+                        color=Colors.yellow,
+                    )
+                    await channel.send(embed=embed)
+            except Exception:
+                pass
+        
+        # Wait 30 seconds
+        await asyncio.sleep(30)
+        
+        # Run the race
+        await run_scheduled_race()
+        
+        # Generate next race
+        next_race = await generate_race_data()
 
 
 async def run_scheduled_race():
@@ -18533,22 +18610,41 @@ async def race(message: discord.Interaction):
     await message.response.send_message(embed=embed, view=view)
 
 
-@bot.tree.command(description="Set this channel for automatic race announcements (Admin only)")
+@bot.tree.command(description="(DEPRECATED - Use /setup) Set this channel for automatic race announcements")
+@discord.app_commands.default_permissions(manage_guild=True)
 async def setracechannel(message: discord.Interaction):
-    """Set the current channel to receive automatic race announcements every 10 minutes"""
-    # Check if user has admin permissions
-    if not message.user.guild_permissions.administrator:
-        await message.response.send_message("You need administrator permissions to use this command!", ephemeral=True)
+    """Set the current channel to receive automatic race announcements
+    
+    DEPRECATED: This command is deprecated. Please use /setup instead to configure 
+    race settings along with other channel options.
+    """
+    # Check if channel is already setup for cats
+    channel = await Channel.get_or_none(channel_id=message.channel.id)
+    
+    if not channel:
+        await message.response.send_message(
+            "⚠️ This channel needs to be setup first! Use `/setup` to configure this channel for cats and races.",
+            ephemeral=True
+        )
         return
     
+    # Enable races in the database
+    channel.race_channel_id = message.channel.id
+    if not hasattr(channel, 'race_frequency') or channel.race_frequency is None:
+        channel.race_frequency = 600  # Default 10 minutes
+    await channel.save()
+    
+    # Add to global race_channels dict for compatibility
     global race_channels
     race_channels[message.guild.id] = message.channel.id
     
     await message.response.send_message(
-        f"✅ This channel will now receive automatic race announcements every 10 minutes!\n"
-        f"Users can use `/race` to view and bet on upcoming races.",
+        f"✅ This channel will now receive automatic race announcements every {channel.race_frequency // 60} minutes!\n"
+        f"Users can use `/race` to view and bet on upcoming races.\n\n"
+        f"💡 **Tip:** Use `/setup` for full configuration including race frequency, spawn settings, and more!",
         ephemeral=False,
     )
+
 
 
 @bot.tree.command(description="Watch cats race and bet kibble on the winner!")
@@ -19970,6 +20066,392 @@ async def givecat(message: discord.Interaction, person_id: discord.User, cat_typ
     await message.response.send_message(f"gave {person_id.mention} {amount:,} {cat_type} cats", allowed_mentions=discord.AllowedMentions(users=True))
 
 
+# Interactive Setup Components
+class SpawnFrequencyModal(discord.ui.Modal, title="Set Spawn Frequency"):
+    min_time = discord.ui.TextInput(
+        label="Minimum spawn time (seconds)",
+        placeholder="Default: 120 (2 minutes)",
+        default="120",
+        required=True,
+        min_length=1,
+        max_length=6,
+    )
+    max_time = discord.ui.TextInput(
+        label="Maximum spawn time (seconds)",
+        placeholder="Default: 1200 (20 minutes)",
+        default="1200",
+        required=True,
+        min_length=1,
+        max_length=6,
+    )
+
+    def __init__(self, channel_id: int):
+        super().__init__()
+        self.channel_id = channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            min_val = int(str(self.min_time.value))
+            max_val = int(str(self.max_time.value))
+            
+            if min_val < 10 or max_val < 10:
+                await interaction.response.send_message("⚠️ Times must be at least 10 seconds!", ephemeral=True)
+                return
+            if min_val > max_val:
+                await interaction.response.send_message("⚠️ Minimum time can't be greater than maximum time!", ephemeral=True)
+                return
+            
+            channel = await Channel.get_or_none(channel_id=self.channel_id)
+            if channel:
+                channel.spawn_times_min = min_val
+                channel.spawn_times_max = max_val
+                await channel.save()
+                await interaction.response.send_message(
+                    f"✅ Spawn frequency set to {min_val}-{max_val} seconds!",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter valid numbers!", ephemeral=True)
+
+
+class SpawnLuckModal(discord.ui.Modal, title="Set Spawn Luck Multiplier"):
+    luck = discord.ui.TextInput(
+        label="Luck multiplier (1x - 100x)",
+        placeholder="Default: 1.0 (normal luck)",
+        default="1.0",
+        required=True,
+        min_length=1,
+        max_length=6,
+    )
+
+    def __init__(self, channel_id: int):
+        super().__init__()
+        self.channel_id = channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            luck_val = float(str(self.luck.value))
+            
+            if luck_val < 1.0 or luck_val > 100.0:
+                await interaction.response.send_message("⚠️ Luck multiplier must be between 1x and 100x!", ephemeral=True)
+                return
+            
+            channel = await Channel.get_or_none(channel_id=self.channel_id)
+            if channel:
+                channel.spawn_luck_multiplier = luck_val
+                await channel.save()
+                await interaction.response.send_message(
+                    f"✅ Spawn luck multiplier set to {luck_val}x!\n"
+                    f"💎 Enchanted cats will now spawn {luck_val}x more frequently!",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+
+
+class PackLuckModal(discord.ui.Modal, title="Set Pack Luck Multiplier"):
+    luck = discord.ui.TextInput(
+        label="Pack luck multiplier (1x - 100x)",
+        placeholder="Default: 1.0 (normal luck)",
+        default="1.0",
+        required=True,
+        min_length=1,
+        max_length=6,
+    )
+
+    def __init__(self, channel_id: int):
+        super().__init__()
+        self.channel_id = channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            luck_val = float(str(self.luck.value))
+            
+            if luck_val < 1.0 or luck_val > 100.0:
+                await interaction.response.send_message("⚠️ Pack luck multiplier must be between 1x and 100x!", ephemeral=True)
+                return
+            
+            channel = await Channel.get_or_none(channel_id=self.channel_id)
+            if channel:
+                channel.pack_luck_multiplier = luck_val
+                await channel.save()
+                await interaction.response.send_message(
+                    f"✅ Pack luck multiplier set to {luck_val}x!\n"
+                    f"📦 Better cats will appear {luck_val}x more often in packs!",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+
+
+class CatSelectionView(discord.ui.View):
+    def __init__(self, channel_id: int, disabled_cats: set):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.disabled_cats = disabled_cats.copy()
+        self.current_page = 0
+        self.cats_per_page = 12  # 12 cats = 3 rows, leaving rows 3-4 for controls
+        self.update_buttons()
+    
+    def update_buttons(self):
+        self.clear_items()
+        
+        # Get page of cats
+        start_idx = self.current_page * self.cats_per_page
+        end_idx = start_idx + self.cats_per_page
+        page_cats = spawnable_cattypes[start_idx:end_idx]
+        
+        # Add toggle buttons for each cat (4 per row)
+        for i, cat in enumerate(page_cats):
+            is_disabled = cat in self.disabled_cats
+            label = f"{'❌' if is_disabled else '✅'} {cat}"
+            style = ButtonStyle.secondary if is_disabled else ButtonStyle.primary
+            
+            button = Button(label=label, style=style, custom_id=f"cat_{cat}", row=i // 4)
+            button.callback = self.make_toggle_callback(cat)
+            self.add_item(button)
+        
+        # Navigation buttons on row 3
+        if self.current_page > 0:
+            prev_btn = Button(label="◀️ Previous", style=ButtonStyle.secondary, row=3)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+        
+        if end_idx < len(spawnable_cattypes):
+            next_btn = Button(label="Next ▶️", style=ButtonStyle.secondary, row=3)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        # Toggle All and Save buttons on row 4
+        toggle_all_btn = Button(label="🔄 Toggle All", style=ButtonStyle.secondary, row=4)
+        toggle_all_btn.callback = self.toggle_all
+        self.add_item(toggle_all_btn)
+        
+        save_btn = Button(label="💾 Save", style=ButtonStyle.success, row=4)
+        save_btn.callback = self.save_selection
+        self.add_item(save_btn)
+    
+    def make_toggle_callback(self, cat: str):
+        async def callback(interaction: discord.Interaction):
+            if cat in self.disabled_cats:
+                self.disabled_cats.remove(cat)
+            else:
+                self.disabled_cats.add(cat)
+            self.update_buttons()
+            await interaction.response.edit_message(
+                content=f"**Select which cats can spawn** (Page {self.current_page + 1}/{(len(spawnable_cattypes) - 1) // self.cats_per_page + 1})\n"
+                        f"✅ = Enabled | ❌ = Disabled | Currently disabled: {len(self.disabled_cats)}",
+                view=self
+            )
+        return callback
+    
+    async def prev_page(self, interaction: discord.Interaction):
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(
+            content=f"**Select which cats can spawn** (Page {self.current_page + 1}/{(len(spawnable_cattypes) - 1) // self.cats_per_page + 1})\n"
+                    f"✅ = Enabled | ❌ = Disabled | Currently disabled: {len(self.disabled_cats)}",
+            view=self
+        )
+    
+    async def next_page(self, interaction: discord.Interaction):
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(
+            content=f"**Select which cats can spawn** (Page {self.current_page + 1}/{(len(spawnable_cattypes) - 1) // self.cats_per_page + 1})\n"
+                    f"✅ = Enabled | ❌ = Disabled | Currently disabled: {len(self.disabled_cats)}",
+            view=self
+        )
+    
+    async def toggle_all(self, interaction: discord.Interaction):
+        # Get current page cats
+        start_idx = self.current_page * self.cats_per_page
+        end_idx = start_idx + self.cats_per_page
+        page_cats = spawnable_cattypes[start_idx:end_idx]
+        
+        # If any are enabled, disable all; otherwise enable all
+        any_enabled = any(cat not in self.disabled_cats for cat in page_cats)
+        if any_enabled:
+            for cat in page_cats:
+                self.disabled_cats.add(cat)
+        else:
+            for cat in page_cats:
+                self.disabled_cats.discard(cat)
+        
+        self.update_buttons()
+        await interaction.response.edit_message(
+            content=f"**Select which cats can spawn** (Page {self.current_page + 1}/{(len(spawnable_cattypes) - 1) // self.cats_per_page + 1})\n"
+                    f"✅ = Enabled | ❌ = Disabled | Currently disabled: {len(self.disabled_cats)}",
+            view=self
+        )
+    
+    async def save_selection(self, interaction: discord.Interaction):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            # Save as comma-separated string
+            channel.disabled_cats = ",".join(sorted(self.disabled_cats)) if self.disabled_cats else ""
+            await channel.save()
+            
+            enabled_count = len(spawnable_cattypes) - len(self.disabled_cats)
+            await interaction.response.send_message(
+                f"✅ Cat selection saved!\n"
+                f"📊 **{enabled_count}** cats enabled, **{len(self.disabled_cats)}** cats disabled",
+                ephemeral=True
+            )
+            self.stop()
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+
+
+class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
+    frequency = discord.ui.TextInput(
+        label="Race frequency (seconds)",
+        placeholder="Default: 600 (10 minutes)",
+        default="600",
+        required=True,
+        min_length=1,
+        max_length=6,
+    )
+
+    def __init__(self, channel_id: int):
+        super().__init__()
+        self.channel_id = channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            freq_val = int(str(self.frequency.value))
+            
+            if freq_val < 60:
+                await interaction.response.send_message("⚠️ Race frequency must be at least 60 seconds!", ephemeral=True)
+                return
+            
+            channel = await Channel.get_or_none(channel_id=self.channel_id)
+            if channel:
+                channel.race_frequency = freq_val
+                await channel.save()
+                
+                # Regenerate the next race to apply new timing immediately
+                global next_race
+                if next_race is not None:
+                    # Keep existing bets if any
+                    existing_bets = next_race.get("bets", {})
+                    next_race = await generate_race_data()
+                    next_race["bets"] = existing_bets
+                    
+                    # Show when the next race will be
+                    next_race_time = int(next_race["start_time"])
+                    await interaction.response.send_message(
+                        f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
+                        f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
+                        f"⏰ Next race will be scheduled with the new frequency.",
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+
+
+class SetupConfigView(discord.ui.View):
+    def __init__(self, channel_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.channel_id = channel_id
+
+    @discord.ui.button(label="⏰ Spawn Frequency", style=ButtonStyle.primary, row=0)
+    async def spawn_frequency_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SpawnFrequencyModal(self.channel_id))
+
+    @discord.ui.button(label="🍀 Spawn Luck", style=ButtonStyle.primary, row=0)
+    async def spawn_luck_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SpawnLuckModal(self.channel_id))
+
+    @discord.ui.button(label="📦 Pack Luck", style=ButtonStyle.primary, row=0)
+    async def pack_luck_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PackLuckModal(self.channel_id))
+
+    @discord.ui.button(label="🐱 Select Cats", style=ButtonStyle.primary, row=1)
+    async def cat_selection_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            # Parse disabled cats
+            disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
+            disabled_cats = {cat for cat in disabled_cats if cat}  # Remove empty strings
+            
+            view = CatSelectionView(self.channel_id, disabled_cats)
+            await interaction.response.send_message(
+                f"**Select which cats can spawn** (Page 1/{(len(spawnable_cattypes) - 1) // 12 + 1})\n"
+                f"✅ = Enabled | ❌ = Disabled | Currently disabled: {len(disabled_cats)}",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+
+    @discord.ui.button(label="🏁 Enable Races", style=ButtonStyle.success, row=2)
+    async def race_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            channel.race_channel_id = self.channel_id
+            if not hasattr(channel, 'race_frequency') or channel.race_frequency is None:
+                channel.race_frequency = 600  # Default 10 minutes
+            await channel.save()
+            
+            # Add to global race_channels dict
+            global race_channels
+            race_channels[interaction.guild.id] = self.channel_id
+            
+            await interaction.response.send_message(
+                f"✅ Races enabled in this channel! Races will occur every {channel.race_frequency // 60} minutes.\n"
+                f"💡 Use the '⚙️ Race Frequency' button to adjust timing.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+
+    @discord.ui.button(label="⚙️ Race Frequency", style=ButtonStyle.secondary, row=2)
+    async def race_frequency_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RaceFrequencyModal(self.channel_id))
+
+    @discord.ui.button(label="✅ Done", style=ButtonStyle.success, row=3)
+    async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            race_status = "✅ Enabled" if channel.race_channel_id else "❌ Disabled"
+            
+            # Calculate enabled cats
+            disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
+            disabled_cats = {cat for cat in disabled_cats if cat}
+            enabled_count = len(spawnable_cattypes) - len(disabled_cats)
+            
+            summary = (
+                f"**Setup Complete!** 🎉\n\n"
+                f"📊 **Configuration Summary:**\n"
+                f"⏰ Spawn Frequency: {channel.spawn_times_min}-{channel.spawn_times_max} seconds\n"
+                f"🍀 Spawn Luck: {channel.spawn_luck_multiplier if hasattr(channel, 'spawn_luck_multiplier') and channel.spawn_luck_multiplier else 1.0}x\n"
+                f"📦 Pack Luck: {channel.pack_luck_multiplier if hasattr(channel, 'pack_luck_multiplier') and channel.pack_luck_multiplier else 1.0}x\n"
+                f"🐱 Enabled Cats: {enabled_count}/{len(spawnable_cattypes)}\n"
+                f"🏁 Races: {race_status}"
+            )
+            if channel.race_channel_id:
+                summary += f"\n⚙️ Race Frequency: {channel.race_frequency if hasattr(channel, 'race_frequency') and channel.race_frequency else 600} seconds"
+            
+            await interaction.response.send_message(summary, ephemeral=False)
+            self.stop()
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+
+
 @bot.tree.command(name="setup", description="(ADMIN) Setup cat in current channel")
 @discord.app_commands.default_permissions(manage_guild=True)
 async def setup_channel(message: discord.Interaction):
@@ -19978,43 +20460,69 @@ async def setup_channel(message: discord.Interaction):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
     
-    if await Channel.get_or_none(channel_id=message.channel.id):
-        await message.response.send_message(
-            "bruh you already setup cat here are you dumb\n\nthere might already be a cat sitting in chat. type `cat` to catch it."
-        )
-        return
+    # Check if channel already exists
+    existing_channel = await Channel.get_or_none(channel_id=message.channel.id)
+    is_reconfigure = existing_channel is not None
 
-    try:
-        channel_permissions = await fetch_perms(message)
-        needed_perms = {
-            "View Channel": channel_permissions.view_channel,
-            "Send Messages": channel_permissions.send_messages,
-            "Attach Files": channel_permissions.attach_files,
-        }
-        if isinstance(message.channel, discord.Thread):
-            needed_perms["Send Messages in Threads"] = channel_permissions.send_messages_in_threads
+    if not is_reconfigure:
+        # New setup - create channel and spawn initial cat
+        try:
+            channel_permissions = await fetch_perms(message)
+            needed_perms = {
+                "View Channel": channel_permissions.view_channel,
+                "Send Messages": channel_permissions.send_messages,
+                "Attach Files": channel_permissions.attach_files,
+            }
+            if isinstance(message.channel, discord.Thread):
+                needed_perms["Send Messages in Threads"] = channel_permissions.send_messages_in_threads
 
-        for name, value in needed_perms.copy().items():
-            if value:
-                needed_perms.pop(name)
+            for name, value in needed_perms.copy().items():
+                if value:
+                    needed_perms.pop(name)
 
-        missing_perms = list(needed_perms.keys())
-        if len(missing_perms) != 0:
-            needed_perms = "\n- ".join(missing_perms)
-            await message.response.send_message(
-                f":x: Missing Permissions! Please give me the following:\n- {needed_perms}\nHint: try setting channel permissions if server ones don't work."
-            )
+            missing_perms = list(needed_perms.keys())
+            if len(missing_perms) != 0:
+                needed_perms = "\n- ".join(missing_perms)
+                await message.response.send_message(
+                    f":x: Missing Permissions! Please give me the following:\n- {needed_perms}\nHint: try setting channel permissions if server ones don't work."
+                )
+                return
+
+            await Channel.create(channel_id=message.channel.id)
+        except Exception:
+            await message.response.send_message("this channel gives me bad vibes.")
             return
 
-        await Channel.create(channel_id=message.channel.id)
-    except Exception:
-        await message.response.send_message("this channel gives me bad vibes.")
-        return
-
-    # 1 in 3 chance to spawn an enchanted cat
-    modifiers = get_random_spawn_modifiers()
-    await spawn_cat(str(message.channel.id), modifiers=modifiers)
-    await message.response.send_message(f"ok, now i will also send cats in <#{message.channel.id}>")
+        # Spawn initial cat with default modifiers
+        modifiers = get_random_spawn_modifiers(luck_multiplier=1.0)
+        await spawn_cat(str(message.channel.id), modifiers=modifiers)
+    
+    # Present interactive setup view
+    view = SetupConfigView(message.channel.id)
+    
+    if is_reconfigure:
+        title = "⚙️ Reconfigure Channel Settings"
+        intro = f"Update settings for <#{message.channel.id}>:\n\n"
+    else:
+        title = "🎉 Channel Setup Complete!"
+        intro = f"Cats will now spawn in <#{message.channel.id}>!\n\n"
+    
+    embed = discord.Embed(
+        title=title,
+        description=(
+            intro +
+            f"**Configure Settings:**\n"
+            f"⏰ **Spawn Frequency** - How often cats appear (default: 2-20 min)\n"
+            f"🍀 **Spawn Luck** - Chance for enchanted cats (default: 1x)\n"
+            f"📦 **Pack Luck** - Better cats in packs (default: 1x)\n"
+            f"🐱 **Select Cats** - Choose which cats can spawn\n"
+            f"🏁 **Enable Races** - Turn on automatic cat races\n"
+            f"⚙️ **Race Frequency** - How often races happen (default: 10 min)\n\n"
+            f"Click the buttons below to customize your settings, or click **Done** to finish!"
+        ),
+        color=Colors.green,
+    )
+    await message.response.send_message(embed=embed, view=view)
 
 
 @bot.tree.command(description="(ADMIN) Undo the setup")
@@ -20026,6 +20534,11 @@ async def forget(message: discord.Interaction):
         return
     
     if channel := await Channel.get_or_none(channel_id=message.channel.id):
+        # Remove from race_channels if it was a race channel
+        global race_channels
+        if message.guild.id in race_channels and race_channels[message.guild.id] == message.channel.id:
+            del race_channels[message.guild.id]
+        
         await channel.delete()
         await message.response.send_message(f"ok, now i wont send cats in <#{message.channel.id}>")
     else:
@@ -20542,6 +21055,7 @@ def _breed_candidates(parent_a: str, parent_b: str) -> list[str]:
     Return the candidate pool for offspring.
     Changed: include all cat types as possible offspring so chances are centered
     around the averaged rarity of parents (instead of requiring strictly rarer).
+    Only includes cats with weight > 0 (excludes disabled seasonal cats).
     """
     try:
         # validate parents exist
@@ -20549,8 +21063,8 @@ def _breed_candidates(parent_a: str, parent_b: str) -> list[str]:
         _ = cattypes.index(parent_b)
     except ValueError:
         return []
-    # allow every cat type to be possible (weights will bias toward the average)
-    return cattypes[:]
+    # allow every spawnable cat type to be possible (excludes weight=0 cats)
+    return spawnable_cattypes[:]
 
 
 def _breed_raw_weights(parent_a: str, parent_b: str, candidates: list[str]) -> list[float]:
@@ -20570,9 +21084,20 @@ def _breed_raw_weights(parent_a: str, parent_b: str, candidates: list[str]) -> l
     if not candidates:
         return []
 
-    # parent log-average
-    log_parent_a = math.log(type_dict[parent_a])
-    log_parent_b = math.log(type_dict[parent_b])
+    # Filter out any candidates with non-positive weights (safety check)
+    candidates = [c for c in candidates if type_dict.get(c, 0) > 0]
+    if not candidates:
+        return []
+
+    # parent log-average (ensure parents have positive weights)
+    parent_a_weight = type_dict.get(parent_a, 1)
+    parent_b_weight = type_dict.get(parent_b, 1)
+    if parent_a_weight <= 0 or parent_b_weight <= 0:
+        # Fallback: equal weights for all candidates
+        return [1.0] * len(candidates)
+    
+    log_parent_a = math.log(parent_a_weight)
+    log_parent_b = math.log(parent_b_weight)
     avg_log = (log_parent_a + log_parent_b) / 2.0
 
     # precompute logs and basic ranges
@@ -20629,18 +21154,73 @@ def breed_chances(parent_a: str, parent_b: str) -> dict[str, float]:
     return {candidates[i]: (raw[i] / total) * 100.0 for i in range(len(candidates))}
 
 
-def _pick_breed_result(parent_a: str, parent_b: str) -> Optional[str]:
+def _inherit_modifiers(parent1_inst: dict, parent2_inst: dict) -> list[str]:
     """
-    Return a chosen cat type (string) or None if parents invalid.
+    Determine which modifiers the offspring inherits from parents.
+    
+    Rules:
+    - If both parents have the same modifier: 100% chance (guaranteed inheritance)
+    - If one parent has a modifier: 50% chance
+    - If parents have different modifiers: 50% chance for each
+    
+    Args:
+        parent1_inst: First parent cat instance dict (with 'modifiers' key)
+        parent2_inst: Second parent cat instance dict (with 'modifiers' key)
+    
+    Returns:
+        List of modifier strings inherited by offspring
+    """
+    parent1_mods = set(parent1_inst.get('modifiers', []))
+    parent2_mods = set(parent2_inst.get('modifiers', []))
+    
+    offspring_mods = []
+    
+    # Modifiers both parents have: 100% chance
+    shared_mods = parent1_mods & parent2_mods
+    offspring_mods.extend(shared_mods)
+    
+    # Modifiers only one parent has: 50% chance each
+    unique_to_parent1 = parent1_mods - parent2_mods
+    unique_to_parent2 = parent2_mods - parent1_mods
+    
+    for mod in unique_to_parent1:
+        if random.random() < 0.5:
+            offspring_mods.append(mod)
+    
+    for mod in unique_to_parent2:
+        if random.random() < 0.5:
+            offspring_mods.append(mod)
+    
+    return offspring_mods
+
+
+def _pick_breed_result(parent_a: str, parent_b: str, parent_a_inst: dict = None, parent_b_inst: dict = None) -> tuple[Optional[str], list[str]]:
+    """
+    Return a chosen cat type (string) and inherited modifiers, or (None, []) if parents invalid.
     Uses averaged-parent weighting (see _breed_raw_weights).
+    
+    Args:
+        parent_a: Type of first parent (e.g., "Fine")
+        parent_b: Type of second parent (e.g., "Rare")
+        parent_a_inst: Optional first parent instance dict (for modifier inheritance)
+        parent_b_inst: Optional second parent instance dict (for modifier inheritance)
+    
+    Returns:
+        Tuple of (offspring_type, inherited_modifiers)
     """
     candidates = _breed_candidates(parent_a, parent_b)
     if not candidates:
-        return None
+        return (None, [])
 
     raw = _breed_raw_weights(parent_a, parent_b, candidates)
     choice = random.choices(candidates, weights=raw, k=1)[0]
-    return choice
+    
+    # Inherit modifiers if parent instances provided
+    inherited_mods = []
+    if parent_a_inst and parent_b_inst:
+        inherited_mods = _inherit_modifiers(parent_a_inst, parent_b_inst)
+    
+    return (choice, inherited_mods)
 
 
 @bot.tree.command(description="Breed two cats to get an offspring (chances are based on parents' averaged rarity)")
@@ -20772,16 +21352,27 @@ async def breed(
             profile[f"cat_{cat1_type}"] -= 1
             profile[f"cat_{cat2_type}"] -= 1
             
-            # Generate offspring
-            offspring = _pick_breed_result(cat1_type, cat2_type)
+            # Generate offspring with modifier inheritance
+            offspring, inherited_modifiers = _pick_breed_result(cat1_type, cat2_type, cat1_inst, cat2_inst)
             if offspring:
                 profile[f"cat_{offspring}"] += 1
                 profile.breeds_total = (profile.breeds_total or 0) + 1
                 await profile.save()
                 
-                # Create offspring instance
+                # Create offspring instance with inherited modifiers
                 try:
+                    # First, ensure base instance exists
                     await auto_sync_cat_instances(profile, offspring)
+                    
+                    # If modifiers were inherited, apply them to the newest offspring instance
+                    if inherited_modifiers:
+                        cats_list_updated = await get_user_cats(message.guild.id, message.user.id)
+                        # Find the newest cat of the offspring type (last one added)
+                        offspring_instances = [c for c in cats_list_updated if c.get("type") == offspring]
+                        if offspring_instances:
+                            newest_offspring = offspring_instances[-1]
+                            newest_offspring["modifiers"] = inherited_modifiers
+                            await save_user_cats(message.guild.id, message.user.id, cats_list_updated)
                 except Exception:
                     pass
                 
@@ -20792,15 +21383,29 @@ async def breed(
                 except Exception:
                     pass
                 
+                # Prepare modifier display
+                parent1_mods = cat1_inst.get('modifiers', [])
+                parent2_mods = cat2_inst.get('modifiers', [])
+                parent1_mod_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in parent1_mods if m in CAT_MODIFIERS]) if parent1_mods else ""
+                parent2_mod_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in parent2_mods if m in CAT_MODIFIERS]) if parent2_mods else ""
+                offspring_mod_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in inherited_modifiers if m in CAT_MODIFIERS]) if inherited_modifiers else ""
+                
+                modifier_info = ""
+                if inherited_modifiers:
+                    modifier_names = ", ".join([CAT_MODIFIERS[m].get("name", m) for m in inherited_modifiers if m in CAT_MODIFIERS])
+                    modifier_info = f"\n✨ **Inherited modifiers:** {offspring_mod_text} {modifier_names}"
+                
                 # Send result
                 await message.followup.send(
                     f"🧬 **Breeding complete!**\n\n"
-                    f"{get_emoji(cat1_type.lower()+'cat')} **{cat1_inst.get('name')}** ({cat1_type}) + "
-                    f"{get_emoji(cat2_type.lower()+'cat')} **{cat2_inst.get('name')}** ({cat2_type}) → "
-                    f"{get_emoji(offspring.lower()+'cat')} **{offspring}**!",
+                    f"{get_emoji(cat1_type.lower()+'cat')} {parent1_mod_text}**{cat1_inst.get('name')}** ({cat1_type}) + "
+                    f"{get_emoji(cat2_type.lower()+'cat')} {parent2_mod_text}**{cat2_inst.get('name')}** ({cat2_type}) → "
+                    f"{get_emoji(offspring.lower()+'cat')} {offspring_mod_text}**{offspring}**!{modifier_info}",
                     ephemeral=False
                 )
-                await message.channel.send(f"{message.user.mention} bred two cats and got a **{offspring}**!")
+                
+                offspring_display = f"{offspring_mod_text}{offspring}" if offspring_mod_text else offspring
+                await message.channel.send(f"{message.user.mention} bred two cats and got a **{offspring_display}**!")
                 
                 # Achievement
                 try:
@@ -20818,8 +21423,8 @@ async def breed(
             return
         
         # REGULAR BREEDING MENU: No parameters provided
-        # State variables for breeding pairs
-        breed_pairs = []  # Will store [(cat1_type, cat2_type), ...]
+        # State variables for breeding pairs - now stores (cat1_inst, cat2_inst) tuples
+        breed_pairs = []  # Will store [(cat1_inst_dict, cat2_inst_dict), ...]
         
         class BreedView(View):
             def __init__(self):
@@ -20847,8 +21452,8 @@ async def breed(
                     await do_funny(btn_it)
                     return
                 
-                # Track parents for this pair
-                pair_parents = []
+                # Track parents for this pair - store full instances
+                pair_parent_instances = []
                 
                 async def parent_selected(sel_it: discord.Interaction, selected_cat: dict):
                     cat_type = selected_cat.get('type')
@@ -20856,12 +21461,15 @@ async def breed(
                         await sel_it.followup.send("Invalid cat selected.", ephemeral=True)
                         return
                     
-                    pair_parents.append(cat_type)
+                    # Store the full instance, not just the type
+                    pair_parent_instances.append(selected_cat)
                     
-                    if len(pair_parents) == 1:
+                    if len(pair_parent_instances) == 1:
                         # First parent selected
+                        cat_mods = selected_cat.get('modifiers', [])
+                        mod_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in cat_mods if m in CAT_MODIFIERS]) if cat_mods else ""
                         await sel_it.followup.send(
-                            f"✅ First parent: {get_emoji(cat_type.lower() + 'cat')} **{cat_type}**\n"
+                            f"✅ First parent: {get_emoji(cat_type.lower() + 'cat')} {mod_text}**{selected_cat.get('name', cat_type)}**\n"
                             f"Now select the second parent...",
                             ephemeral=True
                         )
@@ -20877,17 +21485,25 @@ async def breed(
                         )
                         await sel_it.followup.send("Select second parent:", view=selector2, ephemeral=True)
                     
-                    elif len(pair_parents) == 2:
+                    elif len(pair_parent_instances) == 2:
                         # Both parents selected, add to pairs
-                        breed_pairs.append((pair_parents[0], pair_parents[1]))
+                        breed_pairs.append((pair_parent_instances[0], pair_parent_instances[1]))
                         
+                        # Format pairs display with modifiers
                         pairs_text = "\n".join([
-                            f"{i+1}. {get_emoji(p1.lower()+'cat')} {p1} + {get_emoji(p2.lower()+'cat')} {p2}"
+                            f"{i+1}. {get_emoji(p1.get('type').lower()+'cat')} {''.join([CAT_MODIFIERS[m]['emoji'] for m in p1.get('modifiers', []) if m in CAT_MODIFIERS])}{p1.get('name', p1.get('type'))} + "
+                            f"{get_emoji(p2.get('type').lower()+'cat')} {''.join([CAT_MODIFIERS[m]['emoji'] for m in p2.get('modifiers', []) if m in CAT_MODIFIERS])}{p2.get('name', p2.get('type'))}"
                             for i, (p1, p2) in enumerate(breed_pairs)
                         ])
                         
+                        cat1_mods = pair_parent_instances[0].get('modifiers', [])
+                        cat2_mods = pair_parent_instances[1].get('modifiers', [])
+                        mod1_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in cat1_mods if m in CAT_MODIFIERS]) if cat1_mods else ""
+                        mod2_text = "".join([CAT_MODIFIERS[m]["emoji"] for m in cat2_mods if m in CAT_MODIFIERS]) if cat2_mods else ""
+                        
                         await sel_it.followup.send(
-                            f"✅ Added pair: {get_emoji(pair_parents[0].lower()+'cat')} **{pair_parents[0]}** + {get_emoji(pair_parents[1].lower()+'cat')} **{pair_parents[1]}**\n\n"
+                            f"✅ Added pair: {get_emoji(pair_parent_instances[0].get('type').lower()+'cat')} {mod1_text}**{pair_parent_instances[0].get('name')}** + "
+                            f"{get_emoji(pair_parent_instances[1].get('type').lower()+'cat')} {mod2_text}**{pair_parent_instances[1].get('name')}**\n\n"
                             f"**All Pairs ({len(breed_pairs)}):**\n{pairs_text}",
                             ephemeral=True
                         )
@@ -20921,50 +21537,59 @@ async def breed(
                 
                 await btn_it.response.defer()
                 
-                # Verify user still has all cats
+                # Get fresh cat list
+                fresh_cats_list = await get_user_cats(message.guild.id, message.user.id)
                 fresh_profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
                 
-                # Count requirements
-                from collections import Counter
-                cat_requirements = Counter()
-                for p1, p2 in breed_pairs:
-                    if p1 == p2:
-                        cat_requirements[p1] += 2
-                    else:
-                        cat_requirements[p1] += 1
-                        cat_requirements[p2] += 1
-                
-                # Check availability
-                for cat_type, needed in cat_requirements.items():
-                    available = getattr(fresh_profile, f"cat_{cat_type}", 0)
-                    if available < needed:
-                        await btn_it.followup.send(f"❌ Not enough {cat_type} cats! Need {needed}, have {available}.", ephemeral=True)
+                # Verify all cats still exist in the list (by ID)
+                cat_ids_in_list = {c.get('id') for c in fresh_cats_list if c.get('id')}
+                for p1_inst, p2_inst in breed_pairs:
+                    if p1_inst.get('id') not in cat_ids_in_list or p2_inst.get('id') not in cat_ids_in_list:
+                        await btn_it.followup.send("❌ One or more cats are no longer available!", ephemeral=True)
                         return
                 
                 # Perform all breeding
                 results = []
-                for p1, p2 in breed_pairs:
-                    # Consume parents
-                    if p1 == p2:
-                        fresh_profile[f"cat_{p1}"] -= 2
-                    else:
-                        fresh_profile[f"cat_{p1}"] -= 1
-                        fresh_profile[f"cat_{p2}"] -= 1
+                for p1_inst, p2_inst in breed_pairs:
+                    p1_type = p1_inst.get('type')
+                    p2_type = p2_inst.get('type')
                     
-                    # Generate offspring
-                    offspring = _pick_breed_result(p1, p2)
+                    # Remove the specific instances from the list
+                    fresh_cats_list = [c for c in fresh_cats_list if c.get('id') not in [p1_inst.get('id'), p2_inst.get('id')]]
+                    
+                    # Update profile cat counts
+                    fresh_profile[f"cat_{p1_type}"] -= 1
+                    fresh_profile[f"cat_{p2_type}"] -= 1
+                    
+                    # Generate offspring with modifier inheritance
+                    offspring, inherited_mods = _pick_breed_result(p1_type, p2_type, p1_inst, p2_inst)
                     if offspring:
                         fresh_profile[f"cat_{offspring}"] += 1
-                        results.append((p1, p2, offspring))
-                        
-                        try:
-                            await auto_sync_cat_instances(fresh_profile, offspring)
-                        except Exception:
-                            pass
+                        results.append((p1_inst, p2_inst, offspring, inherited_mods))
                 
-                # Track total breeds
+                # Save the updated cat list
+                await save_user_cats(message.guild.id, message.user.id, fresh_cats_list)
+                
+                # Track total breeds and save profile
                 fresh_profile.breeds_total = (fresh_profile.breeds_total or 0) + len(breed_pairs)
                 await fresh_profile.save()
+                
+                # Create offspring instances with modifiers
+                for p1_inst, p2_inst, offspring, inherited_mods in results:
+                    try:
+                        # Create base instance
+                        await auto_sync_cat_instances(fresh_profile, offspring)
+                        
+                        # Apply inherited modifiers if any
+                        if inherited_mods:
+                            fresh_cats_list = await get_user_cats(message.guild.id, message.user.id)
+                            offspring_instances = [c for c in fresh_cats_list if c.get("type") == offspring]
+                            if offspring_instances:
+                                newest_offspring = offspring_instances[-1]
+                                newest_offspring["modifiers"] = inherited_mods
+                                await save_user_cats(message.guild.id, message.user.id, fresh_cats_list)
+                    except Exception:
+                        pass
                 
                 # Update breed quest progress for each breed
                 try:
@@ -20978,11 +21603,17 @@ async def breed(
                 except Exception:
                     pass
                 
-                # Format results
-                result_lines = [
-                    f"{get_emoji(p1.lower()+'cat')} {p1} + {get_emoji(p2.lower()+'cat')} {p2} → {get_emoji(off.lower()+'cat')} **{off}**"
-                    for p1, p2, off in results
-                ]
+                # Format results with modifiers
+                result_lines = []
+                for p1_inst, p2_inst, offspring, inherited_mods in results:
+                    p1_mods = "".join([CAT_MODIFIERS[m]["emoji"] for m in p1_inst.get('modifiers', []) if m in CAT_MODIFIERS])
+                    p2_mods = "".join([CAT_MODIFIERS[m]["emoji"] for m in p2_inst.get('modifiers', []) if m in CAT_MODIFIERS])
+                    off_mods = "".join([CAT_MODIFIERS[m]["emoji"] for m in inherited_mods if m in CAT_MODIFIERS])
+                    result_lines.append(
+                        f"{get_emoji(p1_inst.get('type').lower()+'cat')} {p1_mods}{p1_inst.get('name', p1_inst.get('type'))} + "
+                        f"{get_emoji(p2_inst.get('type').lower()+'cat')} {p2_mods}{p2_inst.get('name', p2_inst.get('type'))} → "
+                        f"{get_emoji(offspring.lower()+'cat')} {off_mods}**{offspring}**"
+                    )
                 
                 result_text = "\n".join(result_lines)
                 if len(result_text) > 1800:
