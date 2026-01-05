@@ -18718,19 +18718,18 @@ async def generate_race_data():
     min_frequency = None
     for guild_id, channel_id in race_channels.items():
         try:
-            channel_obj = bot.get_channel(channel_id)
-            if channel_obj:
-                channel_db = await Channel.get_or_none(channel_id=channel_id)
-                if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None:
-                    if min_frequency is None:
-                        min_frequency = channel_db.race_frequency
-                    else:
-                        min_frequency = min(min_frequency, channel_db.race_frequency)
+            # Look up the channel in the database using the correct channel_id
+            channel_db = await Channel.get_or_none(channel_id=channel_id)
+            if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None and channel_db.race_frequency > 0:
+                if min_frequency is None:
+                    min_frequency = channel_db.race_frequency
+                else:
+                    min_frequency = min(min_frequency, channel_db.race_frequency)
         except Exception:
             pass
     
     # Default to 10 minutes if no valid frequency found
-    if min_frequency is None:
+    if min_frequency is None or min_frequency <= 0:
         min_frequency = 600
     
     return {
