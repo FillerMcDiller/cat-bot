@@ -1743,6 +1743,59 @@ async def bot_perform_attack(s, attacker_id: int, atk_cat: dict, defender_id: in
                 # except Exception:
                 #     pass
                 
+                # Handle ranked rating changes if this is a ranked battle
+                if hasattr(s, 'ranked') and s.ranked:
+                    try:
+                        guild_id = s.channel.guild.id if hasattr(s.channel, 'guild') else None
+                        if guild_id:
+                            # Get current season
+                            current_season = await get_current_season()
+                            
+                            # Get both players' profiles
+                            winner_profile = await get_profile(guild_id, attacker_id)
+                            loser_profile = await get_profile(guild_id, defender_id)
+                            
+                            winner_rating = winner_profile.get('ranked_rating', 1000)
+                            loser_rating = loser_profile.get('ranked_rating', 1000)
+                            
+                            # Calculate rating changes
+                            winner_change, loser_change = calculate_rating_change(winner_rating, loser_rating)
+                            
+                            new_winner_rating = winner_rating + winner_change
+                            new_loser_rating = max(0, loser_rating + loser_change)  # Don't go below 0
+                            
+                            # Update winner
+                            winner_wins = winner_profile.get('ranked_wins', 0) + 1
+                            winner_peak = max(new_winner_rating, winner_profile.get('ranked_peak_rating', 1000))
+                            await db.execute(
+                                "UPDATE profile SET ranked_rating = $1, ranked_wins = $2, ranked_peak_rating = $3, ranked_season = $4 WHERE guild_id = $5 AND user_id = $6",
+                                new_winner_rating, winner_wins, winner_peak, current_season, guild_id, attacker_id
+                            )
+                            
+                            # Update loser
+                            loser_losses = loser_profile.get('ranked_losses', 0) + 1
+                            loser_peak = max(new_loser_rating, loser_profile.get('ranked_peak_rating', 1000))
+                            await db.execute(
+                                "UPDATE profile SET ranked_rating = $1, ranked_losses = $2, ranked_peak_rating = $3, ranked_season = $4 WHERE guild_id = $5 AND user_id = $6",
+                                new_loser_rating, loser_losses, loser_peak, current_season, guild_id, defender_id
+                            )
+                            
+                            # Send rating update message
+                            winner_rank_display = get_rank_display(new_winner_rating)
+                            loser_rank_display = get_rank_display(new_loser_rating)
+                            
+                            rating_msg = f"\n🏆 **Ranked Battle Results:**\n"
+                            rating_msg += f"{actor_name}: {winner_rating} → **{new_winner_rating}** ({'+' if winner_change > 0 else ''}{winner_change}) [{winner_rank_display}]\n"
+                            rating_msg += f"{s.challenger.display_name if defender_id == s.challenger.id else s.opponent.display_name}: {loser_rating} → **{new_loser_rating}** ({loser_change}) [{loser_rank_display}]"
+                            
+                            try:
+                                await s.channel.send(rating_msg)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print(f"Error updating ranked ratings: {e}")
+                        pass
+                
                 try:
                     if s.channel.id in FIGHT_SESSIONS:
                         del FIGHT_SESSIONS[s.channel.id]
@@ -2612,7 +2665,7 @@ class BattleModeSelector(View):
         self.initiator = initiator
         self.opponent = opponent
     
-    @discord.ui.button(label="1v1", style=discord.ButtonStyle.primary, emoji="⚔️")
+    @discord.ui.button(label="1v1 Casual", style=discord.ButtonStyle.primary, emoji="⚔️", row=0)
     async def mode_1v1(self, btn_inter: discord.Interaction, button: discord.ui.Button):
         if btn_inter.user.id != self.initiator.id:
             await btn_inter.response.send_message("Only the initiator can select the mode!", ephemeral=True)
@@ -2624,9 +2677,27 @@ class BattleModeSelector(View):
         
         await btn_inter.response.send_message("Starting 1v1 battle...", ephemeral=True)
         self.stop()
-        await start_1v1_battle(btn_inter, self.initiator, self.opponent)
+        await start_1v1_battle(btn_inter, self.initiator, self.opponent, ranked=False)
     
-    @discord.ui.button(label="2v2", style=discord.ButtonStyle.primary, emoji="🤝")
+    @discord.ui.button(label="1v1 Ranked", style=discord.ButtonStyle.danger, emoji="🏆", row=0)
+    async def mode_ranked(self, btn_inter: discord.Interaction, button: discord.ui.Button):
+        if btn_inter.user.id != self.initiator.id:
+            await btn_inter.response.send_message("Only the initiator can select the mode!", ephemeral=True)
+            return
+        
+        if not self.opponent:
+            await btn_inter.response.send_message("You need to specify an opponent for ranked! Use `/fight @user`", ephemeral=True)
+            return
+        
+        if self.opponent.bot:
+            await btn_inter.response.send_message("You can't play ranked matches against bots!", ephemeral=True)
+            return
+        
+        await btn_inter.response.send_message("Starting ranked battle...", ephemeral=True)
+        self.stop()
+        await start_1v1_battle(btn_inter, self.initiator, self.opponent, ranked=True)
+    
+    @discord.ui.button(label="2v2", style=discord.ButtonStyle.primary, emoji="🤝", row=1)
     async def mode_2v2(self, btn_inter: discord.Interaction, button: discord.ui.Button):
         if btn_inter.user.id != self.initiator.id:
             await btn_inter.response.send_message("Only the initiator can select the mode!", ephemeral=True)
@@ -2636,7 +2707,7 @@ class BattleModeSelector(View):
         self.stop()
         await start_2v2_setup(btn_inter, self.initiator)
     
-    @discord.ui.button(label="FFA", style=discord.ButtonStyle.primary, emoji="💥")
+    @discord.ui.button(label="FFA", style=discord.ButtonStyle.primary, emoji="💥", row=1)
     async def mode_ffa(self, btn_inter: discord.Interaction, button: discord.ui.Button):
         if btn_inter.user.id != self.initiator.id:
             await btn_inter.response.send_message("Only the initiator can select the mode!", ephemeral=True)
@@ -2646,7 +2717,7 @@ class BattleModeSelector(View):
         self.stop()
         await start_ffa_setup(btn_inter, self.initiator)
 
-async def start_1v1_battle(interaction: discord.Interaction, challenger: discord.Member, opponent: discord.Member):
+async def start_1v1_battle(interaction: discord.Interaction, challenger: discord.Member, opponent: discord.Member, ranked: bool = False):
     """Start a classic 1v1 battle (existing logic)"""
     executor = challenger
 
@@ -2755,7 +2826,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
 
                 # Build a very small in-memory session object supporting teams of 3
                 class SimpleFightSession:
-                    def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member):
+                    def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member, ranked=False):
                         self.channel = channel
                         self.challenger = challenger
                         self.opponent = opponent
@@ -2773,9 +2844,11 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                         self.last_action = None
                         # message will hold the embed message
                         self.message = None
+                        # Store ranked flag
+                        self.ranked = ranked
 
                 first = random.choice([self.challenger, self.opponent])
-                sess = SimpleFightSession(interaction.channel, self.challenger, self.opponent, challenger_team, opponent_team, first)
+                sess = SimpleFightSession(interaction.channel, self.challenger, self.opponent, challenger_team, opponent_team, first, ranked)
 
                 # store session by channel id
                 FIGHT_SESSIONS[interaction.channel.id] = sess
@@ -3451,7 +3524,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
 
             # Instantiate session (reuse SimpleFightSession shape)
             class SimpleFightSessionLocal:
-                def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member):
+                def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member, ranked=False):
                     self.channel = channel
                     self.challenger = challenger
                     self.opponent = opponent
@@ -3466,9 +3539,11 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                     # Store last action for display
                     self.last_action = None
                     self.message = None
+                    # Store ranked flag
+                    self.ranked = ranked
 
             first = random.choice([executor, opponent])
-            sess = SimpleFightSessionLocal(interaction.channel, executor, opponent, challenger_team, opponent_team, first)
+            sess = SimpleFightSessionLocal(interaction.channel, executor, opponent, challenger_team, opponent_team, first, ranked)
             FIGHT_SESSIONS[interaction.channel.id] = sess
 
             # render embed (reuse render_fight_embed logic if available, otherwise inline)
@@ -4909,6 +4984,425 @@ async def battles_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
+# ==================== RANKED BATTLE SYSTEM ====================
+
+# Rank tiers and divisions
+RANK_TIERS = [
+    ("Bronze", 0, 1199),
+    ("Silver", 1200, 1399),
+    ("Gold", 1400, 1599),
+    ("Platinum", 1600, 1799),
+    ("Diamond", 1800, 1999),
+    ("Master", 2000, 2199),
+    ("Grandmaster", 2200, 2399),
+    ("Challenger", 2400, 999999),
+]
+
+def get_rank_from_rating(rating: int) -> tuple[str, int]:
+    """Returns (tier_name, division) based on rating. Division is 1-3 (I-III) except for Master+"""
+    for tier_name, min_rating, max_rating in RANK_TIERS:
+        if min_rating <= rating <= max_rating:
+            if tier_name in ["Master", "Grandmaster", "Challenger"]:
+                return (tier_name, 0)  # No divisions for top tiers
+            # Calculate division (I, II, III)
+            tier_range = max_rating - min_rating + 1
+            division_size = tier_range // 3
+            if rating < min_rating + division_size:
+                return (tier_name, 3)  # III
+            elif rating < min_rating + (division_size * 2):
+                return (tier_name, 2)  # II
+            else:
+                return (tier_name, 1)  # I
+    return ("Unranked", 0)
+
+def get_rank_display(rating: int) -> str:
+    """Get formatted rank display string"""
+    tier, division = get_rank_from_rating(rating)
+    if division == 0:
+        return f"{tier}"
+    roman = ["", "I", "II", "III"]
+    return f"{tier} {roman[division]}"
+
+def get_rank_emoji(tier: str) -> str:
+    """Get emoji for rank tier"""
+    emojis = {
+        "Bronze": "🥉",
+        "Silver": "🥈",
+        "Gold": "🥇",
+        "Platinum": "💎",
+        "Diamond": "💠",
+        "Master": "⭐",
+        "Grandmaster": "🌟",
+        "Challenger": "👑",
+        "Unranked": "❓"
+    }
+    return emojis.get(tier, "❓")
+
+def calculate_rating_change(winner_rating: int, loser_rating: int) -> tuple[int, int]:
+    """Calculate ELO rating changes for winner and loser"""
+    K = 32  # K-factor
+    expected_winner = 1 / (1 + 10 ** ((loser_rating - winner_rating) / 400))
+    expected_loser = 1 / (1 + 10 ** ((winner_rating - loser_rating) / 400))
+    
+    winner_change = round(K * (1 - expected_winner))
+    loser_change = round(K * (0 - expected_loser))
+    
+    # Minimum change of ±5
+    if abs(winner_change) < 5:
+        winner_change = 5 if winner_change > 0 else -5
+    if abs(loser_change) < 5:
+        loser_change = -5 if loser_change < 0 else 5
+        
+    return (winner_change, loser_change)
+
+async def get_current_season() -> int:
+    """Get the current active ranked season number"""
+    # Check if we need to initialize or rotate season
+    import datetime
+    current_time = int(time.time())
+    
+    # Try to get active season
+    from database import db
+    result = await db.fetch_one("SELECT season_number, end_time FROM ranked_season WHERE active = true ORDER BY season_number DESC LIMIT 1")
+    
+    if result:
+        season_num = result['season_number']
+        end_time = result['end_time']
+        
+        # Check if season has ended
+        if current_time >= end_time:
+            # End this season and start new one
+            await end_ranked_season(season_num)
+            return season_num + 1
+        return season_num
+    else:
+        # Initialize first season
+        now = datetime.datetime.utcnow()
+        # End of current month
+        if now.month == 12:
+            next_month = datetime.datetime(now.year + 1, 1, 1)
+        else:
+            next_month = datetime.datetime(now.year, now.month + 1, 1)
+        end_time = int(next_month.timestamp())
+        
+        await db.execute(
+            "INSERT INTO ranked_season (season_number, start_time, end_time, active) VALUES ($1, $2, $3, true)",
+            1, current_time, end_time
+        )
+        return 1
+
+async def end_ranked_season(season: int):
+    """End a ranked season and distribute rewards"""
+    from database import db
+    
+    # Mark season as inactive
+    await db.execute("UPDATE ranked_season SET active = false WHERE season_number = $1", season)
+    
+    # Get all players sorted by rating
+    players = await db.fetch_all(
+        "SELECT user_id, guild_id, ranked_rating, ranked_wins, ranked_losses FROM profile WHERE ranked_season = $1 AND (ranked_wins > 0 OR ranked_losses > 0) ORDER BY ranked_rating DESC, ranked_wins DESC",
+        season
+    )
+    
+    # Distribute rewards based on ranking
+    for rank, player in enumerate(players, 1):
+        user_id = player['user_id']
+        guild_id = player['guild_id']
+        rating = player['ranked_rating']
+        
+        # Determine rewards
+        kibble = 0
+        packs = ""
+        title = ""
+        
+        if rank == 1:
+            kibble = 50000
+            packs = "celestial:15"
+            title = "Champion"
+        elif rank <= 10:
+            kibble = 10000
+            packs = "celestial:5"
+            title = "Warrior"
+        elif rank <= 50:
+            kibble = 2000
+            packs = "platinum:3"
+            title = "Fighter"
+        elif rank <= 100:
+            kibble = 1000
+            packs = ""
+            title = ""
+        
+        if kibble > 0 or packs or title:
+            # Store rewards
+            await db.execute(
+                """INSERT INTO ranked_rewards (user_id, guild_id, season, final_rank, final_rating, kibble_reward, packs_reward, title_reward, claimed)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
+                   ON CONFLICT (user_id, guild_id, season) DO UPDATE SET
+                   final_rank = $4, final_rating = $5, kibble_reward = $6, packs_reward = $7, title_reward = $8""",
+                user_id, guild_id, season, rank, rating, kibble, packs, title
+            )
+    
+    # Reset all players for new season
+    await db.execute(
+        "UPDATE profile SET ranked_rating = 1000, ranked_wins = 0, ranked_losses = 0, ranked_season = $1, ranked_rewards_claimed = false WHERE ranked_season = $2",
+        season + 1, season
+    )
+    
+    # Start new season
+    import datetime
+    now = datetime.datetime.utcnow()
+    current_time = int(time.time())
+    if now.month == 12:
+        next_month = datetime.datetime(now.year + 1, 1, 1)
+    else:
+        next_month = datetime.datetime(now.year, now.month + 1, 1)
+    end_time = int(next_month.timestamp())
+    
+    await db.execute(
+        "INSERT INTO ranked_season (season_number, start_time, end_time, active) VALUES ($1, $2, $3, true)",
+        season + 1, current_time, end_time
+    )
+
+@bot.tree.command(name="ranked", description="View ranked battle information and your rank")
+async def ranked_command(interaction: discord.Interaction):
+    """View ranked battle stats and leaderboard"""
+    # Global command cooldown check (5 seconds)
+    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
+        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    guild_id = interaction.guild.id if interaction.guild else 0
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=interaction.user.id)
+    
+    # Ensure we have the ranked fields
+    if not hasattr(profile, 'ranked_rating'):
+        profile.ranked_rating = 1000
+    if not hasattr(profile, 'ranked_wins'):
+        profile.ranked_wins = 0
+    if not hasattr(profile, 'ranked_losses'):
+        profile.ranked_losses = 0
+    if not hasattr(profile, 'ranked_season'):
+        profile.ranked_season = await get_current_season()
+    if not hasattr(profile, 'ranked_peak_rating'):
+        profile.ranked_peak_rating = 1000
+    await profile.save()
+    
+    # Get current season
+    current_season = await get_current_season()
+    
+    # Check if player needs season update
+    if profile.ranked_season < current_season:
+        profile.ranked_season = current_season
+        profile.ranked_rating = 1000
+        profile.ranked_wins = 0
+        profile.ranked_losses = 0
+        await profile.save()
+    
+    # Get rank info
+    tier, division = get_rank_from_rating(profile.ranked_rating)
+    rank_display = get_rank_display(profile.ranked_rating)
+    rank_emoji = get_rank_emoji(tier)
+    
+    # Get season end time
+    from database import db
+    season_info = await db.fetch_one("SELECT end_time FROM ranked_season WHERE season_number = $1", current_season)
+    season_end = season_info['end_time'] if season_info else int(time.time()) + 2592000
+    
+    # Create embed
+    embed = discord.Embed(
+        title=f"{rank_emoji} Ranked Battles - Season {current_season}",
+        description=f"Climb the ranks and compete for monthly rewards!",
+        color=0x9b59b6
+    )
+    
+    # Player stats
+    total_games = profile.ranked_wins + profile.ranked_losses
+    winrate = (profile.ranked_wins / total_games * 100) if total_games > 0 else 0
+    
+    embed.add_field(
+        name="📊 Your Rank",
+        value=f"{rank_emoji} **{rank_display}**\n⭐ Rating: **{profile.ranked_rating}** (Peak: {profile.ranked_peak_rating})",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎮 Season Stats",
+        value=f"**{profile.ranked_wins}**W - **{profile.ranked_losses}**L ({winrate:.1f}% WR)\nTotal Games: {total_games}",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="⏰ Season Ends",
+        value=f"<t:{season_end}:R>",
+        inline=True
+    )
+    
+    # Rank rewards
+    rewards_text = (
+        "**Monthly Rewards:**\n"
+        "🏆 **Top 1**: 50k kibble, 15 celestial packs, 'Champion' title\n"
+        "🥇 **Top 10**: 10k kibble, 5 celestial packs, 'Warrior' title\n"
+        "🥈 **Top 50**: 2k kibble, 3 platinum packs, 'Fighter' title\n"
+        "🥉 **Top 100**: 1k kibble"
+    )
+    embed.add_field(
+        name="💎 Rewards",
+        value=rewards_text,
+        inline=False
+    )
+    
+    # How to play
+    embed.add_field(
+        name="⚔️ How to Play",
+        value="Challenge other players using `/battle @player` and select **Ranked Match** to compete for rating!",
+        inline=False
+    )
+    
+    embed.set_footer(text="Rating changes based on opponent strength • Seasons reset monthly")
+    
+    # Add buttons
+    class RankedView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=180)
+        
+        @discord.ui.button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary)
+        async def leaderboard_button(self, it: discord.Interaction, btn: discord.ui.Button):
+            if it.user.id != interaction.user.id:
+                await it.response.send_message("This is not your ranked menu.", ephemeral=True)
+                return
+            
+            await it.response.defer(ephemeral=True)
+            
+            # Get top players
+            from database import db
+            top_players = await db.fetch_all(
+                """SELECT user_id, ranked_rating, ranked_wins, ranked_losses 
+                   FROM profile 
+                   WHERE ranked_season = $1 AND guild_id = $2 
+                   ORDER BY ranked_rating DESC, ranked_wins DESC 
+                   LIMIT 20""",
+                current_season, guild_id
+            )
+            
+            if not top_players:
+                await it.followup.send("No ranked players this season yet!", ephemeral=True)
+                return
+            
+            lb_embed = discord.Embed(
+                title=f"🏆 Ranked Leaderboard - Season {current_season}",
+                description="Top 20 players in this server",
+                color=0xf1c40f
+            )
+            
+            leaderboard_text = ""
+            for idx, player in enumerate(top_players, 1):
+                try:
+                    user = await bot.fetch_user(player['user_id'])
+                    name = user.name
+                except:
+                    name = f"User#{player['user_id']}"
+                
+                rank_display = get_rank_display(player['ranked_rating'])
+                rank_emoji = get_rank_emoji(get_rank_from_rating(player['ranked_rating'])[0])
+                total = player['ranked_wins'] + player['ranked_losses']
+                wr = (player['ranked_wins'] / total * 100) if total > 0 else 0
+                
+                medal = ""
+                if idx == 1:
+                    medal = "🥇"
+                elif idx == 2:
+                    medal = "🥈"
+                elif idx == 3:
+                    medal = "🥉"
+                
+                leaderboard_text += f"{medal}**{idx}.** {name}\n{rank_emoji} {rank_display} • {player['ranked_rating']} LP • {player['ranked_wins']}W-{player['ranked_losses']}L ({wr:.0f}%)\n\n"
+            
+            lb_embed.description = leaderboard_text
+            lb_embed.set_footer(text=f"Season ends {datetime.datetime.fromtimestamp(season_end).strftime('%B %d')}")
+            
+            await it.followup.send(embed=lb_embed, ephemeral=True)
+        
+        @discord.ui.button(label="🎁 Claim Rewards", style=discord.ButtonStyle.success)
+        async def rewards_button(self, it: discord.Interaction, btn: discord.ui.Button):
+            if it.user.id != interaction.user.id:
+                await it.response.send_message("This is not your ranked menu.", ephemeral=True)
+                return
+            
+            await it.response.defer(ephemeral=True)
+            
+            # Check for unclaimed rewards
+            from database import db
+            rewards = await db.fetch_one(
+                "SELECT * FROM ranked_rewards WHERE user_id = $1 AND guild_id = $2 AND claimed = false ORDER BY season DESC LIMIT 1",
+                interaction.user.id, guild_id
+            )
+            
+            if not rewards:
+                await it.followup.send("You don't have any unclaimed rewards!", ephemeral=True)
+                return
+            
+            # Claim rewards
+            profile = await Profile.get_or_create(guild_id=guild_id, user_id=interaction.user.id)
+            
+            # Add kibble
+            if rewards['kibble_reward'] > 0:
+                profile.kibble += rewards['kibble_reward']
+            
+            # Add packs
+            if rewards['packs_reward']:
+                pack_type, pack_count = rewards['packs_reward'].split(':')
+                pack_field = f"pack_{pack_type}"
+                if hasattr(profile, pack_field):
+                    current = getattr(profile, pack_field, 0)
+                    setattr(profile, pack_field, current + int(pack_count))
+            
+            # Add cosmetic title
+            if rewards['title_reward']:
+                title_id = f"ranked_{rewards['title_reward'].lower()}"
+                owned = get_owned_cosmetics(profile)
+                if title_id not in owned:
+                    add_owned_cosmetic(profile, title_id)
+            
+            await profile.save()
+            
+            # Mark as claimed
+            await db.execute(
+                "UPDATE ranked_rewards SET claimed = true WHERE user_id = $1 AND guild_id = $2 AND season = $3",
+                interaction.user.id, guild_id, rewards['season']
+            )
+            
+            # Create reward embed
+            reward_embed = discord.Embed(
+                title="🎁 Ranked Rewards Claimed!",
+                description=f"**Season {rewards['season']} Rewards**\nFinal Rank: **#{rewards['final_rank']}**\nFinal Rating: **{rewards['final_rating']}**",
+                color=0x2ecc71
+            )
+            
+            rewards_list = []
+            if rewards['kibble_reward'] > 0:
+                rewards_list.append(f"💰 {rewards['kibble_reward']:,} Kibble")
+            if rewards['packs_reward']:
+                pack_type, count = rewards['packs_reward'].split(':')
+                rewards_list.append(f"📦 {count}x {pack_type.title()} Pack")
+            if rewards['title_reward']:
+                rewards_list.append(f"✨ '{rewards['title_reward']}' Title")
+            
+            reward_embed.add_field(
+                name="Rewards Received:",
+                value="\n".join(rewards_list),
+                inline=False
+            )
+            
+            await it.followup.send(embed=reward_embed, ephemeral=True)
+    
+    view = RankedView()
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+# ==================== END RANKED BATTLE SYSTEM ====================
+
+
 @bot.tree.command(name="updatecatstats", description="Update all your cats to use the new battle stat system")
 async def update_cat_stats_command(interaction: discord.Interaction):
     # Global command cooldown check (5 seconds)
@@ -5066,7 +5560,7 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
         first = random.choice([executor, opponent])
         
         class SimpleFightSessionLocal:
-            def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member):
+            def __init__(self, channel, challenger, opponent, challenger_team, opponent_team, first_member, ranked=False):
                 self.channel = channel
                 self.challenger = challenger
                 self.opponent = opponent
@@ -5077,8 +5571,10 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
                 self.round = 1
                 self.power_by_cat = {}
                 self.message = None
+                # Store ranked flag (although bot fights shouldn't be ranked)
+                self.ranked = ranked
 
-        sess = SimpleFightSessionLocal(interaction.channel, executor, opponent, challenger_team, opponent_team, first)
+        sess = SimpleFightSessionLocal(interaction.channel, executor, opponent, challenger_team, opponent_team, first, ranked=False)
         FIGHT_SESSIONS[interaction.channel.id] = sess
 
         # Send battle message (reuse existing render and view logic)
@@ -6726,21 +7222,6 @@ async def maintaince_loop():
                                 await auto_sync_cat_instances(profile, rare_cat)
                             except Exception:
                                 pass
-                        # restore the adventuring instance if present
-                        if inst:
-                            try:
-                                inst["on_adventure"] = False
-                                await save_user_cats(guild_id, user_id, user_cats)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                profile[f"cat_{cat_sent}"] += 1
-                                await profile.save()
-                                # Auto-sync instances if counter was incremented
-                                await auto_sync_cat_instances(profile, cat_sent)
-                            except Exception:
-                                pass
                     # award extra rain scaled by luck
                     minutes_awarded = int(60 * multiplier * (1 + luck_mult))
                     try:
@@ -6865,21 +7346,6 @@ async def maintaince_loop():
                                 await auto_sync_cat_instances(profile, cat_type)
                             except Exception:
                                 pass
-                        # restore the adventuring instance if present
-                        if inst:
-                            try:
-                                inst["on_adventure"] = False
-                                await save_user_cats(guild_id, user_id, user_cats)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                profile[f"cat_{cat_sent}"] += 1
-                                await profile.save()
-                                # Auto-sync instances if counter was incremented
-                                await auto_sync_cat_instances(profile, cat_sent)
-                            except Exception:
-                                pass
                     reward_text = f"🎁 Your {cat_sent} returned with **{amount}x {cat_type}** cat(s)!"
                     embed.description = reward_text
                 elif roll < 0.95:
@@ -6896,21 +7362,6 @@ async def maintaince_loop():
                             await profile.save()
                         except Exception:
                             pass
-                        # restore adventuring instance if present
-                        if inst:
-                            try:
-                                inst["on_adventure"] = False
-                                await save_user_cats(guild_id, user_id, user_cats)
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                profile[f"cat_{cat_sent}"] += 1
-                                await profile.save()
-                                # Auto-sync instances if counter was incremented
-                                await auto_sync_cat_instances(profile, cat_sent)
-                            except Exception:
-                                pass
                     reward_text = f"🥣 Your {cat_sent} returned with **{kibble_amt}** Kibble!"
                     embed.description = reward_text
                 else:
@@ -6932,23 +7383,32 @@ async def maintaince_loop():
                             await global_user.save()
                         except Exception:
                             pass
-                    # restore adventuring instance if present
-                    if inst:
-                        try:
-                            inst["on_adventure"] = False
-                            await save_user_cats(guild_id, user_id, user_cats)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            profile[f"cat_{cat_sent}"] += 1
-                            await profile.save()
-                            # Auto-sync instances if counter was incremented
-                            await auto_sync_cat_instances(profile, cat_sent)
-                        except Exception:
-                            pass
                     reward_text = f"☔ Your {cat_sent} attracted **{minutes}** minutes of Cat Rain!"
                     embed.description = reward_text
+
+                # ALWAYS restore the adventuring cat instance back to inventory
+                # This must happen regardless of reward type to prevent cats from disappearing
+                try:
+                    if inst:
+                        # increase bond slightly on successful return
+                        inc = random.randint(1, 3)
+                        inst["bond"] = inst.get("bond", 0) + inc  # No longer capped at 100
+                        inst["on_adventure"] = False
+                        await save_user_cats(guild_id, user_id, user_cats)
+                    else:
+                        # If instance wasn't found (shouldn't happen but safety fallback),
+                        # manually restore the cat by unmarking any instance of this type
+                        try:
+                            user_cats = await get_user_cats(guild_id, user_id)
+                            for c in user_cats:
+                                if c.get("type") == cat_sent and c.get("on_adventure"):
+                                    c["on_adventure"] = False
+                                    await save_user_cats(guild_id, user_id, user_cats)
+                                    break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
                 # send notification to channel if possible, else DM the user
                 try:
@@ -6963,16 +7423,6 @@ async def maintaince_loop():
                         await person.send(reward_text, embed=embed)
                     except Exception:
                         pass
-
-                # increase bond slightly on successful return and ensure instance no longer marked on adventure
-                try:
-                    if inst:
-                        inc = random.randint(1, 3)
-                        inst["bond"] = inst.get("bond", 0) + inc  # No longer capped at 100
-                        inst["on_adventure"] = False
-                        await save_user_cats(guild_id, user_id, user_cats)
-                except Exception:
-                    pass
 
             except Exception:
                 pass
@@ -20316,7 +20766,7 @@ class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
         default="600",
         required=True,
         min_length=1,
-        max_length=6,
+        max_length=10,
     )
 
     def __init__(self, channel_id: int):
@@ -20672,6 +21122,72 @@ async def giveachievement(message: discord.Interaction, person_id: discord.User,
         await message.response.send_message(person_id.mention, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
     else:
         await message.response.send_message("i cant find that achievement! try harder next time.", ephemeral=True)
+
+
+@bot.tree.command(description="(OWNER) Send a message from the bot")
+@discord.app_commands.describe(
+    target_type="Where to send the message (User or Server)",
+    target_id="User ID or Server ID to send to",
+    message_text="The message to send"
+)
+async def sendmessage(
+    message: discord.Interaction,
+    target_type: Literal["User", "Server"],
+    target_id: str,
+    message_text: str
+):
+    """Owner-only command to send messages as the bot"""
+    if message.user.id != OWNER_ID:
+        await message.response.send_message("❌ This command is owner-only.", ephemeral=True)
+        return
+    
+    await message.response.defer(ephemeral=True)
+    
+    try:
+        target_id_int = int(target_id)
+    except ValueError:
+        await message.followup.send("❌ Invalid ID format. Please provide a valid numeric ID.", ephemeral=True)
+        return
+    
+    if len(message_text) > 2000:
+        await message.followup.send("❌ Message is too long (max 2000 characters).", ephemeral=True)
+        return
+    
+    try:
+        if target_type == "User":
+            # Send to user
+            user = await bot.fetch_user(target_id_int)
+            await user.send(message_text)
+            await message.followup.send(f"✅ Message sent to user **{user.name}** (ID: {target_id_int})", ephemeral=True)
+        else:  # Server
+            # Send to first available channel in server
+            guild = bot.get_guild(target_id_int)
+            if not guild:
+                await message.followup.send(f"❌ Bot is not in server with ID {target_id_int}", ephemeral=True)
+                return
+            
+            # Try to find a suitable channel (prefer general/announcements, fallback to first text channel)
+            channel = None
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages:
+                    if "general" in ch.name.lower() or "announce" in ch.name.lower():
+                        channel = ch
+                        break
+                    if channel is None:  # First available channel as fallback
+                        channel = ch
+            
+            if not channel:
+                await message.followup.send(f"❌ No suitable channel found in **{guild.name}** where bot can send messages.", ephemeral=True)
+                return
+            
+            await channel.send(message_text)
+            await message.followup.send(f"✅ Message sent to **{guild.name}** in #{channel.name} (Server ID: {target_id_int})", ephemeral=True)
+    except discord.Forbidden:
+        await message.followup.send(f"❌ Permission denied. Bot cannot send messages to this {target_type.lower()}.", ephemeral=True)
+    except discord.NotFound:
+        await message.followup.send(f"❌ {target_type} not found with ID {target_id_int}", ephemeral=True)
+    except Exception as e:
+        await message.followup.send(f"❌ Error sending message: {str(e)[:200]}", ephemeral=True)
 
 
 @bot.tree.command(description="(ADMIN) Reset people")

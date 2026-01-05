@@ -314,7 +314,13 @@ CREATE TABLE IF NOT EXISTS public.profile (
     gift_giver_progress INTEGER DEFAULT 0,
     pack_festive_opened INTEGER DEFAULT 0,
     winter_battles INTEGER DEFAULT 0,
-    team_battle_wins INTEGER DEFAULT 0
+    team_battle_wins INTEGER DEFAULT 0,
+    ranked_rating integer DEFAULT 1000,
+    ranked_wins integer DEFAULT 0,
+    ranked_losses integer DEFAULT 0,
+    ranked_season integer DEFAULT 1,
+    ranked_peak_rating integer DEFAULT 1000,
+    ranked_rewards_claimed boolean DEFAULT false
 );
 
 
@@ -524,6 +530,34 @@ CREATE INDEX IF NOT EXISTS idx_adventure_user_id ON public.adventure USING btree
 CREATE INDEX IF NOT EXISTS idx_adventure_end_time ON public.adventure USING btree (end_time);
 
 CREATE UNIQUE INDEX IF NOT EXISTS deck_guild_user ON public.deck USING btree (guild_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_profile_ranked_rating ON public.profile USING btree (ranked_rating DESC, ranked_wins DESC);
+
+-- Ranked battle season table
+CREATE TABLE IF NOT EXISTS public.ranked_season (
+    season_number integer PRIMARY KEY,
+    start_time bigint NOT NULL,
+    end_time bigint NOT NULL,
+    active boolean DEFAULT true
+);
+
+-- Ranked rewards table
+CREATE TABLE IF NOT EXISTS public.ranked_rewards (
+    id SERIAL PRIMARY KEY,
+    user_id bigint NOT NULL,
+    guild_id bigint NOT NULL,
+    season integer NOT NULL,
+    final_rank integer NOT NULL,
+    final_rating integer NOT NULL,
+    kibble_reward integer DEFAULT 0,
+    packs_reward text DEFAULT '',
+    title_reward text DEFAULT '',
+    claimed boolean DEFAULT false,
+    UNIQUE(user_id, guild_id, season)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ranked_rewards_user ON public.ranked_rewards USING btree (user_id, season);
+CREATE INDEX IF NOT EXISTS idx_ranked_rewards_season ON public.ranked_rewards USING btree (season, final_rank);
 
 -- Add missing columns if they don't exist (comprehensive safety check)
 ALTER TABLE public.profile
@@ -751,6 +785,12 @@ ADD COLUMN IF NOT EXISTS cat_instances JSONB DEFAULT '[]'::jsonb,
 ADD COLUMN IF NOT EXISTS breeds_total integer DEFAULT 0,
 ADD COLUMN IF NOT EXISTS battles_won integer DEFAULT 0,
 ADD COLUMN IF NOT EXISTS last_daily_claim BIGINT DEFAULT 0,
-ADD COLUMN IF NOT EXISTS daily_streak INTEGER DEFAULT 0;
+ADD COLUMN IF NOT EXISTS daily_streak INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS ranked_rating integer DEFAULT 1000,
+ADD COLUMN IF NOT EXISTS ranked_wins integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS ranked_losses integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS ranked_season integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS ranked_peak_rating integer DEFAULT 1000,
+ADD COLUMN IF NOT EXISTS ranked_rewards_claimed boolean DEFAULT false;
 
 REVOKE USAGE ON SCHEMA public FROM PUBLIC;

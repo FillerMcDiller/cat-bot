@@ -223,6 +223,24 @@
       "description": "Escaped the darkness",
       "price": 0,
       "requirement": "blackhole"
+    },
+    "ranked_fighter": {
+      "name": "Fighter",
+      "description": "Top 50 ranked player",
+      "price": 0,
+      "requirement": "ranked_top50"
+    },
+    "ranked_warrior": {
+      "name": "Warrior",
+      "description": "Top 10 ranked player",
+      "price": 0,
+      "requirement": "ranked_top10"
+    },
+    "ranked_champion": {
+      "name": "Champion",
+      "description": "Rank 1 legend",
+      "price": 0,
+      "requirement": "ranked_top1"
     }
   },
   "colors": {
