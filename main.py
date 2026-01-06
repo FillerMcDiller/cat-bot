@@ -18717,12 +18717,15 @@ async def generate_race_data():
     
     # Dynamic race frequency: get minimum race_frequency from all active race channels
     global race_frequencies
+    print(f"[RACE_GEN] race_channels: {race_channels}", flush=True)
+    print(f"[RACE_GEN] race_frequencies: {race_frequencies}", flush=True)
     min_frequency = None
     for guild_id, channel_id in race_channels.items():
         try:
             # Check in-memory override first
             if channel_id in race_frequencies:
                 freq = race_frequencies[channel_id]
+                print(f"[RACE_GEN] Found in-memory frequency for channel {channel_id}: {freq}", flush=True)
                 if freq > 0:
                     if min_frequency is None:
                         min_frequency = freq
@@ -18733,16 +18736,20 @@ async def generate_race_data():
             # Fall back to database
             channel_db = await Channel.get_or_none(channel_id=channel_id)
             if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None and channel_db.race_frequency > 0:
+                print(f"[RACE_GEN] Found DB frequency for channel {channel_id}: {channel_db.race_frequency}", flush=True)
                 if min_frequency is None:
                     min_frequency = channel_db.race_frequency
                 else:
                     min_frequency = min(min_frequency, channel_db.race_frequency)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[RACE_GEN] Exception checking channel {channel_id}: {e}", flush=True)
     
     # Default to 10 minutes if no valid frequency found
     if min_frequency is None or min_frequency <= 0:
         min_frequency = 600
+        print(f"[RACE_GEN] No valid frequency found, using default: {min_frequency}", flush=True)
+    else:
+        print(f"[RACE_GEN] Using frequency: {min_frequency}", flush=True)
     
     return {
         "cats": race_cats,
