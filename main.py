@@ -20770,74 +20770,65 @@ class CatSelectionView(discord.ui.View):
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
 
 
-class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
-    frequency = discord.ui.TextInput(
-        label="Race frequency (seconds)",
-        placeholder="Default: 600 (10 minutes)",
-        default="600",
-        required=True,
-        min_length=1,
-        max_length=15,
-    )
-
+class RaceFrequencySelectView(discord.ui.View):
     def __init__(self, channel_id: int):
-        super().__init__()
+        super().__init__(timeout=180)
         self.channel_id = channel_id
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            freq_val = int(str(self.frequency.value))
-            print(f"[RACE_FREQ] User entered: {self.frequency.value}, parsed as: {freq_val}", flush=True)
+    
+    @discord.ui.select(
+        placeholder="Choose race frequency...",
+        options=[
+            discord.SelectOption(label="10 minutes", value="600", emoji="⏱️"),
+            discord.SelectOption(label="20 minutes", value="1200", emoji="⏱️"),
+            discord.SelectOption(label="30 minutes", value="1800", emoji="⏱️"),
+            discord.SelectOption(label="1 hour", value="3600", emoji="⏰"),
+            discord.SelectOption(label="2 hours", value="7200", emoji="⏰"),
+            discord.SelectOption(label="3 hours", value="10800", emoji="⏰"),
+            discord.SelectOption(label="6 hours", value="21600", emoji="🕐"),
+            discord.SelectOption(label="12 hours", value="43200", emoji="🕐"),
+            discord.SelectOption(label="24 hours (1 day)", value="86400", emoji="📅"),
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        freq_val = int(select.values[0])
+        
+        # Save to in-memory dictionary (bypasses DB issues)
+        global race_frequencies
+        race_frequencies[self.channel_id] = freq_val
+        print(f"[RACE_FREQ] Set frequency to {freq_val} seconds for channel {self.channel_id}", flush=True)
+        
+        # Also try to save to DB (best effort)
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            try:
+                channel.race_frequency = freq_val
+                await channel.save()
+            except Exception as e:
+                print(f"[RACE_FREQ] DB save failed (using in-memory fallback): {e}", flush=True)
             
-            if freq_val < 60:
-                await interaction.response.send_message("⚠️ Race frequency must be at least 60 seconds!", ephemeral=True)
-                return
-            
-            # Save to in-memory dictionary (bypasses DB issues)
-            global race_frequencies
-            race_frequencies[self.channel_id] = freq_val
-            print(f"[RACE_FREQ] Saved to race_frequencies dict: {self.channel_id} -> {freq_val}", flush=True)
-            
-            # Also try to save to DB (best effort)
-            channel = await Channel.get_or_none(channel_id=self.channel_id)
-            if channel:
-                try:
-                    print(f"[RACE_FREQ] Before save - channel.race_frequency: {channel.race_frequency}", flush=True)
-                    channel.race_frequency = freq_val
-                    print(f"[RACE_FREQ] After assignment - channel.race_frequency: {channel.race_frequency}", flush=True)
-                    await channel.save()
-                    print(f"[RACE_FREQ] After save - channel.race_frequency: {channel.race_frequency}", flush=True)
-                    # Verify it actually saved by re-fetching
-                    await channel.refresh_from_db()
-                    print(f"[RACE_FREQ] After refresh from DB - channel.race_frequency: {channel.race_frequency}", flush=True)
-                except Exception as e:
-                    print(f"[RACE_FREQ] DB save failed (using in-memory fallback): {e}", flush=True)
+            # Regenerate the next race to apply new timing immediately
+            global next_race
+            if next_race is not None:
+                # Keep existing bets if any
+                existing_bets = next_race.get("bets", {})
+                next_race = await generate_race_data()
+                next_race["bets"] = existing_bets
                 
-                # Regenerate the next race to apply new timing immediately
-                global next_race
-                if next_race is not None:
-                    # Keep existing bets if any
-                    existing_bets = next_race.get("bets", {})
-                    next_race = await generate_race_data()
-                    next_race["bets"] = existing_bets
-                    
-                    # Show when the next race will be
-                    next_race_time = int(next_race["start_time"])
-                    await interaction.response.send_message(
-                        f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
-                        f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
-                        f"⏰ Next race will be scheduled with the new frequency.",
-                        ephemeral=True
-                    )
+                # Show when the next race will be
+                next_race_time = int(next_race["start_time"])
+                await interaction.response.send_message(
+                    f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
+                    f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)",
+                    ephemeral=True
+                )
             else:
-                await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-        except ValueError:
-            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+                await interaction.response.send_message(
+                    f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
+                    f"⏰ Next race will be scheduled with the new frequency.",
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
 
 
 class SetupConfigView(discord.ui.View):
@@ -20898,7 +20889,8 @@ class SetupConfigView(discord.ui.View):
 
     @discord.ui.button(label="⚙️ Race Frequency", style=ButtonStyle.secondary, row=2)
     async def race_frequency_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(RaceFrequencyModal(self.channel_id))
+        view = RaceFrequencySelectView(self.channel_id)
+        await interaction.response.send_message("**Select Race Frequency:**", view=view, ephemeral=True)
 
     @discord.ui.button(label="✅ Done", style=ButtonStyle.success, row=3)
     async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
