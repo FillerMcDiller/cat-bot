@@ -20765,7 +20765,7 @@ class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
         default="600",
         required=True,
         min_length=1,
-        max_length=10,
+        max_length=15,
     )
 
     def __init__(self, channel_id: int):
