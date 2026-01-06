@@ -20775,6 +20775,7 @@ class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             freq_val = int(str(self.frequency.value))
+            print(f"[RACE_FREQ] User entered: {self.frequency.value}, parsed as: {freq_val}", flush=True)
             
             if freq_val < 60:
                 await interaction.response.send_message("⚠️ Race frequency must be at least 60 seconds!", ephemeral=True)
@@ -20782,8 +20783,14 @@ class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
             
             channel = await Channel.get_or_none(channel_id=self.channel_id)
             if channel:
+                print(f"[RACE_FREQ] Before save - channel.race_frequency: {channel.race_frequency}", flush=True)
                 channel.race_frequency = freq_val
+                print(f"[RACE_FREQ] After assignment - channel.race_frequency: {channel.race_frequency}", flush=True)
                 await channel.save()
+                print(f"[RACE_FREQ] After save - channel.race_frequency: {channel.race_frequency}", flush=True)
+                # Verify it actually saved by re-fetching
+                await channel.refresh_from_db()
+                print(f"[RACE_FREQ] After refresh from DB - channel.race_frequency: {channel.race_frequency}", flush=True)
                 
                 # Regenerate the next race to apply new timing immediately
                 global next_race
