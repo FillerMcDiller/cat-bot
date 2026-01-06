@@ -6137,6 +6137,7 @@ race_lock = []
 # Scheduled race system
 next_race = None  # Will store {cats, names, start_time, channel_id, message_id, bets: {user_id: {lane, amount}}}
 race_channels = {}  # {guild_id: channel_id} - guilds that have opted into auto-races
+race_frequencies = {}  # {channel_id: frequency_in_seconds} - override for race frequency per channel
 
 # ???
 rigged_users = []
@@ -18715,10 +18716,21 @@ async def generate_race_data():
     race_names = random.sample(RACING_NAMES, 5)
     
     # Dynamic race frequency: get minimum race_frequency from all active race channels
+    global race_frequencies
     min_frequency = None
     for guild_id, channel_id in race_channels.items():
         try:
-            # Look up the channel in the database using the correct channel_id
+            # Check in-memory override first
+            if channel_id in race_frequencies:
+                freq = race_frequencies[channel_id]
+                if freq > 0:
+                    if min_frequency is None:
+                        min_frequency = freq
+                    else:
+                        min_frequency = min(min_frequency, freq)
+                continue
+            
+            # Fall back to database
             channel_db = await Channel.get_or_none(channel_id=channel_id)
             if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None and channel_db.race_frequency > 0:
                 if min_frequency is None:
@@ -20781,16 +20793,25 @@ class RaceFrequencyModal(discord.ui.Modal, title="Set Race Frequency"):
                 await interaction.response.send_message("⚠️ Race frequency must be at least 60 seconds!", ephemeral=True)
                 return
             
+            # Save to in-memory dictionary (bypasses DB issues)
+            global race_frequencies
+            race_frequencies[self.channel_id] = freq_val
+            print(f"[RACE_FREQ] Saved to race_frequencies dict: {self.channel_id} -> {freq_val}", flush=True)
+            
+            # Also try to save to DB (best effort)
             channel = await Channel.get_or_none(channel_id=self.channel_id)
             if channel:
-                print(f"[RACE_FREQ] Before save - channel.race_frequency: {channel.race_frequency}", flush=True)
-                channel.race_frequency = freq_val
-                print(f"[RACE_FREQ] After assignment - channel.race_frequency: {channel.race_frequency}", flush=True)
-                await channel.save()
-                print(f"[RACE_FREQ] After save - channel.race_frequency: {channel.race_frequency}", flush=True)
-                # Verify it actually saved by re-fetching
-                await channel.refresh_from_db()
-                print(f"[RACE_FREQ] After refresh from DB - channel.race_frequency: {channel.race_frequency}", flush=True)
+                try:
+                    print(f"[RACE_FREQ] Before save - channel.race_frequency: {channel.race_frequency}", flush=True)
+                    channel.race_frequency = freq_val
+                    print(f"[RACE_FREQ] After assignment - channel.race_frequency: {channel.race_frequency}", flush=True)
+                    await channel.save()
+                    print(f"[RACE_FREQ] After save - channel.race_frequency: {channel.race_frequency}", flush=True)
+                    # Verify it actually saved by re-fetching
+                    await channel.refresh_from_db()
+                    print(f"[RACE_FREQ] After refresh from DB - channel.race_frequency: {channel.race_frequency}", flush=True)
+                except Exception as e:
+                    print(f"[RACE_FREQ] DB save failed (using in-memory fallback): {e}", flush=True)
                 
                 # Regenerate the next race to apply new timing immediately
                 global next_race
