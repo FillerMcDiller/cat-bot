@@ -20894,6 +20894,27 @@ class SetupConfigView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
 
+    @discord.ui.button(label="🚫 Disable Races", style=ButtonStyle.danger, row=2)
+    async def race_disable_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            channel.race_channel_id = None
+            await channel.save()
+            
+            # Remove from global race_channels dict
+            global race_channels, race_frequencies
+            if interaction.guild.id in race_channels:
+                del race_channels[interaction.guild.id]
+            if self.channel_id in race_frequencies:
+                del race_frequencies[self.channel_id]
+            
+            await interaction.response.send_message(
+                f"✅ Races disabled in this channel!",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+
     @discord.ui.button(label="⚙️ Race Frequency", style=ButtonStyle.secondary, row=2)
     async def race_frequency_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = RaceFrequencySelectView(self.channel_id)
