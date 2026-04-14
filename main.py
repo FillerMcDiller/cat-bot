@@ -7720,8 +7720,16 @@ async def on_ready():
     global OWNER_ID, on_ready_debounce, gen_credits, emojis
     if on_ready_debounce:
         return
+    
+    # Wait for all shards to be ready before running setup
+    if bot.shard_count and bot.shard_count > 1:
+        ready_shards = sum(1 for shard in bot.shards.values() if not shard.is_closed())
+        if ready_shards < bot.shard_count:
+            print(f"Shard ready, but waiting for all shards ({ready_shards}/{bot.shard_count})")
+            return
+    
     on_ready_debounce = True
-    print("cat is now online")
+    print(f"cat is now online in {len(bot.guilds)} servers")
     # flush any pending logs that were recorded before bot was ready
     try:
         for msg in list(_pending_discord_logs):
@@ -9663,6 +9671,33 @@ async def news(message: discord.Interaction):
                     "amount": 40,
                     "pack_name": "Festive",
                     "name": "40 Festive Packs"
+                }
+            ]
+       },
+          {
+            "title": "KITTAY IS BACK BITCHES",
+            "emoji": "🎉",
+            "desc": "the return of jesus christ",
+            "body": (
+                "After the car crash while on his way to the casino, kittay kinda died. Luckily, cat jesus resurrected him in turn for his soul (and a lot of money to the hospital).\n"
+                "Kittay is back, and he's better than ever!\n"
+                "After we hit 100+ servers, the italian discord mob decided to break kittay's ankles and disabled all of his gateway intents. For some reason, they are back on now, not complaining tho.\n"
+                "Basically, we're so back, and that means new battlepass too! We missed a few but at least season 16 is here woohoo! More content will be released after i do some monitoring on bugs for the next few days. \n"
+                "All your data is safe, PRAISE KITTAY!!! (and enjoy the free stuff :D)"
+                "\n"
+                "**Filler <3**"
+            ),
+            "rewards": [
+                {
+                    "type": "pack",
+                    "amount": 10,
+                    "pack_name": "Platinum",
+                    "name": "10 Platinum Packs"
+                },
+                {
+                    "type": "rain",     
+                    "amount": 5,
+                    "name": "40 Rains"
                 }
             ]
        },
@@ -13321,7 +13356,7 @@ async def gen_items_embed(message, person_id) -> discord.Embed:
     return embed
 
 
-@bot.tree.command(description="View your inventory")
+@bot.tree.command(description="View your inventory with modern cat and item management")
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="Person to view the inventory of!")
 async def inventory(message: discord.Interaction, person_id: Optional[discord.User] = None):
@@ -13329,6 +13364,38 @@ async def inventory(message: discord.Interaction, person_id: Optional[discord.Us
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
+    
+    # Suggest new commands
+    if not person_id or person_id.id == message.user.id:
+        class NewCommandsSuggestion(View):
+            def __init__(self):
+                super().__init__(timeout=30)
+            
+            @discord.ui.button(label="🐱 Browse Cats", style=ButtonStyle.primary)
+            async def cats_btn(self, interaction: discord.Interaction, button: Button):
+                if interaction.user.id != message.user.id:
+                    await do_funny(interaction)
+                    return
+                await interaction.response.send_message("Use `/cats` to browse your cat collection with modern filters and sorting!", ephemeral=True)
+            
+            @discord.ui.button(label="🎒 View Items", style=ButtonStyle.primary)
+            async def items_btn(self, interaction: discord.Interaction, button: Button):
+                if interaction.user.id != message.user.id:
+                    await do_funny(interaction)
+                    return
+                await interaction.response.send_message("Use `/items` to manage your item inventory with easy usage!", ephemeral=True)
+        
+        suggest_view = NewCommandsSuggestion()
+        await message.response.send_message(
+            "💡 **New Commands Available!**\n"
+            "• `/cats` - Modern cat collection browser with filters & sorting\n"
+            "• `/items` - Easy item management and usage\n\n"
+            "The old `/inventory` still works, but try the new commands for a better experience!",
+            view=suggest_view,
+            ephemeral=True
+        )
+        # Don't return - still show old inventory too
+        await asyncio.sleep(0.5)  # Small delay so suggestion shows first
     
     await message.response.defer()
     try:
@@ -13743,6 +13810,706 @@ __Highlighted Stat__
         switch_btn_other.callback = switch_to_items_other
         view_other.add_item(switch_btn_other)
         await message.followup.send(embed=embedVar, view=view_other)
+
+
+@bot.tree.command(name="cats", description="Modern cat collection browser with filtering, sorting, and quick actions")
+@discord.app_commands.describe(
+    filter_type="Filter by cat type",
+    sort_by="Sort cats by attribute", 
+    show="What to show"
+)
+async def cats_browser(
+    message: discord.Interaction,
+    filter_type: Optional[str] = None,
+    sort_by: Optional[Literal["type", "bond", "hp", "dmg", "name", "acquired"]] = "type",
+    show: Optional[Literal["all", "favorites", "high_bond", "on_adventure"]] = "all"
+):
+    """Modern, user-friendly cat collection browser"""
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=3):
+        await message.response.send_message("slow down! you're using commands too fast", ephemeral=True)
+        return
+    
+    await message.response.defer()
+    
+    cats_list = await get_user_cats(message.guild.id, message.user.id)
+    
+    if not cats_list:
+        await message.followup.send("🐱 You don't have any cats yet! Catch some with `/setup` first.", ephemeral=True)
+        return
+    
+    class ModernCatBrowser(View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=300)
+            self.author_id = author_id
+            self.page = 0
+            self.sort_by = sort_by or "type"
+            self.reverse = False
+            self.filter_type = filter_type
+            self.show_mode = show or "all"
+            self.selected_cats = []  # For bulk actions
+            self.per_page = 10
+            
+        def get_filtered_cats(self):
+            """Apply all filters and sorting"""
+            filtered = list(cats_list)
+            
+            # Apply show mode filter
+            if self.show_mode == "favorites":
+                filtered = [c for c in filtered if c.get('favorite', False)]
+            elif self.show_mode == "high_bond":
+                filtered = [c for c in filtered if c.get('bond', 0) >= 100]
+            elif self.show_mode == "on_adventure":
+                filtered = [c for c in filtered if c.get('on_adventure', False)]
+            
+            # Apply type filter
+            if self.filter_type:
+                filtered = [c for c in filtered if c.get('type') == self.filter_type]
+            
+            # Sort
+            sort_keys = {
+                "type": lambda x: x.get('type', ''),
+                "bond": lambda x: x.get('bond', 0),
+                "hp": lambda x: apply_stat_multipliers(x).get('hp', 0),
+                "dmg": lambda x: apply_stat_multipliers(x).get('dmg', 0),
+                "name": lambda x: (x.get('name') or 'Unnamed').lower(),
+                "acquired": lambda x: x.get('acquired_at', 0)
+            }
+            
+            filtered.sort(key=sort_keys.get(self.sort_by, sort_keys["type"]), reverse=self.reverse)
+            return filtered
+        
+        def build_embed(self):
+            """Build the main display embed"""
+            filtered = self.get_filtered_cats()
+            
+            if not filtered:
+                return discord.Embed(
+                    title="🐱 Cat Collection",
+                    description="No cats match your current filters!\nTry changing the filters or show mode.",
+                    color=Colors.brown
+                )
+            
+            # Stats
+            total = len(cats_list)
+            shown = len(filtered)
+            unique_types = len(set(c.get('type') for c in filtered))
+            avg_bond = sum(c.get('bond', 0) for c in filtered) / len(filtered) if filtered else 0
+            favorites_count = sum(1 for c in filtered if c.get('favorite', False))
+            
+            # Pagination
+            total_pages = (shown - 1) // self.per_page + 1 if shown > 0 else 1
+            self.page = max(0, min(self.page, total_pages - 1))
+            start = self.page * self.per_page
+            end = min(start + self.per_page, shown)
+            page_cats = filtered[start:end]
+            
+            # Build embed
+            sort_emoji = {"type": "🏷️", "bond": "💕", "hp": "❤️", "dmg": "⚔️", "name": "📛", "acquired": "📅"}
+            direction = "🔽" if self.reverse else "🔼"
+            
+            title = "🐱 Cat Collection"
+            if self.show_mode != "all":
+                mode_names = {"favorites": "⭐ Favorites", "high_bond": "💕 High Bond", "on_adventure": "🧭 On Adventure"}
+                title = f"🐱 {mode_names.get(self.show_mode, 'Cats')}"
+            
+            description = f"**Showing {shown}/{total} cats** • {unique_types} types • Avg Bond: {avg_bond:.0f}\n"
+            description += f"**Sort:** {direction} {sort_emoji.get(self.sort_by, '')} {self.sort_by.title()}"
+            
+            if self.filter_type:
+                description += f" • **Filter:** {self.filter_type}"
+            if favorites_count > 0:
+                description += f" • ⭐ {favorites_count} favorites"
+            
+            description += f"\n\n"
+            
+            # List cats with better formatting
+            for i, cat in enumerate(page_cats, start=start + 1):
+                cat_type = cat.get('type', 'Unknown')
+                cat_name = cat.get('name') or f"{cat_type} #{i}"
+                cat_bond = cat.get('bond', 0)
+                is_fav = "⭐" if cat.get('favorite', False) else ""
+                on_adv = "🧭" if cat.get('on_adventure', False) else ""
+                
+                # Get modifiers
+                modifiers = cat.get("modifiers", [])
+                mod_emojis = " ".join([CAT_MODIFIERS[m]["emoji"] for m in modifiers if m in CAT_MODIFIERS]) if modifiers else ""
+                
+                # Get stats with modifiers
+                stats = apply_stat_multipliers(cat)
+                hp = stats.get('hp', cat.get('hp', 0))
+                dmg = stats.get('dmg', cat.get('dmg', 0))
+                
+                # Bond level
+                level, _, _ = get_bond_level_and_progress(cat_bond)
+                
+                # Cat emoji
+                cat_emoji = get_emoji(cat_type.lower() + 'cat')
+                
+                description += f"`{i:>3}.` {cat_emoji} {mod_emojis} **{cat_name}** {is_fav}{on_adv}\n"
+                description += f"      Lv{level} Bond {cat_bond} • HP {hp} • DMG {dmg}\n"
+            
+            embed = discord.Embed(title=title, description=description, color=Colors.brown)
+            embed.set_footer(text=f"Page {self.page + 1}/{total_pages} • Use buttons to interact with your cats")
+            
+            return embed
+        
+        def build_view(self):
+            """Build interactive buttons"""
+            self.clear_items()
+            filtered = self.get_filtered_cats()
+            total_pages = (len(filtered) - 1) // self.per_page + 1 if filtered else 1
+            
+            # Row 0: Quick filters
+            filter_select = discord.ui.Select(
+                placeholder="🔍 Quick Filter...",
+                options=[
+                    discord.SelectOption(label="Show All", value="all", emoji="📂", default=self.show_mode=="all"),
+                    discord.SelectOption(label="Favorites Only", value="favorites", emoji="⭐", default=self.show_mode=="favorites"),
+                    discord.SelectOption(label="High Bond (100+)", value="high_bond", emoji="💕", default=self.show_mode=="high_bond"),
+                    discord.SelectOption(label="On Adventure", value="on_adventure", emoji="🧭", default=self.show_mode=="on_adventure"),
+                ],
+                row=0
+            )
+            
+            async def filter_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                self.show_mode = filter_select.values[0]
+                self.page = 0
+                await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+            
+            filter_select.callback = filter_callback
+            self.add_item(filter_select)
+            
+            # Row 1: Sort options
+            sort_select = discord.ui.Select(
+                placeholder="📊 Sort by...",
+                options=[
+                    discord.SelectOption(label="Type", value="type", emoji="🏷️", default=self.sort_by=="type"),
+                    discord.SelectOption(label="Bond Level", value="bond", emoji="💕", default=self.sort_by=="bond"),
+                    discord.SelectOption(label="HP", value="hp", emoji="❤️", default=self.sort_by=="hp"),
+                    discord.SelectOption(label="DMG", value="dmg", emoji="⚔️", default=self.sort_by=="dmg"),
+                    discord.SelectOption(label="Name", value="name", emoji="📛", default=self.sort_by=="name"),
+                    discord.SelectOption(label="Date Acquired", value="acquired", emoji="📅", default=self.sort_by=="acquired"),
+                ],
+                row=1
+            )
+            
+            async def sort_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                self.sort_by = sort_select.values[0]
+                self.page = 0
+                await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+            
+            sort_select.callback = sort_callback
+            self.add_item(sort_select)
+            
+            # Row 2: Actions
+            reverse_btn = Button(label="🔄 Reverse", style=ButtonStyle.secondary, row=2)
+            
+            async def reverse_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                self.reverse = not self.reverse
+                self.page = 0
+                await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+            
+            reverse_btn.callback = reverse_callback
+            self.add_item(reverse_btn)
+            
+            inspect_btn = Button(label="🔍 Inspect", style=ButtonStyle.primary, row=2)
+            
+            async def inspect_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                
+                class InspectModal(discord.ui.Modal):
+                    def __init__(self):
+                        super().__init__(title="Inspect a Cat")
+                        self.index_input = discord.ui.TextInput(
+                            label="Cat number (from the list above)",
+                            placeholder="1",
+                            min_length=1,
+                            max_length=6,
+                            style=discord.TextStyle.short
+                        )
+                        self.add_item(self.index_input)
+                    
+                    async def on_submit(self, modal_inter: discord.Interaction):
+                        await modal_inter.response.defer()
+                        try:
+                            idx = int(self.index_input.value)
+                        except:
+                            await modal_inter.followup.send("❌ Please enter a valid number!", ephemeral=True)
+                            return
+                        
+                        filtered_local = self.get_filtered_cats()
+                        if idx < 1 or idx > len(filtered_local):
+                            await modal_inter.followup.send(f"❌ Invalid number! Choose between 1 and {len(filtered_local)}", ephemeral=True)
+                            return
+                        
+                        cat = filtered_local[idx - 1]
+                        detail_embed = build_instance_detail_embed(cat.get('type'), cat)
+                        
+                        # Quick action buttons
+                        class QuickActions(View):
+                            def __init__(self):
+                                super().__init__(timeout=120)
+                            
+                            @discord.ui.button(label="⭐ Favorite", style=ButtonStyle.secondary)
+                            async def toggle_fav(self, btn_inter: discord.Interaction, button: Button):
+                                if btn_inter.user.id != self.author_id:
+                                    await do_funny(btn_inter)
+                                    return
+                                await btn_inter.response.defer()
+                                cat['favorite'] = not cat.get('favorite', False)
+                                await save_user_cats(message.guild.id, message.user.id, cats_list)
+                                button.label = "★ Unfavorite" if cat['favorite'] else "⭐ Favorite"
+                                await btn_inter.edit_original_response(embed=build_instance_detail_embed(cat.get('type'), cat), view=self)
+                            
+                            @discord.ui.button(label="📝 Rename", style=ButtonStyle.secondary)
+                            async def rename_btn(self, btn_inter: discord.Interaction, button: Button):
+                                if btn_inter.user.id != self.author_id:
+                                    await do_funny(btn_inter)
+                                    return
+                                
+                                class RenameModal(discord.ui.Modal):
+                                    def __init__(self):
+                                        super().__init__(title="Rename Cat")
+                                        self.name_input = discord.ui.TextInput(
+                                            label="New name",
+                                            placeholder=cat.get('name') or "Enter name",
+                                            max_length=32,
+                                            style=discord.TextStyle.short
+                                        )
+                                        self.add_item(self.name_input)
+                                    
+                                    async def on_submit(self, rename_inter: discord.Interaction):
+                                        await rename_inter.response.defer()
+                                        new_name = self.name_input.value.strip()
+                                        if new_name:
+                                            cat['name'] = new_name
+                                            await save_user_cats(message.guild.id, message.user.id, cats_list)
+                                            await rename_inter.followup.send(f"✅ Renamed to **{new_name}**!", ephemeral=True)
+                                        else:
+                                            await rename_inter.followup.send("❌ Name cannot be empty!", ephemeral=True)
+                                
+                                await btn_inter.response.send_modal(RenameModal())
+                            
+                            @discord.ui.button(label="🎾 Play", style=ButtonStyle.primary)
+                            async def play_btn(self, btn_inter: discord.Interaction, button: Button):
+                                if btn_inter.user.id != self.author_id:
+                                    await do_funny(btn_inter)
+                                    return
+                                await btn_inter.response.send_message(f"Use `/play {cat.get('name') or cat.get('type')}` to play with this cat!", ephemeral=True)
+                        
+                        quick_view = QuickActions()
+                        quick_view.author_id = self.author_id
+                        # Update favorite button label
+                        if cat.get('favorite', False):
+                            quick_view.children[0].label = "★ Unfavorite"
+                        
+                        await modal_inter.followup.send(embed=detail_embed, view=quick_view, ephemeral=True)
+                
+                inspect_modal = InspectModal()
+                inspect_modal.get_filtered_cats = self.get_filtered_cats
+                await interaction.response.send_modal(inspect_modal)
+            
+            inspect_btn.callback = inspect_callback
+            self.add_item(inspect_btn)
+            
+            if self.filter_type:
+                clear_btn = Button(label="🗑️ Clear Filter", style=ButtonStyle.danger, row=2)
+                
+                async def clear_callback(interaction: discord.Interaction):
+                    if interaction.user.id != self.author_id:
+                        await do_funny(interaction)
+                        return
+                    self.filter_type = None
+                    self.page = 0
+                    await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+                
+                clear_btn.callback = clear_callback
+                self.add_item(clear_btn)
+            
+            # Row 3: Pagination
+            if self.page > 0 or self.page < total_pages - 1:
+                if self.page > 0:
+                    prev_btn = Button(label="◀ Prev", style=ButtonStyle.secondary, row=3)
+                    
+                    async def prev_callback(interaction: discord.Interaction):
+                        if interaction.user.id != self.author_id:
+                            await do_funny(interaction)
+                            return
+                        self.page -= 1
+                        await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+                    
+                    prev_btn.callback = prev_callback
+                    self.add_item(prev_btn)
+                
+                page_btn = Button(label=f"Page {self.page + 1}/{total_pages}", style=ButtonStyle.secondary, disabled=True, row=3)
+                self.add_item(page_btn)
+                
+                if self.page < total_pages - 1:
+                    next_btn = Button(label="Next ▶", style=ButtonStyle.secondary, row=3)
+                    
+                    async def next_callback(interaction: discord.Interaction):
+                        if interaction.user.id != self.author_id:
+                            await do_funny(interaction)
+                            return
+                        self.page += 1
+                        await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+                    
+                    next_btn.callback = next_callback
+                    self.add_item(next_btn)
+            
+            return self
+    
+    browser = ModernCatBrowser(author_id=message.user.id)
+    await message.followup.send(embed=browser.build_embed(), view=browser.build_view())
+
+
+@bot.tree.command(name="items", description="Modern item inventory with easy usage and management")
+async def items_manager(message: discord.Interaction):
+    """Modern, user-friendly item inventory"""
+    if not await check_global_cooldown(message.user.id, cooldown_seconds=3):
+        await message.response.send_message("slow down! you're using commands too fast", ephemeral=True)
+        return
+    
+    await message.response.defer()
+    
+    user_items = await get_user_items(message.guild.id, message.user.id)
+    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+    
+    if not user_items or all(count <= 0 for count in user_items.values()):
+        embed = discord.Embed(
+            title="🎒 Item Inventory",
+            description="You don't have any items yet!\n\n💡 **How to get items:**\n• Complete battlepass tiers (`/battlepass`)\n• Buy from shop (`/shop`)\n• Win events and giveaways",
+            color=Colors.brown
+        )
+        embed.add_field(name="Active Buffs", value="None", inline=False)
+        
+        # Show shop button
+        shop_btn = Button(label="🛒 Visit Shop", style=ButtonStyle.primary)
+        async def shop_callback(interaction: discord.Interaction):
+            if interaction.user.id != message.user.id:
+                await do_funny(interaction)
+                return
+            # Redirect to shop command
+            await interaction.response.send_message("Use `/shop` to browse items!", ephemeral=True)
+        shop_btn.callback = shop_callback
+        
+        view = View(timeout=120)
+        view.add_item(shop_btn)
+        await message.followup.send(embed=embed, view=view)
+        return
+    
+    class ItemInventory(View):
+        def __init__(self, author_id: int):
+            super().__init__(timeout=300)
+            self.author_id = author_id
+            self.category = "all"  # all, potions, toys, food, misc
+            
+        def build_embed(self):
+            """Build item inventory embed"""
+            # Get active buffs
+            buffs = get_active_buffs(message.guild.id, message.user.id)
+            buff_text = []
+            if buffs.get('luck'):
+                buff_text.append(f"🧪 Luck +{int(buffs['luck']*100)}%")
+            if buffs.get('xp'):
+                buff_text.append(f"📈 XP +{int(buffs['xp']*100)}%")
+            if profile.rain_minutes > 0:
+                buff_text.append(f"☔ {profile.rain_minutes} rain minutes")
+            
+            buff_display = " • ".join(buff_text) if buff_text else "No active buffs"
+            
+            # Organize items by category
+            emoji_map = {
+                "luck": "luckpotion",
+                "xp": "xppotion",
+                "rains": "bottlerain",
+                "ball": "goodball",
+                "dogtreat": "dogtreat",
+                "pancakes": "pancakes",
+                "candy_cane": "candy_cane",
+                "gingerbread": "gingerbread",
+                "hot_cocoa": "hot_cocoa"
+            }
+            
+            categories = {
+                "potions": ["luck", "xp"],
+                "toys": ["ball"],
+                "food": ["dogtreat", "pancakes", "candy_cane", "gingerbread", "hot_cocoa"],
+                "misc": ["rains"]
+            }
+            
+            description = f"**Active Buffs:** {buff_display}\n\n"
+            
+            # Group items
+            items_by_cat = {"potions": [], "toys": [], "food": [], "misc": []}
+            
+            for item_key, count in user_items.items():
+                if count <= 0:
+                    continue
+                
+                parts = item_key.rsplit("_", 1)
+                item_code = parts[0]
+                tier = parts[1] if len(parts) > 1 else "I"
+                
+                # Find category
+                cat = "misc"
+                for category_name, items in categories.items():
+                    if item_code in items:
+                        cat = category_name
+                        break
+                
+                data = SHOP_ITEMS.get(item_code, {})
+                tier_data = data.get("tiers", {}).get(tier, {})
+                emoji_label = get_emoji(emoji_map.get(item_code, item_code))
+                title = data.get("title", item_code)
+                desc = tier_data.get("desc", "")
+                
+                items_by_cat[cat].append({
+                    "emoji": emoji_label,
+                    "name": f"{title} {tier}",
+                    "desc": desc,
+                    "count": count,
+                    "key": item_key,
+                    "item_code": item_code,
+                    "tier": tier
+                })
+            
+            # Display based on filter
+            if self.category == "all":
+                for cat_name, cat_items in items_by_cat.items():
+                    if cat_items:
+                        cat_emoji = {"potions": "🧪", "toys": "🎾", "food": "🍖", "misc": "📦"}
+                        description += f"**{cat_emoji.get(cat_name, '📦')} {cat_name.title()}**\n"
+                        for item in cat_items:
+                            description += f"{item['emoji']} **{item['name']}** × {item['count']}\n"
+                            description += f"   ↳ {item['desc']}\n"
+                        description += "\n"
+            else:
+                cat_items = items_by_cat.get(self.category, [])
+                if cat_items:
+                    for item in cat_items:
+                        description += f"{item['emoji']} **{item['name']}** × {item['count']}\n"
+                        description += f"   ↳ {item['desc']}\n\n"
+                else:
+                    description += f"No items in this category."
+            
+            embed = discord.Embed(
+                title="🎒 Item Inventory",
+                description=description,
+                color=Colors.brown
+            )
+            
+            # Count total items
+            total_items = sum(count for count in user_items.values() if count > 0)
+            unique_items = sum(1 for count in user_items.values() if count > 0)
+            embed.set_footer(text=f"{total_items} total items • {unique_items} unique")
+            
+            return embed
+        
+        def build_view(self):
+            """Build interactive view"""
+            self.clear_items()
+            
+            # Row 0: Category filter
+            category_select = discord.ui.Select(
+                placeholder="📂 Filter by category...",
+                options=[
+                    discord.SelectOption(label="All Items", value="all", emoji="📦", default=self.category=="all"),
+                    discord.SelectOption(label="Potions", value="potions", emoji="🧪", default=self.category=="potions"),
+                    discord.SelectOption(label="Toys", value="toys", emoji="🎾", default=self.category=="toys"),
+                    discord.SelectOption(label="Food", value="food", emoji="🍖", default=self.category=="food"),
+                    discord.SelectOption(label="Miscellaneous", value="misc", emoji="📦", default=self.category=="misc"),
+                ],
+                row=0
+            )
+            
+            async def category_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                self.category = category_select.values[0]
+                await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+            
+            category_select.callback = category_callback
+            self.add_item(category_select)
+            
+            # Row 1: Use item
+            use_btn = Button(label="🎯 Use Item", style=ButtonStyle.primary, row=1)
+            
+            async def use_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                
+                # Build list of usable items
+                options = []
+                emoji_map = {
+                    "luck": "luckpotion",
+                    "xp": "xppotion",
+                    "rains": "bottlerain",
+                    "ball": "goodball",
+                    "dogtreat": "dogtreat",
+                    "pancakes": "pancakes",
+                    "candy_cane": "candy_cane",
+                    "gingerbread": "gingerbread",
+                    "hot_cocoa": "hot_cocoa"
+                }
+                
+                for item_key, count in user_items.items():
+                    if count <= 0:
+                        continue
+                    
+                    parts = item_key.rsplit("_", 1)
+                    item_code = parts[0]
+                    tier = parts[1] if len(parts) > 1 else "I"
+                    
+                    data = SHOP_ITEMS.get(item_code, {})
+                    tier_data = data.get("tiers", {}).get(tier, {})
+                    emoji_label = get_emoji(emoji_map.get(item_code, item_code))
+                    title = data.get("title", item_code)
+                    
+                    options.append(discord.SelectOption(
+                        label=f"{title} {tier} (×{count})",
+                        value=item_key,
+                        emoji=emoji_label,
+                        description=tier_data.get("desc", "")[:100]
+                    ))
+                
+                if not options:
+                    await interaction.response.send_message("You don't have any items to use!", ephemeral=True)
+                    return
+                
+                item_select = discord.ui.Select(
+                    placeholder="Choose an item to use...",
+                    options=options[:25],
+                    row=0
+                )
+                
+                async def item_use_callback(item_inter: discord.Interaction):
+                    if item_inter.user.id != self.author_id:
+                        await do_funny(item_inter)
+                        return
+                    
+                    await item_inter.response.defer()
+                    
+                    item_key = item_select.values[0]
+                    parts = item_key.rsplit("_", 1)
+                    item_code = parts[0]
+                    tier = parts[1] if len(parts) > 1 else "I"
+                    
+                    # Reload items to ensure we have latest counts
+                    current_items = await get_user_items(message.guild.id, message.user.id)
+                    if current_items.get(item_key, 0) <= 0:
+                        await item_inter.followup.send("❌ You don't have this item anymore!", ephemeral=True)
+                        return
+                    
+                    data = SHOP_ITEMS.get(item_code, {})
+                    tier_data = data.get("tiers", {}).get(tier, {})
+                    title = data.get("title", item_code)
+                    
+                    # Handle different item types
+                    if item_code == "rains":
+                        # Add rain minutes
+                        minutes = tier_data.get("minutes", 0)
+                        profile_local = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                        profile_local.rain_minutes += minutes
+                        await profile_local.save()
+                        
+                        current_items[item_key] -= 1
+                        await save_user_items(message.guild.id, message.user.id, current_items)
+                        
+                        await item_inter.followup.send(
+                            f"✅ Used **{title} {tier}**!\nAdded {minutes} rain minutes. Use `/rain` to activate them.",
+                            ephemeral=True
+                        )
+                    
+                    elif item_code in ("luck", "xp"):
+                        # Apply buff
+                        effect = tier_data.get("effect", 0)
+                        dur_map = {'I': 3600, 'II': 10800, 'III': 21600}
+                        duration = dur_map.get(tier, 3600)
+                        now_ts = int(time.time())
+                        
+                        k = _get_buffs_key(message.guild.id, message.user.id)
+                        ITEM_BUFFS.setdefault(k, {})[item_code] = {"mult": effect, "until": now_ts + duration}
+                        save_item_buffs()
+                        
+                        current_items[item_key] -= 1
+                        await save_user_items(message.guild.id, message.user.id, current_items)
+                        
+                        await item_inter.followup.send(
+                            f"✅ Used **{title} {tier}**!\n+{int(effect*100)}% {item_code} for {duration//3600}h. Expires <t:{now_ts + duration}:R>",
+                            ephemeral=True
+                        )
+                    
+                    elif item_code in ("ball", "dogtreat", "pancakes", "candy_cane", "gingerbread", "hot_cocoa"):
+                        # Bond items - need to select a cat
+                        await item_inter.followup.send(
+                            f"💡 Use `/play` to apply **{title} {tier}** to one of your cats!",
+                            ephemeral=True
+                        )
+                    
+                    else:
+                        await item_inter.followup.send(f"✅ Used **{title} {tier}**!", ephemeral=True)
+                        current_items[item_key] -= 1
+                        await save_user_items(message.guild.id, message.user.id, current_items)
+                    
+                    # Refresh display
+                    await interaction.edit_original_response(embed=self.build_embed(), view=self.build_view())
+                
+                item_select.callback = item_use_callback
+                
+                use_view = View(timeout=120)
+                use_view.add_item(item_select)
+                
+                await interaction.response.send_message("Choose an item:", view=use_view, ephemeral=True)
+            
+            use_btn.callback = use_callback
+            self.add_item(use_btn)
+            
+            # Shop button
+            shop_btn = Button(label="🛒 Shop", style=ButtonStyle.secondary, row=1)
+            
+            async def shop_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                await interaction.response.send_message("Use `/shop` to buy more items with Kibble!", ephemeral=True)
+            
+            shop_btn.callback = shop_callback
+            self.add_item(shop_btn)
+            
+            # Refresh button
+            refresh_btn = Button(label="🔄 Refresh", style=ButtonStyle.secondary, row=1)
+            
+            async def refresh_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.author_id:
+                    await do_funny(interaction)
+                    return
+                # Reload items
+                nonlocal user_items, profile
+                user_items = await get_user_items(message.guild.id, message.user.id)
+                profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+                await interaction.response.edit_message(embed=self.build_embed(), view=self.build_view())
+            
+            refresh_btn.callback = refresh_callback
+            self.add_item(refresh_btn)
+            
+            return self
+    
+    inventory = ItemInventory(author_id=message.user.id)
+    await message.followup.send(embed=inventory.build_embed(), view=inventory.build_view())
 
 
 @bot.tree.command(description="its raining cats")
@@ -18199,16 +18966,31 @@ async def batch_rename_cmd(message: discord.Interaction):
     await message.followup.send(embed=embed, view=view)
 
 
-@bot.tree.command(name="sortinventory", description="Sort and filter your cat inventory")
+@bot.tree.command(name="sortinventory", description="[LEGACY] Sort and filter - Try /cats for modern interface!")
 async def sort_inventory_cmd(message: discord.Interaction):
-    """Advanced inventory sorting and filtering"""
+    """Advanced inventory sorting and filtering (Legacy - use /cats instead)"""
     await message.response.defer()
     
     cats_list = await get_user_cats(message.guild.id, message.user.id)
     
     if not cats_list:
-        await message.followup.send("You don't have any cats yet!", ephemeral=True)
+        await message.followup.send("You don't have any cats yet!\n\n💡 **Tip:** Try the new `/cats` command for a better experience!", ephemeral=True)
         return
+    
+    # Show suggestion to use new command
+    class SuggestionView(View):
+        def __init__(self):
+            super().__init__(timeout=60)
+        
+        @discord.ui.button(label="✨ Try New /cats Command", style=ButtonStyle.primary)
+        async def try_new(self, interaction: discord.Interaction, button: Button):
+            if interaction.user.id != message.user.id:
+                await do_funny(interaction)
+                return
+            await interaction.response.send_message("Use `/cats` for a modern, easier-to-use cat browser!", ephemeral=True)
+    
+    suggestion_view = SuggestionView()
+    await message.followup.send("💡 **New!** Try `/cats` for a better, modern cat browser!", view=suggestion_view, ephemeral=True)
     
     # Get current stats for summary
     total_cats = len(cats_list)
