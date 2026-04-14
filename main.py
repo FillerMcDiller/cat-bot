@@ -2102,9 +2102,12 @@ RESTART_INTERVAL = 20        # 6 hours in seconds
 WARNING_BEFORE = 60               # 1 minute warning
 RESTART_WARNING_CHANNEL_ID = 123456789012345678  # replace with your channel ID
 
+intents = discord.Intents.default()
+intents.message_content = True
+
 bot = commands.AutoShardedBot(
     command_prefix="!",
-    intents=discord.Intents.default(),
+    intents=intents,
     heartbeat_timeout=120.0,  # Give more time for heartbeat responses during high load
     # Gateway connection optimization
     http_trace=None,  # Disable tracing overhead

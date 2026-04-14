@@ -30,12 +30,15 @@ import catpg
 
 winuvloop.install()
 
+intents = discord.Intents(messages=True, guilds=True)
+intents.message_content = True
+
 bot = commands.AutoShardedBot(
     command_prefix="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     help_command=None,
     chunk_guilds_at_startup=False,
     allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=False, private_channel=False),
-    intents=discord.Intents(messages=True, guilds=True),  # Removed message_content (privileged intent)
+    intents=intents,
     member_cache_flags=discord.MemberCacheFlags.none(),
     allowed_mentions=discord.AllowedMentions.none(),
 )
