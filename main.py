@@ -13861,38 +13861,6 @@ async def inventory(message: discord.Interaction, person_id: Optional[discord.Us
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
     
-    # Suggest new commands
-    if not person_id or person_id.id == message.user.id:
-        class NewCommandsSuggestion(View):
-            def __init__(self):
-                super().__init__(timeout=30)
-            
-            @discord.ui.button(label="🐱 Browse Cats", style=ButtonStyle.primary)
-            async def cats_btn(self, interaction: discord.Interaction, button: Button):
-                if interaction.user.id != message.user.id:
-                    await do_funny(interaction)
-                    return
-                await interaction.response.send_message("Use `/cats` to browse your cat collection with modern filters and sorting!", ephemeral=True)
-            
-            @discord.ui.button(label="🎒 View Items", style=ButtonStyle.primary)
-            async def items_btn(self, interaction: discord.Interaction, button: Button):
-                if interaction.user.id != message.user.id:
-                    await do_funny(interaction)
-                    return
-                await interaction.response.send_message("Use `/items` to manage your item inventory with easy usage!", ephemeral=True)
-        
-        suggest_view = NewCommandsSuggestion()
-        await message.response.send_message(
-            "💡 **New Commands Available!**\n"
-            "• `/cats` - Modern cat collection browser with filters & sorting\n"
-            "• `/items` - Easy item management and usage\n\n"
-            "The old `/inventory` still works, but try the new commands for a better experience!",
-            view=suggest_view,
-            ephemeral=True
-        )
-        # Don't return - still show old inventory too
-        await asyncio.sleep(0.5)  # Small delay so suggestion shows first
-    
     await message.response.defer()
     try:
         if not person_id:
