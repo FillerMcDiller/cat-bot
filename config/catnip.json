@@ -1,0 +1,332 @@
+{
+  "levels": [
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 8,
+      "max_amount": 20,
+      "cost": 50,
+      "bonus": false,
+      "weights": {
+        "common": 700,
+        "uncommon": 200,
+        "rare": 80,
+        "epic": 15,
+        "legendary": 5
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 12,
+      "max_amount": 30,
+      "cost": 150,
+      "bonus": true,
+      "weights": {
+        "common": 650,
+        "uncommon": 250,
+        "rare": 80,
+        "epic": 15,
+        "legendary": 5
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 16,
+      "max_amount": 40,
+      "cost": 300,
+      "bonus": false,
+      "weights": {
+        "common": 600,
+        "uncommon": 300,
+        "rare": 80,
+        "epic": 15,
+        "legendary": 5
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 20,
+      "max_amount": 50,
+      "cost": 500,
+      "bonus": true,
+      "weights": {
+        "common": 550,
+        "uncommon": 350,
+        "rare": 80,
+        "epic": 15,
+        "legendary": 5
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 24,
+      "max_amount": 60,
+      "cost": 800,
+      "bonus": false,
+      "weights": {
+        "common": 500,
+        "uncommon": 380,
+        "rare": 90,
+        "epic": 20,
+        "legendary": 10
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 28,
+      "max_amount": 70,
+      "cost": 1200,
+      "bonus": true,
+      "weights": {
+        "common": 450,
+        "uncommon": 400,
+        "rare": 100,
+        "epic": 30,
+        "legendary": 20
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 32,
+      "max_amount": 80,
+      "cost": 1600,
+      "bonus": false,
+      "weights": {
+        "common": 400,
+        "uncommon": 420,
+        "rare": 120,
+        "epic": 40,
+        "legendary": 20
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 36,
+      "max_amount": 90,
+      "cost": 2000,
+      "bonus": true,
+      "weights": {
+        "common": 350,
+        "uncommon": 420,
+        "rare": 140,
+        "epic": 60,
+        "legendary": 30
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 40,
+      "max_amount": 100,
+      "cost": 2500,
+      "bonus": false,
+      "weights": {
+        "common": 300,
+        "uncommon": 400,
+        "rare": 160,
+        "epic": 80,
+        "legendary": 60
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 50,
+      "max_amount": 120,
+      "cost": 3000,
+      "bonus": true,
+      "weights": {
+        "common": 250,
+        "uncommon": 350,
+        "rare": 180,
+        "epic": 120,
+        "legendary": 100
+      }
+    },
+    {
+      "bounty_amount": 3,
+      "bounty_difficulty": 100,
+      "max_amount": 150,
+      "cost": 5000,
+      "bonus": false,
+      "weights": {
+        "common": 200,
+        "uncommon": 300,
+        "rare": 200,
+        "epic": 150,
+        "legendary": 150
+      }
+    }
+  ],
+  "perks": [
+    {
+      "id": "double",
+      "name": "Double Catch",
+      "exclusive": 0,
+      "weight": 150,
+      "values": [10, 20, 35, 50, 70],
+      "desc": "Catch 2 cats instead of 1 (percent% chance)"
+    },
+    {
+      "id": "triple_none",
+      "name": "Triple Catch",
+      "exclusive": 0,
+      "weight": 100,
+      "values": [5, 10, 20, 35, 55],
+      "desc": "Catch 3 cats (percent% chance) or catch nothing (triple_none% chance)"
+    },
+    {
+      "id": "pack_wooden",
+      "name": "Wooden Pack Reward",
+      "exclusive": 0,
+      "weight": 80,
+      "values": [30, 40, 50, 60, 70],
+      "desc": "percent% chance to get a Wooden Pack on catch"
+    },
+    {
+      "id": "pack_stone",
+      "name": "Stone Pack Reward",
+      "exclusive": 0,
+      "weight": 70,
+      "values": [20, 30, 40, 50, 65],
+      "desc": "percent% chance to get a Stone Pack on catch"
+    },
+    {
+      "id": "pack_bronze",
+      "name": "Bronze Pack Reward",
+      "exclusive": 0,
+      "weight": 60,
+      "values": [15, 25, 35, 45, 60],
+      "desc": "percent% chance to get a Bronze Pack on catch"
+    },
+    {
+      "id": "pack_silver",
+      "name": "Silver Pack Reward",
+      "exclusive": 0,
+      "weight": 50,
+      "values": [10, 20, 30, 40, 55],
+      "desc": "percent% chance to get a Silver Pack on catch"
+    },
+    {
+      "id": "pack_gold",
+      "name": "Gold Pack Reward",
+      "exclusive": 0,
+      "weight": 35,
+      "values": [8, 15, 25, 35, 50],
+      "desc": "percent% chance to get a Gold Pack on catch"
+    },
+    {
+      "id": "pack_platinum",
+      "name": "Platinum Pack Reward",
+      "exclusive": 0,
+      "weight": 20,
+      "values": [5, 10, 18, 28, 40],
+      "desc": "percent% chance to get a Platinum Pack on catch"
+    },
+    {
+      "id": "double_boost",
+      "name": "Double Multiplier",
+      "exclusive": 1,
+      "weight": 40,
+      "values": [25, 35, 50, 65, 80],
+      "desc": "percent% chance to double a Double Catch perk"
+    },
+    {
+      "id": "triple_ach",
+      "name": "Perfect Catch Streak",
+      "exclusive": 0,
+      "weight": 30,
+      "values": [40, 50, 60, 70, 80],
+      "desc": "If you catch a cat with a perfect time, it becomes triple! (requires triple_none perk)"
+    },
+    {
+      "id": "timer_add",
+      "name": "Catnip Timer Extension",
+      "exclusive": 0,
+      "weight": 35,
+      "values": [25, 40, 55, 70, 85],
+      "desc": "percent% chance to add 5 minutes to your catnip timer on catch"
+    },
+    {
+      "id": "rain_boost",
+      "name": "Rain Summoner",
+      "exclusive": 0,
+      "weight": 25,
+      "values": [20, 30, 45, 60, 75],
+      "desc": "percent% chance to trigger a cat rain on catch"
+    },
+    {
+      "id": "double_first",
+      "name": "First Catch Doubled",
+      "exclusive": 0,
+      "weight": 28,
+      "values": [1, 3, 5, 8, 12],
+      "desc": "Your first {timer_add_streak} catches are automatically doubled!"
+    }
+  ],
+  "quotes": [
+    {
+      "name": "The Don",
+      "quotes": {
+        "leveldown": "you're losing your touch, kid. take a break."
+      }
+    },
+    {
+      "name": "Vinny",
+      "quotes": {
+        "leveldown": "looks like you couldn't make the grade. step down."
+      }
+    },
+    {
+      "name": "The Godfather",
+      "quotes": {
+        "leveldown": "sometimes a man can't be everything he wants to be. now, go rest."
+      }
+    },
+    {
+      "name": "Scarface",
+      "quotes": {
+        "leveldown": "you're taking an L, pal. come back when you're ready."
+      }
+    },
+    {
+      "name": "Tombstone",
+      "quotes": {
+        "leveldown": "you're getting soft. hibernate and reflect on your failures."
+      }
+    },
+    {
+      "name": "Capone",
+      "quotes": {
+        "leveldown": "even the best fall sometimes. take your medicine."
+      }
+    },
+    {
+      "name": "The Enforcer",
+      "quotes": {
+        "leveldown": "you had one job. go cool off in hibernation."
+      }
+    },
+    {
+      "name": "The Boss",
+      "quotes": {
+        "leveldown": "losing's contagious in this business. sit this one out."
+      }
+    },
+    {
+      "name": "Silk",
+      "quotes": {
+        "leveldown": "even the smoothest operators stumble. rest up."
+      }
+    },
+    {
+      "name": "Fingers",
+      "quotes": {
+        "leveldown": "you couldn't finger-move your way out of this one."
+      }
+    },
+    {
+      "name": "The Accountant",
+      "quotes": {
+        "leveldown": "your numbers don't add up anymore. good day."
+      }
+    }
+  ]
+}

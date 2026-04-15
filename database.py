@@ -102,3 +102,23 @@ class Item(catpg.Model):
     - quantity: Number of this item the user has
     """
     pass
+
+
+class StockOrder(catpg.Model):
+    pass
+
+
+class StockPriceHistory(catpg.Model):
+    pass
+
+
+class StockPortfolioHistory(catpg.Model):
+    pass
+
+
+class StockReward(catpg.Model):
+    _primary_key = "ticker"
+
+
+class Server(catpg.Model):
+    _primary_key = "guild_id"

@@ -66,10 +66,6 @@ CREATE SEQUENCE IF NOT EXISTS public.prism_id_seq
 
 ALTER TABLE public.prism_id_seq OWNER TO cat_bot;
 
-
-ALTER SEQUENCE public.prism_id_seq OWNED BY public.prism.id;
-
-
 CREATE TABLE IF NOT EXISTS public.profile (
     id integer NOT NULL,
     user_id bigint NOT NULL,
@@ -320,7 +316,38 @@ CREATE TABLE IF NOT EXISTS public.profile (
     ranked_losses integer DEFAULT 0,
     ranked_season integer DEFAULT 1,
     ranked_peak_rating integer DEFAULT 1000,
-    ranked_rewards_claimed boolean DEFAULT false
+    ranked_rewards_claimed boolean DEFAULT false,
+    catnip_level integer DEFAULT 0,
+    catnip_active bigint DEFAULT 0,
+    hibernation boolean DEFAULT false,
+    perks JSONB DEFAULT '[]'::jsonb,
+    bounty_id_one integer DEFAULT 0,
+    bounty_id_two integer DEFAULT 0,
+    bounty_id_three integer DEFAULT 0,
+    bounty_id_bonus integer DEFAULT 0,
+    bounty_type_one character varying(50) DEFAULT ''::character varying,
+    bounty_type_two character varying(50) DEFAULT ''::character varying,
+    bounty_type_three character varying(50) DEFAULT ''::character varying,
+    bounty_type_bonus character varying(50) DEFAULT ''::character varying,
+    bounty_total_one integer DEFAULT 1,
+    bounty_total_two integer DEFAULT 1,
+    bounty_total_three integer DEFAULT 1,
+    bounty_total_bonus integer DEFAULT 1,
+    bounty_progress_one integer DEFAULT 0,
+    bounty_progress_two integer DEFAULT 0,
+    bounty_progress_three integer DEFAULT 0,
+    bounty_progress_bonus integer DEFAULT 0,
+    catnip_amount integer DEFAULT 0,
+    catnip_price character varying(50) DEFAULT ''::character varying,
+    bounties integer DEFAULT 0,
+    bounty_active boolean DEFAULT false,
+    first_quote_seen boolean DEFAULT false,
+    catnip_activations integer DEFAULT 0,
+    catnip_bought integer DEFAULT 0,
+    highest_catnip_level integer DEFAULT 0,
+    bounties_complete integer DEFAULT 0,
+    catnip_total_cats integer DEFAULT 0,
+    reroll boolean DEFAULT false
 );
 
 
@@ -338,6 +365,60 @@ CREATE SEQUENCE IF NOT EXISTS public.profile_id_seq
 ALTER TABLE public.profile_id_seq OWNER TO cat_bot;
 
 ALTER SEQUENCE public.profile_id_seq OWNED BY public.profile.id;
+
+ALTER TABLE public.profile
+ADD COLUMN IF NOT EXISTS ranked_rating integer DEFAULT 1000,
+ADD COLUMN IF NOT EXISTS ranked_wins integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS ranked_losses integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS ranked_season integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS ranked_peak_rating integer DEFAULT 1000,
+ADD COLUMN IF NOT EXISTS ranked_rewards_claimed boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS coins bigint DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_level integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_active bigint DEFAULT 0,
+ADD COLUMN IF NOT EXISTS hibernation boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS perks JSONB DEFAULT '[]'::jsonb,
+ADD COLUMN IF NOT EXISTS bounty_id_one integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_id_two integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_id_three integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_id_bonus integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_type_one character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS bounty_type_two character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS bounty_type_three character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS bounty_type_bonus character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS bounty_total_one integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS bounty_total_two integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS bounty_total_three integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS bounty_total_bonus integer DEFAULT 1,
+ADD COLUMN IF NOT EXISTS bounty_progress_one integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_progress_two integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_progress_three integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_progress_bonus integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_amount integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_price character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS bounties integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounty_active boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS first_quote_seen boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS catnip_activations integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_bought integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS highest_catnip_level integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS bounties_complete integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS catnip_total_cats integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS reroll boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS reroll_level integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS perk_selected boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS perk1 character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS perk2 character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS perk3 character varying(50) DEFAULT ''::character varying,
+ADD COLUMN IF NOT EXISTS cutscene integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS mafia_win boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS pack_attempts integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS last_ran_stocks bigint DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_prsm integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_ctnp integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_pass integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_achs integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_rain integer DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS public.reminder (
     id integer NOT NULL,
@@ -406,7 +487,45 @@ CREATE SEQUENCE IF NOT EXISTS public.deck_id_seq
 
 ALTER TABLE public.deck_id_seq OWNER TO cat_bot;
 
-ALTER SEQUENCE public.deck_id_seq OWNED BY public.deck.id;
+CREATE TABLE IF NOT EXISTS public.stockorder (
+    id SERIAL PRIMARY KEY,
+    user_id bigint NOT NULL,
+    guild_id bigint NOT NULL,
+    ticker character varying(10) NOT NULL,
+    quantity integer NOT NULL,
+    price integer NOT NULL,
+    type_buy boolean NOT NULL,
+    "time" bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.stockpricehistory (
+    id SERIAL PRIMARY KEY,
+    ticker character varying(10) NOT NULL,
+    price integer NOT NULL,
+    "time" bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.stockportfoliohistory (
+    id SERIAL PRIMARY KEY,
+    user_id bigint NOT NULL,
+    guild_id bigint NOT NULL,
+    ticker character varying(10),
+    type character varying(1) NOT NULL,
+    quantity integer,
+    price integer,
+    "time" bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.stockreward (
+    ticker character varying(10) PRIMARY KEY,
+    active boolean DEFAULT false,
+    start_time bigint DEFAULT 0,
+    end_time bigint DEFAULT 0,
+    chance smallint DEFAULT 0,
+    amount integer DEFAULT 0,
+    chance_hidden boolean DEFAULT false,
+    amount_hidden boolean DEFAULT false
+);
 
 CREATE TABLE IF NOT EXISTS public."user" (
     user_id bigint NOT NULL,
@@ -556,8 +675,21 @@ CREATE TABLE IF NOT EXISTS public.ranked_rewards (
     UNIQUE(user_id, guild_id, season)
 );
 
-CREATE INDEX IF NOT EXISTS idx_ranked_rewards_user ON public.ranked_rewards USING btree (user_id, season);
-CREATE INDEX IF NOT EXISTS idx_ranked_rewards_season ON public.ranked_rewards USING btree (season, final_rank);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_roles r ON r.oid = c.relowner
+        WHERE n.nspname = 'public'
+          AND c.relname = 'ranked_rewards'
+          AND r.rolname = current_user
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_ranked_rewards_user ON public.ranked_rewards USING btree (user_id, season);
+        CREATE INDEX IF NOT EXISTS idx_ranked_rewards_season ON public.ranked_rewards USING btree (season, final_rank);
+    END IF;
+END $$;
 
 -- Add missing columns if they don't exist (comprehensive safety check)
 ALTER TABLE public.profile
@@ -774,11 +906,7 @@ ADD COLUMN IF NOT EXISTS full_stack boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS unfunny boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS genetically_gifted boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS you_failure boolean DEFAULT false,
-ADD COLUMN IF NOT EXISTS grinder boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS owned_cosmetics TEXT DEFAULT '',
-ADD COLUMN IF NOT EXISTS equipped_badge TEXT DEFAULT '',
-ADD COLUMN IF NOT EXISTS equipped_title TEXT DEFAULT '',
-ADD COLUMN IF NOT EXISTS equipped_color TEXT DEFAULT '',
 ADD COLUMN IF NOT EXISTS equipped_effect TEXT DEFAULT '',
 ADD COLUMN IF NOT EXISTS claimed_news_rewards JSONB DEFAULT '[]'::jsonb,
 ADD COLUMN IF NOT EXISTS cat_instances JSONB DEFAULT '[]'::jsonb,

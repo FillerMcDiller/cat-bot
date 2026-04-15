@@ -3,7 +3,7 @@ import dotenv
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(override=True)
 
 TOKEN = os.getenv("TOKEN")
 if TOKEN:
@@ -42,3 +42,21 @@ RAIN_CHANNEL_ID = 1436486865489236299
 
 # OpenRouter API key for chatbot 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
+# Gemini settings for periodic chat reader responses
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+# Azure OpenAI settings for periodic chat reader responses
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+
+# Chat reader behavior tuning
+CHAT_INTERVAL_SECONDS = int(os.getenv("CHAT_INTERVAL_SECONDS", "600"))
+CHAT_BUFFER_SIZE = int(os.getenv("CHAT_BUFFER_SIZE", "120"))
+CHAT_CONTEXT_MESSAGES = int(os.getenv("CHAT_CONTEXT_MESSAGES", "40"))
+CHAT_MIN_NEW_MESSAGES = int(os.getenv("CHAT_MIN_NEW_MESSAGES", "4"))
+CHAT_MAX_MESSAGE_CHARS = int(os.getenv("CHAT_MAX_MESSAGE_CHARS", "220"))
