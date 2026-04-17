@@ -50,6 +50,7 @@ import topgg
 import catnip_system
 import config
 import msg2img
+from community_market import register_community_market
 from cat_modifiers import add_modifier, get_cat_display_name, apply_stat_multipliers, get_image_path, CAT_MODIFIERS
 from catpg import RawSQL, pool
 from database import Adventure, Channel, Deck, Item, Prism, Profile, Reminder, Server, StockOrder, StockPortfolioHistory, StockPriceHistory, StockReward, User
@@ -128,12 +129,6 @@ temp_stock_prices: Dict[str, int] = {}
 stock_field_map = {stock["ticker"]: f"stock_{stock['ticker'].lower()}" for stock in stock_data}
 
 # Global slash command cap is 100. Keep this file under the cap by avoiding extra legacy slash entries.
-
-# Webhook server is handled by `webhook_server.py`.
-# The reward logic for votes lives here below and will be scheduled by the webhook server.
-async def reward_vote(user_id: int):
-    # your reward logic here
-    print(f"Rewarding vote for user {user_id}", flush=True)
 
 # trigger warning, base64 encoded for your convinience
 NONOWORDS = [base64.b64decode(i).decode("utf-8") for i in ["bmlja2E=", "bmlja2Vy", "bmlnYQ==", "bmlnZ2E=", "bmlnZ2Vy"]]
@@ -673,6 +668,17 @@ SHOP_ITEMS = {
     #     },
     # },
 }
+
+
+def humanize_item_code(item_code: str) -> str:
+    return " ".join(part.capitalize() for part in str(item_code).split("_") if part)
+
+
+def humanize_item_key(item_key: str) -> str:
+    parts = str(item_key).rsplit("_", 1)
+    item_code = parts[0] if parts else str(item_key)
+    tier = parts[1] if len(parts) > 1 else ""
+    return f"{humanize_item_code(item_code)} {tier}".strip()
 
 # In-memory temporary buffs applied by using potions. Keyed by string "{guild}_{user}".
 # Example: ITEM_BUFFS["{guild}_{user}"] = {"luck": {"mult": 0.1, "until": 1234567890}, "xp": {...}}
@@ -1518,26 +1524,6 @@ COMMAND_COOLDOWNS = {
 
 # Simple in-memory active fights mapping: channel_id -> SimpleFightSession
 FIGHT_SESSIONS: dict = {}
-
-
-def get_cat_emoji(cat_type: str) -> str:
-    """Return a short emoji representing the cat type. Fallback to generic cat face."""
-    if not cat_type:
-        return "🐱"
-    mapping = {
-        "Water": "💧",
-        "Fire": "🔥",
-        "Candy": "🍬",
-        "Alien": "👽",
-        "Chef": "🍳",
-        "Professor": "🧑‍🏫",
-        "Legendary": "🌟",
-        "Mythic": "✨",
-        "8bit": "🕹️",
-        "Donut": "🍩",
-        "Rickroll": "🎵",
-    }
-    return mapping.get(cat_type, "🐱")
 
 
 def render_fight_embed(s) -> discord.Embed:
@@ -6665,7 +6651,7 @@ last_random_giveaway_time = 0
 
 def get_emoji(name):
     global emojis
-    if name in emojis.keys():
+    if name in emojis:
         return emojis[name]
     elif name in emoji.EMOJI_DATA:
         return name
@@ -6733,6 +6719,47 @@ news_list = [
     {"title": "CAT MODIFIERS ARE HERE!", "emoji": "✨"},
     {"title": "CHRISTMAS UPDATE + BUG FIXES", "emoji": "🎄"},
 ]
+
+# Hot-path constants for on_message (avoid rebuilding these on every message).
+ON_MESSAGE_ACH_RULES_BASE = [
+    ["cat?", "startswith", "???"],
+    ["catn", "exact", "catn"],
+    ["cat!coupon jr0f-pzka", "exact", "coupon_user"],
+    ["pineapple", "exact", "pineapple"],
+    ["cat!i_like_cat_website", "exact", "website_user"],
+    ["cat!i_clicked_there", "exact", "click_here"],
+    ["cat!lia_is_cute", "exact", "nerd"],
+    ["i read help", "exact", "patient_reader"],
+    ["lol_i_have_dmed_the_cat_bot_and_got_an_ach", "exact", "dm"],
+    ["dog", "exact", "not_quite"],
+    ["egril", "exact", "egril"],
+    ["-.-. .- -", "exact", "morse_cat"],
+    ["tac", "exact", "reverse"],
+    ["joob", "exact", "joober"],
+    ["cst", "exact", "cst"],
+    ["cab", "exact", "cab"],
+    ["cat!n4lltvuCOKe2iuDCmc6JsU7Jmg4vmFBj8G8l5xvoDHmCoIJMcxkeXZObR6HbIV6", "veryexact", "dataminer"],
+]
+
+ON_MESSAGE_REACTIONS = [
+    ["v1;", "custom", "why_v1"],
+    ["proglet", "custom", "professor_cat"],
+    ["xnopyt", "custom", "vanish"],
+    ["silly", "custom", "sillycat"],
+    ["indev", "vanilla", "🐸"],
+    ["bleh", "custom", "blepcat"],
+    ["blep", "custom", "blepcat"],
+]
+
+MULTILINGUAL_CAT_WORDS = {
+    "mace", "katu", "kot", "koshka", "macka", "gat", "gata", "kocka", "kat", "poes", "kass", "kissa",
+    "chat", "chatte", "gato", "katze", "macska", "kottur", "gatto", "getta", "kakis", "kate", "qattus",
+    "qattusa", "katt", "kit", "kishka", "cath", "qitta", "pisik", "biral", "kyaung", "mao", "pusa",
+    "kata", "billi", "kucing", "neko", "bekku", "mysyq", "chhma", "goyangi", "pucha", "manjar", "muur",
+    "biralo", "gorbeh", "punai", "pilli", "kedi", "mushuk", "meo", "demat", "nwamba", "jangwe", "adure",
+    "katsi", "bisad,", "paka", "ikati", "ologbo", "wesa", "popoki", "piqtuq", "negeru", "poti", "mosi",
+    "michi", "pusi", "oratii",
+}
 
 
 # this is some common code which is run whether someone gets an achievement
@@ -8565,36 +8592,10 @@ async def on_message(message: discord.Message):
 
     perms = await fetch_perms(message)
 
-    achs = [
-        ["cat?", "startswith", "???"],
-        ["catn", "exact", "catn"],
-        ["cat!coupon jr0f-pzka", "exact", "coupon_user"],
-        ["pineapple", "exact", "pineapple"],
-        ["cat!i_like_cat_website", "exact", "website_user"],
-        ["cat!i_clicked_there", "exact", "click_here"],
-        ["cat!lia_is_cute", "exact", "nerd"],
-        ["i read help", "exact", "patient_reader"],
-        [str(bot.user.id), "in", "who_ping"],
-        ["lol_i_have_dmed_the_cat_bot_and_got_an_ach", "exact", "dm"],
-        ["dog", "exact", "not_quite"],
-        ["egril", "exact", "egril"],
-        ["-.-. .- -", "exact", "morse_cat"],
-        ["tac", "exact", "reverse"],
-        ["joob", "exact", "joober"],
-        ["cst", "exact", "cst"],
-        ["cab", "exact", "cab"],
-        ["cat!n4lltvuCOKe2iuDCmc6JsU7Jmg4vmFBj8G8l5xvoDHmCoIJMcxkeXZObR6HbIV6", "veryexact", "dataminer"],
-    ]
+    achs = list(ON_MESSAGE_ACH_RULES_BASE)
+    achs.append([str(bot.user.id), "in", "who_ping"])
 
-    reactions = [
-        ["v1;", "custom", "why_v1"],
-        ["proglet", "custom", "professor_cat"],
-        ["xnopyt", "custom", "vanish"],
-        ["silly", "custom", "sillycat"],
-        ["indev", "vanilla", "🐸"],
-        ["bleh", "custom", "blepcat"],
-        ["blep", "custom", "blepcat"],
-    ]
+    reactions = ON_MESSAGE_REACTIONS
 
     responses = [
         ["cat!sex", "exact", "..."],
@@ -8619,7 +8620,7 @@ async def on_message(message: discord.Message):
         pass
 
     # here are some automation hooks for giving out purchases and similiar
-    if config.RAIN_CHANNEL_ID and message.channel.id == config.RAIN_CHANNEL_ID and text.lower().startswith("cat!rain"):
+    if config.RAIN_CHANNEL_ID and message.channel.id == config.RAIN_CHANNEL_ID and text.startswith("cat!rain"):
         things = text.split(" ")
         user = await User.get_or_create(user_id=int(things[1]))
         if not user.rain_minutes:
@@ -8651,7 +8652,7 @@ async def on_message(message: discord.Message):
 
     # :staring_cat: reaction on "bullshit"
     if " " not in text and len(text) > 7 and text.isalnum():
-        s = text.lower()
+        s = text
         total_vow = 0
         total_illegal = 0
         for i in "aeuio":
@@ -8816,93 +8817,20 @@ async def on_message(message: discord.Message):
 
     for ach in achs:
         if (
-            (ach[1] == "startswith" and text.lower().startswith(ach[0]))
-            or (ach[1] == "re" and re.search(ach[0], text.lower()))
-            or (ach[1] == "exact" and ach[0] == text.lower())
+            (ach[1] == "startswith" and text.startswith(ach[0]))
+            or (ach[1] == "re" and re.search(ach[0], text))
+            or (ach[1] == "exact" and ach[0] == text)
             or (ach[1] == "veryexact" and ach[0] == text)
-            or (ach[1] == "in" and ach[0] in text.lower())
+            or (ach[1] == "in" and ach[0] in text)
         ):
             await achemb(message, ach[2], "reply")
 
-    if text.lower() in [
-        "mace",
-        "katu",
-        "kot",
-        "koshka",
-        "macka",
-        "gat",
-        "gata",
-        "kocka",
-        "kat",
-        "poes",
-        "kass",
-        "kissa",
-        "chat",
-        "chatte",
-        "gato",
-        "katze",
-        "gata",
-        "macska",
-        "kottur",
-        "gatto",
-        "getta",
-        "kakis",
-        "kate",
-        "qattus",
-        "qattusa",
-        "katt",
-        "kit",
-        "kishka",
-        "cath",
-        "qitta",
-        "katu",
-        "pisik",
-        "biral",
-        "kyaung",
-        "mao",
-        "pusa",
-        "kata",
-        "billi",
-        "kucing",
-        "neko",
-        "bekku",
-        "mysyq",
-        "chhma",
-        "goyangi",
-        "pucha",
-        "manjar",
-        "muur",
-        "biralo",
-        "gorbeh",
-        "punai",
-        "pilli",
-        "kedi",
-        "mushuk",
-        "meo",
-        "demat",
-        "nwamba",
-        "jangwe",
-        "adure",
-        "katsi",
-        "bisad,",
-        "paka",
-        "ikati",
-        "ologbo",
-        "wesa",
-        "popoki",
-        "piqtuq",
-        "negeru",
-        "poti",
-        "mosi",
-        "michi",
-        "pusi",
-        "oratii",
-    ]:
+    if text in MULTILINGUAL_CAT_WORDS:
         await achemb(message, "multilingual", "reply")
 
     if perms.add_reactions:
         for r in reactions:
-            if r[0] in text.lower() and reactions_ratelimit.get(message.author.id, 0) < 20:
+            if r[0] in text and reactions_ratelimit.get(message.author.id, 0) < 20:
                 if r[1] == "custom":
                     em = get_emoji(r[2])
                 elif r[1] == "vanilla":
@@ -8918,10 +8846,10 @@ async def on_message(message: discord.Message):
     if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
         for resp in responses:
             if (
-                (resp[1] == "startswith" and text.lower().startswith(resp[0]))
-                or (resp[1] == "re" and re.search(resp[0], text.lower()))
-                or (resp[1] == "exact" and resp[0] == text.lower())
-                or (resp[1] == "in" and resp[0] in text.lower())
+                (resp[1] == "startswith" and text.startswith(resp[0]))
+                or (resp[1] == "re" and re.search(resp[0], text))
+                or (resp[1] == "exact" and resp[0] == text)
+                or (resp[1] == "in" and resp[0] in text)
             ):
                 try:
                     await message.reply(resp[2])
@@ -8941,7 +8869,7 @@ async def on_message(message: discord.Message):
     if (":place_of_worship:" in text or "🛐" in text) and (":cat:" in text or ":staring_cat:" in text or "🐱" in text):
         await achemb(message, "worship", "reply")
 
-    if text.lower() in ["testing testing 1 2 3", "cat!ach"]:
+    if text in ["testing testing 1 2 3", "cat!ach"]:
         try:
             if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
                 await message.reply("test success")
@@ -8950,7 +8878,7 @@ async def on_message(message: discord.Message):
             pass
         await achemb(message, "test_ach", "reply")
 
-    if text.lower() == "please do not the cat":
+    if text == "please do not the cat":
         user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.author.id)
         user.cat_Fine -= 1
         await user.save()
@@ -8962,7 +8890,7 @@ async def on_message(message: discord.Message):
             pass
         await achemb(message, "pleasedonotthecat", "reply")
 
-    if text.lower() == "please do the cat":
+    if text == "please do the cat":
         thing = discord.File("images/socialcredit.jpg", filename="socialcredit.jpg")
         try:
             if perms.send_messages and perms.attach_files and (not message.thread or perms.send_messages_in_threads):
@@ -8971,7 +8899,7 @@ async def on_message(message: discord.Message):
             pass
         await achemb(message, "pleasedothecat", "reply")
 
-    if text.lower() == "car":
+    if text == "car":
         file = discord.File("images/car.png", filename="car.png")
         embed = discord.Embed(title="car!", color=Colors.brown).set_image(url="attachment://car.png")
         try:
@@ -8981,7 +8909,7 @@ async def on_message(message: discord.Message):
             pass
         await achemb(message, "car", "reply")
 
-    if text.lower() == "cart":
+    if text == "cart":
         file = discord.File("images/cart.png", filename="cart.png")
         embed = discord.Embed(title="cart!", color=Colors.brown).set_image(url="attachment://cart.png")
         try:
@@ -8990,7 +8918,7 @@ async def on_message(message: discord.Message):
         except Exception:
             pass
 
-    if "love you" in text.lower():
+    if "love you" in text:
         try:
             if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
                 # Try to send with heart.gif if it exists, otherwise just send emoji
@@ -9004,7 +8932,7 @@ async def on_message(message: discord.Message):
 
     try:
         if (
-            ("sus" in text.lower() or "amog" in text.lower() or "among" in text.lower() or "impost" in text.lower() or "report" in text.lower())
+            ("sus" in text or "amog" in text or "among" in text or "impost" in text or "report" in text)
             and (channel := await Channel.get_or_none(channel_id=message.channel.id))
             and channel.cattype == "Sus"
         ):
@@ -9013,7 +8941,7 @@ async def on_message(message: discord.Message):
         pass
 
     # this is run whether someone says "cat" (very complex)
-    if text.lower() == "cat":
+    if text == "cat":
         # Fast initial checks before any DB queries
         if message.channel.id in temp_catches_storage:
             return
@@ -9561,7 +9489,7 @@ async def on_message(message: discord.Message):
                     except Exception:
                         pass
 
-    if text.lower().startswith("cat!amount") and perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+    if text.startswith("cat!amount") and perms.send_messages and (not message.thread or perms.send_messages_in_threads):
         user = await User.get_or_create(user_id=message.author.id)
         try:
             user.custom_num = int(text.split(" ")[1])
@@ -9575,7 +9503,7 @@ async def on_message(message: discord.Message):
         return
 
     # those are "owner" commands which are not really interesting
-    if text.lower().startswith("cat!sweep"):
+    if text.startswith("cat!sweep"):
         try:
             channel = await Channel.get_or_none(channel_id=message.channel.id)
             channel.cat = 0
@@ -9583,7 +9511,7 @@ async def on_message(message: discord.Message):
             await message.reply("success")
         except Exception:
             pass
-    if text.lower().startswith("cat!rain"):
+    if text.startswith("cat!rain"):
         # syntax: cat!rain 553093932012011520 short
         things = text.split(" ")
         user = await User.get_or_create(user_id=int(things[1]))
@@ -9599,13 +9527,13 @@ async def on_message(message: discord.Message):
             user.rain_minutes += int(things[2])
         user.premium = True
         await user.save()
-    if text.lower().startswith("cat!restart"):
+    if text.startswith("cat!restart"):
         await message.reply("restarting!")
         os.system("git pull")
         if config.WEBHOOK_VERIFY:
             await vote_server.cleanup()
         await bot.cat_bot_reload_hook("db" in text)  # pyright: ignore
-    if text.lower().startswith("cat!print"):
+    if text.startswith("cat!print"):
         # just a simple one-line with no async (e.g. 2+3)
         try:
             await message.reply(eval(text[9:]))
@@ -9614,7 +9542,7 @@ async def on_message(message: discord.Message):
                 await message.reply(traceback.format_exc())
             except Exception:
                 pass
-    if text.lower().startswith("cat!eval"):
+    if text.startswith("cat!eval"):
         # complex eval, multi-line + async support
         # requires the full `await message.channel.send(2+3)` to get the result
 
@@ -9637,7 +9565,7 @@ async def on_message(message: discord.Message):
 
         complete = intro + spaced + ending
         exec(complete)
-    if text.lower().startswith("cat!news"):
+    if text.startswith("cat!news"):
         async for i in Channel.all():
             try:
                 channeley = bot.get_channel(int(i.channel_id))
@@ -9655,7 +9583,7 @@ async def on_message(message: discord.Message):
                     await channeley.send(text[8:])
             except Exception:
                 pass
-    if text.lower().startswith("cat!custom"):
+    if text.startswith("cat!custom"):
         stuff = text.split(" ")
         if stuff[1][0] not in "1234567890":
             stuff.insert(1, message.channel.owner_id)
@@ -10194,6 +10122,33 @@ async def news(message: discord.Interaction):
                     "type": "rain",     
                     "amount": 5,
                     "name": "40 Rains"
+                }
+            ]
+       },
+          {
+            "title": "COMMUNITY MARKET, CATNIP, STOCKS + MORE!",
+            "emoji": "🛍️",
+            "desc": "shopppp",
+            "body": (
+                "The April update has arrived, brining along the community market, catnip, stocks, and some bug fixes.\n"
+                "To start, the community market `/market` allows players to buy and sell cats, items, and cosmetics for kibble, pretty useful alternative to trading!\n"
+                "As well as this, the stock market and catnip has been added due to user request. This is NOT my feature, but if you want anything changed with it, please let me know\n"
+                "To finish, there was also bug fixes for many missing emojis, shop items (thanks jeremy), and much more cat spawning stuff. It should be quicker since i optimised the file now.\n"
+                "If you see bugs, report them to me via `/suggestion` and i'll fix them when I can, thanks. Also enjoy the free stuff!! \n"
+                "\n"
+                "**Filler <3**"
+            ),
+            "rewards": [
+                {
+                    "type": "pack",
+                    "amount": 10,
+                    "pack_name": "Platinum",
+                    "name": "10 Platinum Packs"
+                },
+                {
+                    "type": "kibble",     
+                    "amount": 6000,
+                    "name": "6000 Kibble"
                 }
             ]
        },
@@ -10896,160 +10851,6 @@ async def suggestion(interaction: discord.Interaction, suggestion: str):
     
     await interaction.followup.send(f"✅ Your suggestion has been sent to the bot owner via {sent_to}! Thank you for your feedback.", ephemeral=True)
 
-# Admin subcommands (owner-only)
-@bot.tree.command(description="(OWNER) Start a cat rain in a channel")
-@discord.app_commands.describe(channel_id="Channel ID to start rain in", duration="Duration in minutes (default 10)")
-async def rainstart(interaction: discord.Interaction, channel_id: str, duration: int = 10):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Start a cat rain in specified channel"""
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    try:
-        ch_id = int(channel_id)
-        channel = bot.get_channel(ch_id)
-        if not channel:
-            await interaction.response.send_message(f"Could not find channel with ID {ch_id}!", ephemeral=True)
-            return
-        
-        duration_seconds = duration * 60
-        await give_rain(channel, duration_seconds)
-        await interaction.response.send_message(f"✅ Started a {duration} minute cat rain in {channel.mention}!", ephemeral=True)
-    except ValueError:
-        await interaction.response.send_message("Invalid channel ID!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"Error starting rain: {str(e)}", ephemeral=True)
-
-@bot.tree.command(description="(OWNER) Give kibbles to a user")
-@discord.app_commands.describe(user="User to give kibbles to", amount="Amount of kibbles to give")
-async def givekibbles(interaction: discord.Interaction, user: discord.User, amount: int):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Give kibbles to a user"""
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    try:
-        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=user.id)
-        profile.kibble = (profile.kibble or 0) + amount
-        await profile.save()
-        await interaction.response.send_message(f"✅ Gave {amount:,} 🍖 Kibbles to {user.mention}!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"Error giving kibbles: {str(e)}", ephemeral=True)
-
-@bot.tree.command(description="(OWNER) Test adventure rewards")
-async def adventuretest(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Give instant adventure rewards for testing"""
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    try:
-        user = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
-        
-        # Give test rewards
-        test_kibbles = 1000
-        test_packs = 3
-        
-        user.kibble = (user.kibble or 0) + test_kibbles
-        user.pack_silver = (user.pack_silver or 0) + test_packs
-        await user.save()
-        
-        await interaction.response.send_message(
-            f"✅ **Adventure Test Complete!**\n"
-            f"Rewards given:\n"
-            f"🍖 {test_kibbles:,} Kibbles\n"
-            f"📦 {test_packs} Silver Packs\n\n"
-            f"Use this to verify adventure rewards are working correctly!",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.response.send_message(f"Error testing adventure: {str(e)}", ephemeral=True)
-
-@bot.tree.command(description="List all servers the bot is in")
-async def servers(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    guilds = sorted(bot.guilds, key=lambda g: g.member_count, reverse=True)
-    
-    # Create pages of 10 servers each
-    pages = []
-    for i in range(0, len(guilds), 10):
-        chunk = guilds[i:i+10]
-        embed = discord.Embed(
-            title=f"📊 Server List ({len(guilds)} total)",
-            description=f"Page {i//10 + 1}/{(len(guilds)-1)//10 + 1}",
-            color=Colors.brown
-        )
-        
-        for guild in chunk:
-            embed.add_field(
-                name=f"{guild.name}",
-                value=f"Members: {guild.member_count:,} | ID: {guild.id}",
-                inline=False
-            )
-        
-        pages.append(embed)
-    
-    if len(pages) == 1:
-        await interaction.response.send_message(embed=pages[0], ephemeral=True)
-    else:
-        # If multiple pages, use a simple view with navigation
-        view = ServerListView(pages)
-        await interaction.response.send_message(embed=pages[0], view=view, ephemeral=True)
-
-class ServerListView(discord.ui.View):
-    def __init__(self, pages):
-        super().__init__(timeout=180)
-        self.pages = pages
-        self.current_page = 0
-        self.update_buttons()
-    
-    def update_buttons(self):
-        self.previous_button.disabled = self.current_page == 0
-        self.next_button.disabled = self.current_page >= len(self.pages) - 1
-    
-    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
-    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != OWNER_ID:
-            await interaction.response.send_message("This isn't your menu!", ephemeral=True)
-            return
-        
-        self.current_page = max(0, self.current_page - 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
-    
-    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != OWNER_ID:
-            await interaction.response.send_message("This isn't your menu!", ephemeral=True)
-            return
-        
-        self.current_page = min(len(self.pages) - 1, self.current_page + 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
-
 async def check_daily_reminder(interaction: discord.Interaction):
     """Check if user needs daily streak reminder and send it"""
     global daily_reminded
@@ -11146,860 +10947,6 @@ async def give_rain(channel, duration):
         await ch.send(f"Admin started {duration}m rain in {channel.id} (random rain)")
     except Exception:
         pass
-
-@bot.tree.command(description="(ADMIN) Start a cat giveaway")
-@discord.app_commands.describe(
-    cat_type="Type of cat to give away",
-    duration="Duration (e.g. 1h, 30m, 5m, 60s)"
-)
-@discord.app_commands.default_permissions(administrator=True)
-async def giveaway(interaction: discord.Interaction, cat_type: str, duration: str):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
-        return
-        
-    if cat_type not in cattypes:
-        await interaction.response.send_message(f"Invalid cat type! Valid types: {', '.join(cattypes)}", ephemeral=True)
-        return
-        
-    duration_seconds = parse_time(duration)
-    if not duration_seconds:
-        await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
-        return
-        
-    if cat_type not in cattypes:
-        await interaction.response.send_message(f"Invalid cat type! Valid types: {', '.join(cattypes)}", ephemeral=True)
-        return
-        
-    end_time = int(time.time() + duration_seconds)
-    embed = discord.Embed(
-        title=f"🎉 Cat Giveaway! 🎉",
-        description=f"Win a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!\n\n"
-                  f"To enter, click the button below or say `W cat!` in chat.\n"
-                  f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>",
-        color=Colors.green
-    )
-    view = GiveawayView(cat_type)
-    msg = await interaction.channel.send(embed=embed, view=view)
-    await interaction.response.send_message("Giveaway started!", ephemeral=True)
-    
-    # Wait for giveaway duration
-    await asyncio.sleep(duration_seconds)
-    
-    # Include people who said "W cat!"
-    async for message in interaction.channel.history(after=msg):
-        if message.content.lower().strip() in ["w cat!", "w cat"]:
-            view.participants.add(message.author.id)
-    
-    if view.participants:
-        winner_id = random.choice(list(view.participants))
-        winner = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=winner_id)
-        try:
-            await add_cat_instances(winner, cat_type, 1)
-        except Exception:
-            try:
-                winner[f"cat_{cat_type}"] += 1
-                await winner.save()
-            except Exception:
-                pass
-        
-        embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!"
-        await msg.edit(embed=embed, view=None)
-        await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
-    else:
-        embed.description = "No one entered the giveaway 😢"
-        await msg.edit(embed=embed, view=None)
-
-@bot.tree.command(description="(ADMIN) Prevent someone from catching cats for a certain time period")
-@discord.app_commands.default_permissions(manage_guild=True)
-@discord.app_commands.describe(person="A person to timeout!", timeout="How many seconds? (0 to reset)")
-async def preventcatch(message: discord.Interaction, person: discord.User, timeout: int):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
-        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    if timeout < 0:
-        await message.response.send_message("uhh i think time is supposed to be a number", ephemeral=True)
-        return
-    user = await Profile.get_or_create(guild_id=message.guild.id, user_id=person.id)
-    timestamp = round(time.time()) + timeout
-    user.timeout = timestamp
-    await user.save()
-    await message.response.send_message(
-        person.name.replace("_", r"\_") + (f" can't catch cats until <t:{timestamp}:R>" if timeout > 0 else " can now catch cats again.")
-    )
-
-
-@bot.tree.command(description="(ADMIN) Change the cat appear timings")
-@discord.app_commands.default_permissions(manage_guild=True)
-@discord.app_commands.describe(
-    minimum_time="In seconds, minimum possible time between spawns (leave both empty to reset)",
-    maximum_time="In seconds, maximum possible time between spawns (leave both empty to reset)",
-)
-async def changetimings(
-    message: discord.Interaction,
-    minimum_time: Optional[int],
-    maximum_time: Optional[int],
-):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
-        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    channel = await Channel.get_or_none(channel_id=message.channel.id)
-    if not channel:
-        await message.response.send_message("This channel isnt setupped. Please select a valid channel.", ephemeral=True)
-        return
-
-    if not minimum_time and not maximum_time:
-        # reset
-        channel.spawn_times_min = 120
-        channel.spawn_times_max = 1200
-        await channel.save()
-        await message.response.send_message("Success! This channel is now reset back to usual spawning intervals.")
-    elif minimum_time and maximum_time:
-        if minimum_time < 20:
-            await message.response.send_message("Sorry, but minimum time must be above 20 seconds.", ephemeral=True)
-            return
-        if maximum_time < minimum_time:
-            await message.response.send_message(
-                "Sorry, but maximum time must not be less than minimum time.",
-                ephemeral=True,
-            )
-            return
-
-        channel.spawn_times_min = minimum_time
-        channel.spawn_times_max = maximum_time
-        await channel.save()
-
-        await message.response.send_message(
-            f"Success! The spawn times are now {minimum_time} to {maximum_time} seconds. Please note the changes will only apply after the next spawn."
-        )
-    else:
-        await message.response.send_message("Please input all times.", ephemeral=True)
-
-
-@bot.tree.command(description="(ADMIN) Change the cat appear and cought messages")
-@discord.app_commands.default_permissions(manage_guild=True)
-async def changemessage(message: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
-        await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    caller = message.user
-    channel = await Channel.get_or_none(channel_id=message.channel.id)
-    if not channel:
-        await message.response.send_message("pls setup this channel first", ephemeral=True)
-        return
-
-    # this is the silly popup when you click the button
-    class InputModal(discord.ui.Modal):
-        def __init__(self, type):
-            super().__init__(
-                title=f"Change {type} Message",
-                timeout=3600,
-            )
-
-            self.type = type
-
-            self.input = discord.ui.TextInput(
-                min_length=0,
-                max_length=1000,
-                label="Input",
-                style=discord.TextStyle.long,
-                required=False,
-                placeholder='{emoji} {type} has appeared! Type "cat" to catch it!',
-                default=channel.appear if self.type == "Appear" else channel.cought,
-            )
-            self.add_item(self.input)
-
-        async def on_submit(self, interaction: discord.Interaction):
-            await channel.refresh_from_db()
-            if not channel:
-                await message.response.send_message("this channel is not /setup-ed", ephemeral=True)
-                return
-            input_value = self.input.value
-
-            # check if all placeholders are there
-            if input_value != "":
-                check = ["{emoji}", "{type}"] + (["{username}", "{count}", "{time}"] if self.type == "Cought" else [])
-
-                for i in check:
-                    if i not in input_value:
-                        await interaction.response.send_message(f"nuh uh! you are missing `{i}`.", ephemeral=True)
-                        return
-                    elif input_value.count(i) > 10:
-                        await interaction.response.send_message(f"nuh uh! you are using too much of `{i}`.", ephemeral=True)
-                        return
-
-                # check there are no emojis as to not break catching
-                for i in allowedemojis:
-                    if i in input_value:
-                        await interaction.response.send_message(f"nuh uh! you cant use `{i}`. sorry!", ephemeral=True)
-                        return
-
-                icon = get_emoji("finecat")
-                await interaction.response.send_message(
-                    "Success! Here is a preview:\n"
-                    + input_value.replace("{emoji}", str(icon))
-                    .replace("{type}", "Fine")
-                    .replace("{username}", "KITTAYYYYYYY")
-                    .replace("{count}", "1")
-                    .replace("{time}", "69 years 420 days")
-                )
-            else:
-                await interaction.response.send_message("Reset to defaults.")
-
-            if self.type == "Appear":
-                channel.appear = input_value
-            else:
-                channel.cought = input_value
-
-            await channel.save()
-
-    # helper to make the above popup appear
-    async def ask_appear(interaction):
-        nonlocal caller
-
-        if interaction.user != caller:
-            await do_funny(interaction)
-            return
-
-        modal = InputModal("Appear")
-        await interaction.response.send_modal(modal)
-
-    async def ask_catch(interaction):
-        nonlocal caller
-
-        if interaction.user != caller:
-            await do_funny(interaction)
-            return
-
-        modal = InputModal("Cought")
-        await interaction.response.send_modal(modal)
-
-    embed = discord.Embed(
-        title="Change appear and cought messages",
-        description="""below are buttons to change them.
-they are required to have all placeholders somewhere in them.
-you must include the placeholders exactly like they are shown below, the values will be replaced by KITTAYYYYYYY when it uses them.
-that being:
-
-for appear:
-`{emoji}`, `{type}`
-
-for cought:
-`{emoji}`, `{type}`, `{username}`, `{count}`, `{time}`
-
-missing any of these will result in a failure.
-how to do mentions: `@everyone`, `@here`, `<@userid>`, `<@&roleid>`
-to get ids, run `/getid` with the thing you want to mention.
-if it doesnt work make sure the bot has mention permissions.
-leave blank to reset.""",
-        color=Colors.brown,
-    )
-
-    button1 = Button(label="Appear Message", style=ButtonStyle.blurple)
-    button1.callback = ask_appear
-
-    button2 = Button(label="Catch Message", style=ButtonStyle.blurple)
-    button2.callback = ask_catch
-
-    view = View(timeout=VIEW_TIMEOUT)
-    view.add_item(button1)
-    view.add_item(button2)
-
-    await message.response.send_message(embed=embed, view=view)
-
-
-# =============================================================================
-# MODERATION COMMANDS
-# =============================================================================
-
-@bot.tree.command(description="(MOD) Kick a member from the server")
-@discord.app_commands.default_permissions(kick_members=True)
-@discord.app_commands.describe(
-    member="Member to kick",
-    reason="Reason for the kick (optional)"
-)
-async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    """Kick a member from the server"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.kick_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to kick members!",
-            ephemeral=True
-        )
-        return
-    
-    # Bot hierarchy check
-    if not interaction.guild.me.top_role > member.top_role:
-        await interaction.response.send_message(
-            "❌ I can't kick someone with a higher or equal role than me!",
-            ephemeral=True
-        )
-        return
-    
-    # Can't kick yourself
-    if member == interaction.user:
-        await interaction.response.send_message(
-            "❌ You can't kick yourself!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        # Send DM to kicked member
-        try:
-            embed = discord.Embed(
-                title="You've been kicked",
-                description=f"Server: {interaction.guild.name}",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Reason", value=reason, inline=False)
-            embed.add_field(name="Kicked by", value=interaction.user.mention, inline=False)
-            await member.send(embed=embed)
-        except:
-            pass  # Member may have DMs disabled
-        
-        # Kick the member
-        await interaction.guild.kick(member, reason=f"[{interaction.user}] {reason}")
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Member Kicked ✅",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Member", value=member.mention, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=True)
-        embed.add_field(name="Kicked by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-        # Log to moderation channel if configured
-        if hasattr(interaction.guild, 'modlog_channel_id'):
-            try:
-                modlog = interaction.guild.get_channel(interaction.guild.modlog_channel_id)
-                if modlog:
-                    await modlog.send(embed=embed)
-            except:
-                pass
-                
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            "❌ I don't have permission to kick this member!",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Ban a member from the server")
-@discord.app_commands.default_permissions(ban_members=True)
-@discord.app_commands.describe(
-    user="User to ban",
-    reason="Reason for the ban (optional)",
-    delete_messages="Delete how many days of messages? (0-7)"
-)
-async def ban(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided", delete_messages: int = 0):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Ban a user from the server"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.ban_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to ban members!",
-            ephemeral=True
-        )
-        return
-    
-    # Validate delete_messages parameter
-    if delete_messages < 0 or delete_messages > 7:
-        await interaction.response.send_message(
-            "❌ Delete messages must be between 0 and 7 days!",
-            ephemeral=True
-        )
-        return
-    
-    # Get member object if in guild
-    member = interaction.guild.get_member(user.id)
-    
-    # Bot hierarchy check for members in guild
-    if member and not interaction.guild.me.top_role > member.top_role:
-        await interaction.response.send_message(
-            "❌ I can't ban someone with a higher or equal role than me!",
-            ephemeral=True
-        )
-        return
-    
-    # Can't ban yourself
-    if user == interaction.user:
-        await interaction.response.send_message(
-            "❌ You can't ban yourself!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        # Send DM to banned user
-        try:
-            embed = discord.Embed(
-                title="You've been banned",
-                description=f"Server: {interaction.guild.name}",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Reason", value=reason, inline=False)
-            embed.add_field(name="Banned by", value=interaction.user.mention, inline=False)
-            await user.send(embed=embed)
-        except:
-            pass  # User may have DMs disabled
-        
-        # Ban the user
-        await interaction.guild.ban(user, reason=f"[{interaction.user}] {reason}", delete_message_days=delete_messages)
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Member Banned ✅",
-            color=discord.Color.red()
-        )
-        embed.add_field(name="User", value=user.mention, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=True)
-        embed.add_field(name="Deleted Messages", value=f"{delete_messages} days", inline=True)
-        embed.add_field(name="Banned by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-        # Log to moderation channel if configured
-        if hasattr(interaction.guild, 'modlog_channel_id'):
-            try:
-                modlog = interaction.guild.get_channel(interaction.guild.modlog_channel_id)
-                if modlog:
-                    await modlog.send(embed=embed)
-            except:
-                pass
-                
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            "❌ I don't have permission to ban this user!",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Unban a user from the server")
-@discord.app_commands.default_permissions(ban_members=True)
-@discord.app_commands.describe(
-    user_id="User ID to unban",
-    reason="Reason for the unban (optional)"
-)
-async def unban(interaction: discord.Interaction, user_id: str, reason: str = "No reason provided"):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Unban a user from the server"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.ban_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to unban members!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        user_id = int(user_id)
-    except ValueError:
-        await interaction.response.send_message(
-            "❌ Invalid user ID!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        user = await bot.fetch_user(user_id)
-        await interaction.guild.unban(user, reason=f"[{interaction.user}] {reason}")
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Member Unbanned ✅",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="User", value=user.mention, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=True)
-        embed.add_field(name="Unbanned by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-    except discord.NotFound:
-        await interaction.response.send_message(
-            "❌ User not found or not banned!",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Timeout a member")
-@discord.app_commands.default_permissions(moderate_members=True)
-@discord.app_commands.describe(
-    member="Member to timeout",
-    duration="Timeout duration (e.g. 10m, 1h, 1d)",
-    reason="Reason for timeout (optional)"
-)
-async def timeout(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Timeout a member (they can't send messages/react)"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.moderate_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to timeout members!",
-            ephemeral=True
-        )
-        return
-    
-    # Parse duration
-    duration_seconds = parse_time(duration)
-    if not duration_seconds:
-        await interaction.response.send_message(
-            "❌ Invalid duration format! Use format like '10m', '1h', '1d', etc.",
-            ephemeral=True
-        )
-        return
-    
-    # Max timeout is 28 days
-    if duration_seconds > 2419200:  # 28 days in seconds
-        await interaction.response.send_message(
-            "❌ Maximum timeout is 28 days!",
-            ephemeral=True
-        )
-        return
-    
-    # Bot hierarchy check
-    if not interaction.guild.me.top_role > member.top_role:
-        await interaction.response.send_message(
-            "❌ I can't timeout someone with a higher or equal role than me!",
-            ephemeral=True
-        )
-        return
-    
-    # Can't timeout yourself
-    if member == interaction.user:
-        await interaction.response.send_message(
-            "❌ You can't timeout yourself!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        # Apply timeout
-        timeout_until = discord.utils.utcnow() + discord.timedelta(seconds=duration_seconds)
-        await member.timeout(timeout_until, reason=f"[{interaction.user}] {reason}")
-        
-        # Send DM to timed out member
-        try:
-            embed = discord.Embed(
-                title="You've been timed out",
-                description=f"Server: {interaction.guild.name}",
-                color=discord.Color.orange()
-            )
-            embed.add_field(name="Duration", value=duration, inline=True)
-            embed.add_field(name="Reason", value=reason, inline=False)
-            embed.add_field(name="Timed out by", value=interaction.user.mention, inline=False)
-            await member.send(embed=embed)
-        except:
-            pass
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Member Timed Out ✅",
-            color=discord.Color.orange()
-        )
-        embed.add_field(name="Member", value=member.mention, inline=True)
-        embed.add_field(name="Duration", value=duration, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Timed out by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            "❌ I don't have permission to timeout this member!",
-            ephemeral=True
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Remove timeout from a member")
-@discord.app_commands.default_permissions(moderate_members=True)
-@discord.app_commands.describe(
-    member="Member to remove timeout from",
-    reason="Reason for removal (optional)"
-)
-async def untimeout(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Remove timeout from a member"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.moderate_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to manage timeouts!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        # Remove timeout
-        await member.timeout(None, reason=f"[{interaction.user}] {reason}")
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Timeout Removed ✅",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Member", value=member.mention, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Removed by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Warn a member")
-@discord.app_commands.default_permissions(manage_guild=True)
-@discord.app_commands.describe(
-    member="Member to warn",
-    reason="Reason for the warning"
-)
-async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Warn a member (stores warning in database)"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message(
-            "❌ You don't have permission to warn members!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        # Get member profile and add warning
-        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=member.id)
-        
-        # Store warning in JSON field or create warnings list
-        warnings = profile.warnings if hasattr(profile, 'warnings') and profile.warnings else []
-        warnings.append({
-            "reason": reason,
-            "warned_by": str(interaction.user.id),
-            "timestamp": int(time.time())
-        })
-        
-        # For now, we'll just log it (since Profile may not have warnings field)
-        # Send DM to warned member
-        try:
-            embed = discord.Embed(
-                title="You've been warned",
-                description=f"Server: {interaction.guild.name}",
-                color=discord.Color.yellow()
-            )
-            embed.add_field(name="Reason", value=reason, inline=False)
-            embed.add_field(name="Warned by", value=interaction.user.mention, inline=False)
-            embed.set_footer(text="Further violations may result in stricter action.")
-            await member.send(embed=embed)
-        except:
-            pass
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Member Warned ✅",
-            color=discord.Color.yellow()
-        )
-        embed.add_field(name="Member", value=member.mention, inline=True)
-        embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Warned by", value=interaction.user.mention, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) Purge messages in a channel")
-@discord.app_commands.default_permissions(manage_messages=True)
-@discord.app_commands.describe(
-    amount="Number of messages to delete (1-100)",
-    user="(Optional) Only delete messages from this user"
-)
-async def purge(interaction: discord.Interaction, amount: int, user: discord.User = None):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Delete multiple messages from a channel"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.manage_messages:
-        await interaction.response.send_message(
-            "❌ You don't have permission to manage messages!",
-            ephemeral=True
-        )
-        return
-    
-    # Validate amount
-    if amount < 1 or amount > 100:
-        await interaction.response.send_message(
-            "❌ You can only purge between 1 and 100 messages!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        await interaction.response.defer(ephemeral=True)
-        
-        # Define filter function
-        def check(msg):
-            if user:
-                return msg.author == user
-            return True
-        
-        # Delete messages
-        deleted = await interaction.channel.purge(limit=amount, check=check)
-        
-        # Send confirmation
-        embed = discord.Embed(
-            title="Messages Purged ✅",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Messages Deleted", value=str(len(deleted)), inline=True)
-        if user:
-            embed.add_field(name="From User", value=user.mention, inline=True)
-        embed.add_field(name="Purged by", value=interaction.user.mention, inline=False)
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-
-@bot.tree.command(description="(MOD) See the ban list for this server")
-@discord.app_commands.default_permissions(ban_members=True)
-async def banlist(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """View the server's ban list"""
-    
-    # Permission check
-    if not interaction.user.guild_permissions.ban_members:
-        await interaction.response.send_message(
-            "❌ You don't have permission to view the ban list!",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        await interaction.response.defer(ephemeral=True)
-        
-        bans = await interaction.guild.bans()
-        
-        if not bans:
-            embed = discord.Embed(
-                title="Ban List",
-                description="No members are currently banned.",
-                color=discord.Color.green()
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            return
-        
-        # Create paginated embed
-        embeds = []
-        ban_list = list(bans)
-        
-        for i in range(0, len(ban_list), 10):
-            batch = ban_list[i:i+10]
-            embed = discord.Embed(
-                title="Ban List",
-                description=f"Page {i//10 + 1}/{(len(ban_list) + 9)//10}",
-                color=discord.Color.red()
-            )
-            
-            for ban in batch:
-                reason = ban.reason or "No reason provided"
-                embed.add_field(
-                    name=f"{ban.user} ({ban.user.id})",
-                    value=f"Reason: {reason[:100]}...",
-                    inline=False
-                )
-            
-            embeds.append(embed)
-        
-        # Send first embed
-        if embeds:
-            await interaction.followup.send(embed=embeds[0], ephemeral=True)
-        
-    except Exception as e:
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
 
 @bot.tree.command(description="Get ID of a thing")
 async def getid(message: discord.Interaction, thing: discord.User | discord.Role):
@@ -15182,15 +14129,32 @@ async def shop(message: discord.Interaction):
 
     guild_shop = get_guild_shop(guild_id)
     now = int(time.time())
+    valid_pool = []
+    for key, data in SHOP_ITEMS.items():
+        for tier_key in data.get("tiers", {}).keys():
+            base_price = int(ITEM_PRICES.get(key, {}).get(tier_key, 0) or 0)
+            if base_price > 0:
+                valid_pool.append({"key": key, "tier": tier_key, "price": base_price})
+
     # If no shop state or expired, pick 3 random items out of all available tiers
     if not guild_shop or guild_shop.get("next_reset", 0) <= now:
-        # build list of all possible (key, tier)
-        all_items = []
-        for key, data in SHOP_ITEMS.items():
-            for tier_key in data.get("tiers", {}).keys():
-                price = ITEM_PRICES.get(key, {}).get(tier_key, 0)
-                all_items.append({"key": key, "tier": tier_key, "price": price})
-        chosen = random.sample(all_items, k=min(3, len(all_items))) if all_items else []
+        chosen = random.sample(valid_pool, k=min(3, len(valid_pool))) if valid_pool else []
+        next_reset = ((now // SHOP_RESET_SECONDS) + 1) * SHOP_RESET_SECONDS
+        guild_shop = {"items": chosen, "next_reset": next_reset}
+        save_guild_shop(guild_id, guild_shop)
+
+    # sanitize persisted state from older rotations with zero-priced entries
+    has_invalid_price = False
+    for item in guild_shop.get("items", []):
+        key = item.get("key")
+        tier_key = item.get("tier")
+        resolved_price = int(item.get("price") or ITEM_PRICES.get(key, {}).get(tier_key, 0) or 0)
+        if resolved_price <= 0:
+            has_invalid_price = True
+            break
+
+    if has_invalid_price:
+        chosen = random.sample(valid_pool, k=min(3, len(valid_pool))) if valid_pool else []
         next_reset = ((now // SHOP_RESET_SECONDS) + 1) * SHOP_RESET_SECONDS
         guild_shop = {"items": chosen, "next_reset": next_reset}
         save_guild_shop(guild_id, guild_shop)
@@ -15199,11 +14163,13 @@ async def shop(message: discord.Interaction):
     for item in guild_shop.get("items", []):
         key = item.get("key")
         tier_key = item.get("tier")
-        price = item.get("price") or ITEM_PRICES.get(key, {}).get(tier_key, 0)
+        price = int(item.get("price") or ITEM_PRICES.get(key, {}).get(tier_key, 0) or 0)
+        if price <= 0:
+            continue
         data = SHOP_ITEMS.get(key, {})
         tier_data = data.get("tiers", {}).get(tier_key, {})
         emoji_label = get_emoji(emoji_map.get(key, key))
-        title = f"{emoji_label} {data.get('title')} {tier_key}"
+        title = f"{emoji_label} {humanize_item_code(key)} {tier_key}"
         desc = f"{tier_data.get('desc')} — **{price:,} Kibble**"
         embed.add_field(name=title, value=desc, inline=False)
 
@@ -15218,9 +14184,10 @@ async def shop(message: discord.Interaction):
     for item in guild_shop.get("items", []):
         key = item.get("key")
         tier_key = item.get("tier")
-        price = item.get("price") or ITEM_PRICES.get(key, {}).get(tier_key, 0)
-        data = SHOP_ITEMS.get(key, {})
-        label = f"Buy: {data.get('title')} {tier_key} — {price:,} K"
+        price = int(item.get("price") or ITEM_PRICES.get(key, {}).get(tier_key, 0) or 0)
+        if price <= 0:
+            continue
+        label = f"Buy: {humanize_item_code(key)} {tier_key} — {price:,} K"
         btn = Button(label=label[:80], style=ButtonStyle.blurple)
 
         async def make_buy_cb(interaction: discord.Interaction, key_local=key, tier_local=tier_key, price_local=price):
@@ -15242,7 +14209,10 @@ async def shop(message: discord.Interaction):
             uses = SHOP_ITEMS.get(key_local, {}).get('tiers', {}).get(tier_local, {}).get('uses', 1)
             items[item_key] = items.get(item_key, 0) + int(uses)
             await save_user_items(guild_id, user_id, items)
-            await interaction.followup.send(f"Purchased {SHOP_ITEMS[key_local]['title']} {tier_local} for {price_local:,} Kibble.", ephemeral=True)
+            await interaction.followup.send(
+                f"Purchased {humanize_item_code(key_local)} {tier_local} for {price_local:,} Kibble.",
+                ephemeral=True,
+            )
 
         btn.callback = make_buy_cb
         view.add_item(btn)
@@ -15710,21 +14680,12 @@ class PacksView(discord.ui.View):
         if is_single:
             reward_texts.append(f"{final_pack_emoji} {final_level['name']}\n" + build_string)
 
-        # Select cat type and amount
+        # Select cat type and amount.
+        # Christmas cats are excluded from pack rewards while seasonal features are disabled.
         goal_value = final_level["value"]
-        
-        # For Festive packs, ONLY give Christmas cats
-        if is_festive:
-            christmas_cats = ["Santa", "Elf", "Snowman", "ChristmasTree", "Gingerbread", "Cocoa", "Present"]
-            chosen_type = random.choice(christmas_cats)
-            # Use Christmas cat weights for value calculation
-            christmas_weight_sum = sum(christmas_cat_weights.values())
-            cat_emoji = get_emoji(chosen_type.lower() + "cat")
-            pre_cat_amount = goal_value / (christmas_weight_sum / christmas_cat_weights[chosen_type])
-        else:
-            chosen_type = random.choice(spawnable_cattypes)  # Only choose spawnable cats
-            cat_emoji = get_emoji(chosen_type.lower() + "cat")
-            pre_cat_amount = goal_value / (spawnable_weight_sum / type_dict[chosen_type])
+        chosen_type = random.choice(spawnable_cattypes)  # Only choose spawnable (non-Christmas) cats
+        cat_emoji = get_emoji(chosen_type.lower() + "cat")
+        pre_cat_amount = goal_value / (spawnable_weight_sum / type_dict[chosen_type])
             
         # Apply active luck buff (if any) to increase chance of better rewards
         try:
@@ -16186,49 +15147,6 @@ async def packs(message: discord.Interaction):
         await asyncio.sleep(1)
         await interaction.edit_original_response(view=gen_view(user))
 
-async def packs(message: discord.Interaction):
-    try:
-        print(f"[DEBUG] /packs command started for user {message.user.id}")
-        await message.response.defer()  # Prevent the command from timing out
-        print("[DEBUG] Response deferred")
-        
-        try:
-            user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-            print(f"[DEBUG] User profile fetched: {user is not None}")
-        except Exception as e:
-            print(f"[ERROR] Failed to get profile: {e}")
-            await message.followup.send("Failed to load profile. Please try again.", ephemeral=True)
-            return
-            
-        description = "Each pack starts at one of eight tiers of increasing value - Wooden, Stone, Bronze, Silver, Gold, Platinum, Diamond, or Celestial - and can repeatedly move up tiers with a 30% chance per upgrade. This means that even a pack starting at Wooden, through successive upgrades, can reach the Celestial tier.\n[Chance Info](<https://catbot.minkos.lol/packs>)\n\nClick the buttons below to start opening packs!"
-        embed = discord.Embed(title=f"{get_emoji('bronzepack')} Packs", description=description, color=Colors.brown)
-        
-        # Show adventure status if one is active
-        user_adv = active_adventures.get(str(message.user.id))
-        if user_adv:
-            print(f"[DEBUG] User has active adventure: {user_adv['cat']}")
-            embed.add_field(
-                name="Active Adventure", 
-                value=f"You have a {user_adv['cat']} cat on an adventure that returns <t:{int(user_adv['end_time'])}:R>!\nPacks will be awarded when your cat returns.",
-                inline=False
-            )
-            
-        print("[DEBUG] Generating view")
-        view = gen_view(user)
-        print("[DEBUG] View generated")
-        
-        print("[DEBUG] Sending followup")
-        await message.followup.send(embed=embed, view=view)
-        print("[DEBUG] Command completed successfully")
-        
-    except Exception as e:
-        print(f"[ERROR] Unhandled error in /packs: {e}")
-        try:
-            await message.followup.send("An error occurred while loading packs. Please try again.", ephemeral=True)
-        except Exception:
-            pass
-
-
 @bot.tree.command(description="Attempt to steal a cat from another player (1 hour cooldown)")
 @discord.app_commands.describe(target="The player to attempt to steal from")
 async def steal(interaction: discord.Interaction, target: discord.User):
@@ -16340,6 +15258,51 @@ async def battlepass(message: discord.Interaction):
     user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     global_user = await User.get_or_create(user_id=message.user.id)
 
+    def bp_icon(raw_name: str, fallback: str = "❔") -> str:
+        key = str(raw_name or "").strip()
+        if not key:
+            return fallback
+
+        direct = get_emoji(key)
+        if direct != "🔳":
+            return direct
+
+        aliases = {
+            "cat_throphy": "🏆",
+            "mystery": "❔",
+        }
+        if key in aliases:
+            return aliases[key]
+
+        lowered = key.lower()
+        if lowered in {ct.lower() for ct in cattypes}:
+            cat_icon = get_cat_emoji(key)
+            return cat_icon if cat_icon != "🔳" else "🐱"
+
+        if lowered.endswith("cat"):
+            cat_icon = get_cat_emoji(lowered[:-3])
+            return cat_icon if cat_icon != "🔳" else "🐱"
+
+        if lowered.endswith("pack"):
+            pack_icon = get_emoji(lowered)
+            return pack_icon if pack_icon != "🔳" else "📦"
+
+        return fallback
+
+    def bp_reward_icon(reward_name: str, claimed: bool = False) -> str:
+        claimed_suffix = "_claimed" if claimed else ""
+
+        if reward_name == "Rain":
+            return "☔"
+        if reward_name in cattypes:
+            icon = get_emoji(reward_name.lower() + "cat" + claimed_suffix)
+            if icon == "🔳":
+                icon = get_cat_emoji(reward_name)
+            return icon if icon != "🔳" else "🐱"
+
+        icon = get_emoji(reward_name.lower() + "pack" + claimed_suffix)
+        return icon if icon != "🔳" else "📦"
+
     async def toggle_reminders(interaction: discord.Interaction):
         nonlocal current_mode
         if interaction.user.id != message.user.id:
@@ -16442,7 +15405,7 @@ async def battlepass(message: discord.Interaction):
                     progress_string = f" ({real_progress})"
                 else:
                     progress_string = f" ({user.catch_progress}/{catch_quest['progress']})"
-            description += f"{get_emoji(catch_quest['emoji'])} {catch_quest['title']}{progress_string}\n- Reward: {user.catch_reward} XP\n"
+            description += f"{bp_icon(catch_quest['emoji'], '🐾')} {catch_quest['title']}{progress_string}\n- Reward: {user.catch_reward} XP\n"
 
         # misc
         misc_quest = battle.get("quests", {}).get("misc", {}).get(user.misc_quest)
@@ -16455,7 +15418,7 @@ async def battlepass(message: discord.Interaction):
             progress_string = ""
             if misc_quest.get("progress", 1) != 1:
                 progress_string = f" ({user.misc_progress}/{misc_quest.get('progress',1)})"
-            description += f"{get_emoji(misc_quest.get('emoji','mystery'))} {misc_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {user.misc_reward} XP\n\n"
+            description += f"{bp_icon(misc_quest.get('emoji','mystery'), '📝')} {misc_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {user.misc_reward} XP\n\n"
 
         # extra
         extra_quest = battle.get("quests", {}).get("extra", {}).get(user.extra_quest)
@@ -16468,7 +15431,7 @@ async def battlepass(message: discord.Interaction):
             progress_string = ""
             if extra_quest.get("progress", 1) != 1:
                 progress_string = f" ({getattr(user, 'extra_progress', 0)}/{extra_quest.get('progress',1)})"
-            description += f"{get_emoji(extra_quest.get('emoji','mystery'))} {extra_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {getattr(user, 'extra_reward', 0)} XP\n\n"
+            description += f"{bp_icon(extra_quest.get('emoji','mystery'), '✨')} {extra_quest.get('title','Unknown Quest')}{progress_string}\n- Reward: {getattr(user, 'extra_reward', 0)} XP\n\n"
 
         if user.battlepass >= len(battle["seasons"][str(user.season)]):
             description += f"**Extra Rewards** [{user.progress}/1500 XP]\n"
@@ -16483,20 +15446,17 @@ async def battlepass(message: discord.Interaction):
             if level_data["reward"] == "Rain":
                 description += f"Reward: ☔ {level_data['amount']} minutes of rain\n\n"
             elif level_data["reward"] in cattypes:
-                description += f"Reward: {get_emoji(level_data['reward'].lower() + 'cat')} {level_data['amount']} {level_data['reward']} cats\n\n"
+                description += f"Reward: {bp_reward_icon(level_data['reward'])} {level_data['amount']} {level_data['reward']} cats\n\n"
             else:
-                description += f"Reward: {get_emoji(level_data['reward'].lower() + 'pack')} {level_data['reward']} pack\n\n"
+                description += f"Reward: {bp_reward_icon(level_data['reward'])} {level_data['reward']} pack\n\n"
 
         # next reward
         levels = battle["seasons"][str(user.season)]
         for num, level_data in enumerate(levels):
-            claimed_suffix = "_claimed" if num < user.battlepass else ""
             if level_data["reward"] == "Rain":
-                description += get_emoji(str(level_data["amount"]) + "rain" + claimed_suffix)
-            elif level_data["reward"] in cattypes:
-                description += get_emoji(level_data["reward"].lower() + "cat" + claimed_suffix)
+                description += get_emoji(str(level_data["amount"]) + "rain" + ("_claimed" if num < user.battlepass else ""))
             else:
-                description += get_emoji(level_data["reward"].lower() + "pack" + claimed_suffix)
+                description += bp_reward_icon(level_data["reward"], claimed=(num < user.battlepass))
             if num % 10 == 9:
                 description += "\n"
         if user.battlepass >= len(battle["seasons"][str(user.season)]) - 1:
@@ -17402,6 +16362,20 @@ def format_cosmetic_display(profile):
             parts.append(effect_data["emoji"])
     
     return " ".join(parts) if parts else None
+
+
+register_community_market(
+    bot=bot,
+    profile_model=Profile,
+    get_user_cats=get_user_cats,
+    save_user_cats=save_user_cats,
+    get_user_items=get_user_items,
+    save_user_items=save_user_items,
+    pack_data=pack_data,
+    cosmetics_data=COSMETICS_DATA,
+    check_global_cooldown=check_global_cooldown,
+    get_emoji=get_emoji,
+)
 
 
 # Owner-only commands
@@ -24112,11 +23086,18 @@ async def setup(bot2):
     for command in bot.tree.walk_commands():
         # copy all the commands
         command.guild_only = True
-        bot2.tree.add_command(command)
+        try:
+            bot2.tree.add_command(command)
+        except discord.app_commands.errors.CommandAlreadyRegistered:
+            # Allow repeated setup/load paths without crashing on duplicates.
+            continue
 
     context_menu_command = discord.app_commands.ContextMenu(name="catch", callback=catch)
     context_menu_command.guild_only = True
-    bot2.tree.add_command(context_menu_command)
+    try:
+        bot2.tree.add_command(context_menu_command)
+    except discord.app_commands.errors.CommandAlreadyRegistered:
+        pass
 
     # copy all the events
     bot2.on_ready = on_ready
