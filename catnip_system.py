@@ -76,15 +76,22 @@ async def bounty(message, user, cattype):
                     if progress == total:
                         complete += 1
                         title.append(f"Catch {total} {type} cats")
-            elif id == 2:  # Catch rarity or higher
-                try:
-                    if cattypes.index(cattype) >= cattypes.index(type):
+            elif id == 2:
+                if type in cattypes:
+                    if cattype == type:
                         progress += 1
                         if progress == total:
                             complete += 1
-                            title.append(f"Catch {total} {type} or rarer cats")
-                except (ValueError, IndexError):
-                    pass
+                            title.append(f"Catch {total} {type} cats")
+                else:
+                    try:
+                        if cattypes.index(cattype) >= cattypes.index(type):
+                            progress += 1
+                            if progress == total:
+                                complete += 1
+                                title.append(f"Catch {total} {type} or rarer cats")
+                    except (ValueError, IndexError):
+                        pass
         
         # Update bounty progress
         if i == 0:
@@ -115,12 +122,17 @@ async def bounty(message, user, cattype):
                         user.bounty_progress_bonus += 1
                     bonus_title = f"Catch {user.bounty_total_bonus} {cattype} cats"
                 else:
-                    try:
-                        if cattypes.index(cattype) >= cattypes.index(user.bounty_type_bonus):
+                    if user.bounty_type_bonus in cattypes:
+                        if cattype == user.bounty_type_bonus:
                             user.bounty_progress_bonus += 1
-                    except (ValueError, IndexError):
-                        pass
-                    bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} or rarer cats"
+                        bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} cats"
+                    else:
+                        try:
+                            if cattypes.index(cattype) >= cattypes.index(user.bounty_type_bonus):
+                                user.bounty_progress_bonus += 1
+                        except (ValueError, IndexError):
+                            pass
+                        bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} or rarer cats"
                 
                 if user.bounty_progress_bonus == user.bounty_total_bonus:
                     description = "Bonus Bounty Complete!\nGo to `/catnip` to reroll a perk!"
@@ -158,9 +170,13 @@ async def set_mafia_offer(level: int, user):
     vt = level_data.get("cost", 100)
     
     # Find a cat type that matches the value threshold
+    spawnable_types = [cat for cat in cattypes if type_dict.get(cat, 0) > 0]
+    if not spawnable_types:
+        return
+
     cattype = "Fine"
     for _ in range(100):
-        cattype = random.choice(cattypes)
+        cattype = random.choice(spawnable_types)
         value = sum(type_dict.values()) / type_dict.get(cattype, 1) if type_dict.get(cattype) else 1
         if value <= vt:
             break
@@ -227,8 +243,11 @@ async def get_bounties(level: int) -> List[Dict]:
     avg_cats_needed = level_data.get("bounty_difficulty", 10)
     num_max = level_data.get("max_amount", 50)
     
+    spawnable_types = [cat for cat in cattypes if type_dict.get(cat, 0) > 0]
+    if not spawnable_types:
+        return []
+
     used_types = set()
-    used_rarities = set()
     tries = 0
     max_tries = 1000 * num_bounties
     
@@ -244,11 +263,11 @@ async def get_bounties(level: int) -> List[Dict]:
         
         if bounty_type == "rarity":
             margin = 0.2
-            rarity_i = random.randint(2, len(cattypes) - 2) if len(cattypes) > 2 else 1
+            rarity_i = random.randint(2, len(spawnable_types) - 2) if len(spawnable_types) > 2 else 1
             
             while True:
-                rarity = cattypes[rarity_i] if rarity_i < len(cattypes) else cattypes[-1]
-                eligible_types = cattypes[rarity_i:]
+                rarity = spawnable_types[rarity_i] if rarity_i < len(spawnable_types) else spawnable_types[-1]
+                eligible_types = spawnable_types[rarity_i:]
                 
                 prob = sum(type_dict.get(t, 0) for t in eligible_types) / sum(type_dict.values()) if sum(type_dict.values()) > 0 else 0
                 base_amount = max(1, round(avg_cats_needed * prob)) if prob > 0 else 1
@@ -258,16 +277,23 @@ async def get_bounties(level: int) -> List[Dict]:
                     break
                 rarity_i -= 1
             
-            if rarity_i in used_rarities:
+            eligible_types = spawnable_types[rarity_i:]
+            if not eligible_types:
                 continue
-            
-            used_rarities.add(rarity_i)
+
+            cat_type = random.choice(eligible_types)
+            if cat_type in used_types:
+                continue
+
+            used_types.add(cat_type)
+            prob = type_dict.get(cat_type, 0) / sum(type_dict.values()) if sum(type_dict.values()) > 0 else 0
+            base_amount = max(1, round(avg_cats_needed * prob)) if prob > 0 else 1
             amount = max(1, round(base_amount * variation))
             
             if amount > num_max:
                 continue
             
-            bounties.append({"id": 2, "progress": 0, "cat_type": rarity, "amount": amount, "desc": f"Catch {amount} cats of {rarity} rarity and above"})
+            bounties.append({"id": 2, "progress": 0, "cat_type": cat_type, "amount": amount, "desc": f"Catch {amount} {cat_type} cats"})
         
         elif bounty_type == "any":
             if any(b.get("id") == 0 for b in bounties):
@@ -280,7 +306,7 @@ async def get_bounties(level: int) -> List[Dict]:
             bounties.append({"id": 0, "progress": 0, "cat_type": "", "amount": amount, "desc": f"Catch {amount} cats of any kind"})
         
         else:  # specific
-            available_types = [cat for cat in cattypes if cat not in used_types]
+            available_types = [cat for cat in spawnable_types if cat not in used_types]
             if not available_types:
                 continue
             

@@ -7114,20 +7114,22 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
         level_data = battle["seasons"][str(user.season)][user.battlepass]
         level_text = f"Level {user.battlepass + 1}"
 
-    if current_xp >= level_data["xp"]:
+    if current_xp >= level_data.get("xp", 0):
         xp_progress = current_xp
         active_level_data = level_data
-        while xp_progress >= active_level_data["xp"]:
+        while xp_progress >= active_level_data.get("xp", 1):
             user.battlepass += 1
-            xp_progress -= active_level_data["xp"]
+            xp_progress -= active_level_data.get("xp", 1)
             user.progress = xp_progress
             cat_emojis = None
-            if active_level_data["reward"] == "Rain":
-                user.rain_minutes += active_level_data["amount"]
-            elif active_level_data["reward"] in ["Wooden", "Stone", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Celestial"]:
-                user[f"pack_{active_level_data['reward'].lower()}"] += active_level_data["amount"]
-            elif active_level_data["reward"] in cattypes:
-                user[f"cat_{active_level_data['reward']}"] += active_level_data["amount"]
+            reward_type = active_level_data.get("reward", "")
+            reward_amount = active_level_data.get("amount", 0)
+            if reward_type == "Rain":
+                user.rain_minutes += reward_amount
+            elif reward_type in ["Wooden", "Stone", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Celestial"]:
+                user[f"pack_{reward_type.lower()}"] += reward_amount
+            elif reward_type in cattypes:
+                user[f"cat_{reward_type}"] += reward_amount
             await user.save()
             # after incrementing user.battlepass and saving inside the battlepass loop:
             try:
@@ -7136,12 +7138,12 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             except Exception:
                 pass
             if not cat_emojis:
-                if active_level_data["reward"] == "Rain":
-                    description = f"You got ☔ {active_level_data['amount']} rain minutes!"
-                elif active_level_data["reward"] in cattypes:
-                    description = f"You got {get_emoji(active_level_data['reward'].lower() + 'cat')} {active_level_data['amount']} {active_level_data['reward']}!"
+                if reward_type == "Rain":
+                    description = f"You got ☔ {reward_amount} rain minutes!"
+                elif reward_type in cattypes:
+                    description = f"You got {get_emoji(reward_type.lower() + 'cat')} {reward_amount} {reward_type}!"
                 else:
-                    description = f"You got a {get_emoji(active_level_data['reward'].lower() + 'pack')} {active_level_data['reward']} pack! Do /packs to open it!"
+                    description = f"You got a {get_emoji(reward_type.lower() + 'pack')} {reward_type} pack! Do /packs to open it!"
                 title = f"Level {user.battlepass} Complete!"
             else:
                 description = f"You got {cat_emojis}!"
@@ -7196,22 +7198,25 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
 
 
 async def progress_embed(message, user, level_data, current_xp, old_xp, quest_data, diff, level_text) -> discord.Embed:
-    percentage_before = int(old_xp / level_data["xp"] * 10)
-    percentage_after = int(current_xp / level_data["xp"] * 10)
+    xp_required = level_data.get("xp", 1)
+    percentage_before = int(old_xp / xp_required * 10) if xp_required > 0 else 0
+    percentage_after = int(current_xp / xp_required * 10) if xp_required > 0 else 0
     percenteage_left = 10 - percentage_after
 
     progress_line = get_emoji("staring_square") * percentage_before + "🟨" * (percentage_after - percentage_before) + "⬛" * percenteage_left
 
     title = quest_data["title"]
 
-    if level_data["reward"] == "Rain":
-        reward_text = f"☔ {level_data['amount']}m of Rain"
-    elif level_data["reward"] == "random cats":
-        reward_text = f"❓ {level_data['amount']} random cats"
-    elif level_data["reward"] in cattypes:
-        reward_text = f"{get_emoji(level_data['reward'].lower() + 'cat')} {level_data['amount']} {level_data['reward']}"
+    reward_type = level_data.get("reward", "")
+    reward_amount = level_data.get("amount", 0)
+    if reward_type == "Rain":
+        reward_text = f"☔ {reward_amount}m of Rain"
+    elif reward_type == "random cats":
+        reward_text = f"❓ {reward_amount} random cats"
+    elif reward_type in cattypes:
+        reward_text = f"{get_emoji(reward_type.lower() + 'cat')} {reward_amount} {reward_type}"
     else:
-        reward_text = f"{get_emoji(level_data['reward'].lower() + 'pack')} {level_data['reward']} pack"
+        reward_text = f"{get_emoji(reward_type.lower() + 'pack')} {reward_type} pack"
 
     global_user = await User.get_or_create(user_id=user.user_id)
     streak_data = get_streak_reward(global_user.vote_streak)
@@ -18842,6 +18847,10 @@ async def bounty(message, user, cattype):
             total = user.bounty_total_three
             btype = user.bounty_type_three
 
+        target_obtainable = bounty_id == 0 or not btype or type_dict.get(btype, 0) > 0
+        if bounty_id in [1, 2] and not target_obtainable:
+            progress = total
+
         if progress < total:
             if bounty_id == 0:
                 progress += 1
@@ -18855,11 +18864,18 @@ async def bounty(message, user, cattype):
                         complete += 1
                         titles.append(f"Catch {total} {btype} cats")
             elif bounty_id == 2:
-                if cattypes.index(cattype) >= cattypes.index(btype):
-                    progress += 1
-                    if progress == total:
-                        complete += 1
-                        titles.append(f"Catch {total} {btype} or rarer cats")
+                if btype in cattypes:
+                    if cattype == btype:
+                        progress += 1
+                        if progress == total:
+                            complete += 1
+                            titles.append(f"Catch {total} {btype} cats")
+                else:
+                    if cattypes.index(cattype) >= cattypes.index(btype):
+                        progress += 1
+                        if progress == total:
+                            complete += 1
+                            titles.append(f"Catch {total} {btype} or rarer cats")
 
         if i == 0:
             user.bounty_progress_one = progress
@@ -18879,6 +18895,10 @@ async def bounty(message, user, cattype):
     if catnip_list["levels"][user.catnip_level]["bonus"]:
         bonus_title = ""
         if user.bounty_progress_bonus < user.bounty_total_bonus:
+            bonus_obtainable = user.bounty_id_bonus == 0 or not user.bounty_type_bonus or type_dict.get(user.bounty_type_bonus, 0) > 0
+            if user.bounty_id_bonus in [1, 2] and not bonus_obtainable:
+                user.bounty_progress_bonus = user.bounty_total_bonus
+
             if user.bounty_id_bonus == 0:
                 user.bounty_progress_bonus += 1
                 bonus_title = f"Catch {user.bounty_total_bonus} cats"
@@ -18887,9 +18907,14 @@ async def bounty(message, user, cattype):
                     user.bounty_progress_bonus += 1
                 bonus_title = f"Catch {user.bounty_total_bonus} {cattype} cats"
             else:
-                if cattypes.index(cattype) >= cattypes.index(user.bounty_type_bonus):
-                    user.bounty_progress_bonus += 1
-                bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} or rarer cats"
+                if user.bounty_type_bonus in cattypes:
+                    if cattype == user.bounty_type_bonus:
+                        user.bounty_progress_bonus += 1
+                    bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} cats"
+                else:
+                    if cattypes.index(cattype) >= cattypes.index(user.bounty_type_bonus):
+                        user.bounty_progress_bonus += 1
+                    bonus_title = f"Catch {user.bounty_total_bonus} {user.bounty_type_bonus} or rarer cats"
 
             if user.bounty_progress_bonus == user.bounty_total_bonus:
                 embed = discord.Embed(
@@ -19036,18 +19061,58 @@ async def catnip(message: discord.Interaction):
         except Exception:
             return "Unknown perk"
 
+    async def normalize_bounty_state():
+        changed = False
+
+        for slot in ["one", "two", "three"]:
+            bounty_id = user[f"bounty_id_{slot}"]
+            total_field = f"bounty_total_{slot}"
+            progress_field = f"bounty_progress_{slot}"
+
+            total = user[total_field]
+            progress = user[progress_field]
+
+            if bounty_id is not None and total <= 0:
+                user[total_field] = 1
+                total = 1
+                changed = True
+            if progress < 0:
+                user[progress_field] = 0
+                progress = 0
+                changed = True
+            if total > 0 and progress > total:
+                user[progress_field] = total
+                changed = True
+
+        if user.bounty_id_bonus is not None and user.bounty_total_bonus <= 0:
+            user.bounty_total_bonus = 1
+            changed = True
+        if user.bounty_progress_bonus < 0:
+            user.bounty_progress_bonus = 0
+            changed = True
+        if user.bounty_total_bonus > 0 and user.bounty_progress_bonus > user.bounty_total_bonus:
+            user.bounty_progress_bonus = user.bounty_total_bonus
+            changed = True
+
+        if changed:
+            await user.save()
+
     async def pay_catnip(interaction: discord.Interaction):
         await user.refresh_from_db()
+        await normalize_bounty_state()
         if user.catnip_level < 0 or user.catnip_level >= len(levels):
             await interaction.followup.send("Invalid catnip state. Try again later.", ephemeral=True)
             return
 
         for i in range(user.bounties):
+            bounty_id = user.bounty_id_one if i == 0 else user.bounty_id_two if i == 1 else user.bounty_id_three
+            bounty_type = user.bounty_type_one if i == 0 else user.bounty_type_two if i == 1 else user.bounty_type_three
+            impossible_target = bounty_id in [1, 2] and bounty_type and type_dict.get(bounty_type, 0) <= 0
             if (
                 (i == 0 and user.bounty_progress_one < user.bounty_total_one)
                 or (i == 1 and user.bounty_progress_two < user.bounty_total_two)
                 or (i == 2 and user.bounty_progress_three < user.bounty_total_three)
-            ):
+            ) and not impossible_target:
                 await interaction.followup.send("You haven't completed your bounties yet!", ephemeral=True)
                 return
 
@@ -19130,7 +19195,7 @@ async def catnip(message: discord.Interaction):
             )
             return
 
-        duration = levels[user.catnip_level]["duration"]
+        duration = levels[user.catnip_level].get("duration", 24)
         duration_bonus = 0
 
         if user.perks:
@@ -19270,12 +19335,31 @@ async def catnip(message: discord.Interaction):
 
     async def gen_main_embed() -> discord.Embed:
         await user.refresh_from_db()
+        await normalize_bounty_state()
         level = user.catnip_level
         level_data = levels[level]
-        rank = level_data["name"]
-        change = level_data["change"]
-        duration = level_data["duration"]
+        rank = level_data.get("name", f"Rank {level}")
+        change = level_data.get("change", f"Difficulty {level_data.get('bounty_difficulty', '?')}")
+        duration = level_data.get("duration", 24)
         quote_map = quotes[max(0, level - 1)].get("quotes", {}) if level > 0 else {}
+
+        def format_bounty_text(bounty_id, bounty_type, bounty_total, bounty_progress, is_bonus=False):
+            bounty_total = max(1, bounty_total)
+            bounty_progress = max(0, bounty_progress)
+            target_type = bounty_type or "Fine"
+            if bounty_id in [1, 2] and bounty_type and type_dict.get(bounty_type, 0) <= 0:
+                return "Unavailable target (auto-completed)"
+            if bounty_id == 0:
+                if bounty_progress >= bounty_total:
+                    return f"Catch {bounty_total} cats"
+                return f"Catch {max(0, bounty_total - bounty_progress)} more cats"
+            if bounty_id == 1 or target_type in cattypes:
+                if bounty_progress >= bounty_total:
+                    return f"Catch {bounty_total} {target_type} cats"
+                return f"Catch {max(0, bounty_total - bounty_progress)} more {target_type} cats"
+            if bounty_progress >= bounty_total:
+                return f"Catch {bounty_total} {target_type} or rarer cats"
+            return f"Catch {max(0, bounty_total - bounty_progress)} more {target_type} or rarer cats"
 
         desc = ""
         all_complete = True
@@ -19293,24 +19377,22 @@ async def catnip(message: discord.Interaction):
                     bounty_type = user[f"bounty_type_{slot}"]
                     bounty_total = user[f"bounty_total_{slot}"]
                     bounty_progress = user[f"bounty_progress_{slot}"]
-                    completed = bounty_progress >= bounty_total
+                    target_obtainable = bounty_id == 0 or not bounty_type or type_dict.get(bounty_type, 0) > 0
+                    completed = bounty_progress >= bounty_total or (bounty_id in [1, 2] and not target_obtainable)
                     if completed:
                         bounties_complete += 1
                     else:
                         all_complete = False
                     prefix = "✅ " if completed else "- "
-                    line = bounties_cfg[bounty_id]["desc"].replace("X", str(max(0, bounty_total - bounty_progress))).replace(
-                        "type", f"{get_emoji((bounty_type or 'fine').lower() + 'cat')} {bounty_type}"
-                    )
+                    line = format_bounty_text(bounty_id, bounty_type, bounty_total, bounty_progress)
                     desc += f"{prefix}{line}\n"
 
                 if level_data.get("bonus"):
-                    done = user.bounty_progress_bonus >= user.bounty_total_bonus
+                    bonus_obtainable = user.bounty_id_bonus == 0 or not user.bounty_type_bonus or type_dict.get(user.bounty_type_bonus, 0) > 0
+                    done = user.bounty_progress_bonus >= user.bounty_total_bonus or (user.bounty_id_bonus in [1, 2] and not bonus_obtainable)
                     bonus_complete = done
                     prefix = "✅ " if done else "- "
-                    line = bounties_cfg[user.bounty_id_bonus]["desc"].replace("X", str(max(0, user.bounty_total_bonus - user.bounty_progress_bonus))).replace(
-                        "type", f"{get_emoji((user.bounty_type_bonus or 'fine').lower() + 'cat')} {user.bounty_type_bonus}"
-                    )
+                    line = format_bounty_text(user.bounty_id_bonus, user.bounty_type_bonus, user.bounty_total_bonus, user.bounty_progress_bonus, True)
                     desc += f"\n**Bonus**\n{prefix}{line}\n"
 
                 if all_complete:
@@ -19348,18 +19430,23 @@ async def catnip(message: discord.Interaction):
 
     async def gen_main_view() -> View:
         await user.refresh_from_db()
+        await normalize_bounty_state()
         view = View(timeout=VIEW_TIMEOUT)
 
         all_complete = True
         for i in range(user.bounties):
+            bounty_id = user.bounty_id_one if i == 0 else user.bounty_id_two if i == 1 else user.bounty_id_three
+            bounty_type = user.bounty_type_one if i == 0 else user.bounty_type_two if i == 1 else user.bounty_type_three
+            impossible_target = bounty_id in [1, 2] and bounty_type and type_dict.get(bounty_type, 0) <= 0
             if (
                 (i == 0 and user.bounty_progress_one < user.bounty_total_one)
                 or (i == 1 and user.bounty_progress_two < user.bounty_total_two)
                 or (i == 2 and user.bounty_progress_three < user.bounty_total_three)
-            ):
+            ) and not impossible_target:
                 all_complete = False
 
-        bonus_complete = user.bounty_total_bonus > 0 and user.bounty_progress_bonus >= user.bounty_total_bonus
+        bonus_impossible = user.bounty_id_bonus in [1, 2] and user.bounty_type_bonus and type_dict.get(user.bounty_type_bonus, 0) <= 0
+        bonus_complete = user.bounty_total_bonus > 0 and (user.bounty_progress_bonus >= user.bounty_total_bonus or bonus_impossible)
 
         if not user.perk_selected:
             btn = Button(label="Select Perk", style=ButtonStyle.red)
@@ -19388,8 +19475,15 @@ async def catnip(message: discord.Interaction):
             pay_btn = Button(label="Pay Up", style=ButtonStyle.blurple, disabled=not all_complete)
 
             async def pay_cb(interaction: discord.Interaction):
-                await interaction.response.defer()
-                await pay_catnip(interaction)
+                try:
+                    await interaction.response.defer(ephemeral=True)
+                    await pay_catnip(interaction)
+                except Exception:
+                    logging.exception("Pay Up callback failed")
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("Pay Up failed unexpectedly. Try `/catnip` again.", ephemeral=True)
+                    else:
+                        await interaction.followup.send("Pay Up failed unexpectedly. Try `/catnip` again.", ephemeral=True)
 
             pay_btn.callback = pay_cb
             view.add_item(pay_btn)

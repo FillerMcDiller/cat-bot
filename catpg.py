@@ -51,11 +51,33 @@ ModelInstance = TypeVar("ModelInstance", bound="Model")
 class Model:
     _primary_key = "id"
     _capped_ints = []
+    _json_fields = []
+
+    @classmethod
+    def _normalize_json_field(cls, field: str, value):
+        if field not in cls._json_fields:
+            return value
+
+        # asyncpg can return JSON/JSONB columns as strings; normalize to Python values.
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                return []
+            try:
+                return json.loads(value)
+            except Exception:
+                return []
+        if value is None:
+            return []
+        return value
 
     def __init__(self, record: asyncpg.Record):
         # init model from asyncpg Record
         self.__dirty_values = []
-        self.__values = dict(record.items())
+        values = dict(record.items())
+        for key, value in list(values.items()):
+            values[key] = self.__class__._normalize_json_field(key, value)
+        self.__values = values
 
     # setter sugar
     def __setattr__(self, name: str, value) -> None:
@@ -106,12 +128,12 @@ class Model:
         for i in self.__dirty_values:
             changes.append(f'"{i}" = ${var_counter}')
             value = self.__values[i]
-            
-            # Check if this field is a JSON field and serialize if needed
-            json_fields = getattr(self.__class__, '_json_fields', [])
-            if i in json_fields and value is not None and not isinstance(value, str):
-                # Serialize Python objects (list, dict) to JSON string for JSONB columns
-                value = json.dumps(value)
+
+            # Ensure JSON fields are always written as valid JSON text.
+            if i in self.__class__._json_fields:
+                normalized = self.__class__._normalize_json_field(i, value)
+                value = json.dumps(normalized)
+                self.__values[i] = normalized
             
             args.append(value)
             var_counter += 1
@@ -189,6 +211,11 @@ class Model:
     @classmethod
     async def create(self, **kwargs) -> None:
         table = self.__name__.lower()
+        for field in list(kwargs.keys()):
+            if field in self._json_fields:
+                normalized = self._normalize_json_field(field, kwargs[field])
+                kwargs[field] = json.dumps(normalized)
+
         values = kwargs.values()
 
         query_string = f'INSERT INTO "{table}" ('
