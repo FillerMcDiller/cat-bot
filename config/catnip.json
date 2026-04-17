@@ -328,5 +328,28 @@
         "leveldown": "your numbers don't add up anymore. good day."
       }
     }
+  ],
+  "bounties": [
+    {
+      "id": 1,
+      "name": "Common Cat Hunt",
+      "description": "Catch 5 common cats",
+      "target": 5,
+      "reward": 50
+    },
+    {
+      "id": 2,
+      "name": "Uncommon Discovery",
+      "description": "Catch 3 uncommon cats",
+      "target": 3,
+      "reward": 100
+    },
+    {
+      "id": 3,
+      "name": "Rare Collector",
+      "description": "Catch 2 rare cats",
+      "target": 2,
+      "reward": 200
+    }
   ]
 }
