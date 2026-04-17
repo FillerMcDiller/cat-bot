@@ -23,6 +23,7 @@
 # this is a KISS wrapper i made for asyncpg
 
 from typing import Any, AsyncGenerator, TypeVar
+import json
 
 import asyncpg
 
@@ -104,7 +105,15 @@ class Model:
         changes = []
         for i in self.__dirty_values:
             changes.append(f'"{i}" = ${var_counter}')
-            args.append(self.__values[i])
+            value = self.__values[i]
+            
+            # Check if this field is a JSON field and serialize if needed
+            json_fields = getattr(self.__class__, '_json_fields', [])
+            if i in json_fields and value is not None and not isinstance(value, str):
+                # Serialize Python objects (list, dict) to JSON string for JSONB columns
+                value = json.dumps(value)
+            
+            args.append(value)
             var_counter += 1
         query_string += ", ".join(changes)
 
