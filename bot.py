@@ -16,6 +16,7 @@
 
 import asyncio
 import importlib
+import os
 import time
 import logging
 
@@ -101,19 +102,58 @@ async def setup_hook():
                 print("[BOT.PY] TOP_GG_TOKEN not configured, skipping stats update")
         except Exception as e:
             print(f"[BOT.PY] WARNING Could not update top.gg stats: {e}")
-        
+
+        global SOURCE_WATCHER_TASK
+        if SOURCE_WATCHER_TASK is None or SOURCE_WATCHER_TASK.done():
+            SOURCE_WATCHER_TASK = bot.loop.create_task(_watch_source_changes())
+            print("[BOT.PY] Source watcher task started.")
+
     except Exception as e:
         print(f"\n[BOT.PY] ERROR in setup_hook: {e}")
         import traceback
         traceback.print_exc()
         print()
         raise  # Re-raise to prevent silent failure
-    
+
     print("\n" + "="*60)
     print("[BOT.PY] SETUP_HOOK COMPLETE!")
     print("="*60 + "\n")
 
 bot.setup_hook = setup_hook
+
+MAIN_FILE = os.path.join(os.path.dirname(__file__), "main.py")
+CATPG_FILE = os.path.join(os.path.dirname(__file__), "catpg.py")
+DATABASE_FILE = os.path.join(os.path.dirname(__file__), "database.py")
+SOURCE_WATCHER_TASK = None
+
+
+def _get_reload_signature() -> tuple[float, float, float]:
+    def _mtime(path: str) -> float:
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    return (_mtime(MAIN_FILE), _mtime(CATPG_FILE), _mtime(DATABASE_FILE))
+
+
+async def _watch_source_changes(poll_seconds: float = 2.0):
+    last_signature = _get_reload_signature()
+    while True:
+        await asyncio.sleep(poll_seconds)
+        current_signature = _get_reload_signature()
+        if current_signature == last_signature:
+            continue
+
+        last_signature = current_signature
+        try:
+            print("[BOT.PY] Source change detected, reloading main extension...", flush=True)
+            await bot.cat_bot_reload_hook(True)  # pyright: ignore
+            print("[BOT.PY] Reload complete.", flush=True)
+        except Exception as e:
+            print(f"[BOT.PY] Auto-reload failed: {e}", flush=True)
+
+
 async def reload(reload_db):
     try:
         await bot.unload_extension("main")
