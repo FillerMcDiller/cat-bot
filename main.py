@@ -23206,13 +23206,41 @@ def _web_json(payload: dict, status: int = 200, origin: str | None = None) -> we
 
 
 INVENTORY_WEB_SESSIONS: dict[str, dict] = {}
+INVENTORY_WEB_SESSIONS_PATH = os.path.join(BASE_PATH, "data", "inventory_web_sessions.json")
+
+
+def _load_inventory_sessions_from_disk() -> dict[str, dict]:
+    try:
+        if not os.path.exists(INVENTORY_WEB_SESSIONS_PATH):
+            return {}
+        with open(INVENTORY_WEB_SESSIONS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k): v for k, v in data.items() if isinstance(v, dict)}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_inventory_sessions_to_disk() -> None:
+    try:
+        os.makedirs(os.path.dirname(INVENTORY_WEB_SESSIONS_PATH), exist_ok=True)
+        with open(INVENTORY_WEB_SESSIONS_PATH, "w", encoding="utf-8") as f:
+            json.dump(INVENTORY_WEB_SESSIONS, f, ensure_ascii=False)
+    except Exception:
+        pass
 
 
 def _cleanup_inventory_sessions() -> None:
+    if not INVENTORY_WEB_SESSIONS:
+        INVENTORY_WEB_SESSIONS.update(_load_inventory_sessions_from_disk())
+
     now = int(time.time())
     expired = [sid for sid, session in INVENTORY_WEB_SESSIONS.items() if int(session.get("exp", 0)) <= now]
     for sid in expired:
         INVENTORY_WEB_SESSIONS.pop(sid, None)
+    if expired:
+        _save_inventory_sessions_to_disk()
 
 
 def _create_inventory_session(guild_id: int, user_id: int) -> str:
@@ -23228,6 +23256,7 @@ def _create_inventory_session(guild_id: int, user_id: int) -> str:
         "api_base": api_base,
         "exp": int(time.time()) + 3600 * 6,
     }
+    _save_inventory_sessions_to_disk()
     return sid
 
 
@@ -23238,6 +23267,7 @@ def _resolve_inventory_session(sid: str) -> dict | None:
         return None
     if int(session.get("exp", 0)) <= int(time.time()):
         INVENTORY_WEB_SESSIONS.pop(sid, None)
+        _save_inventory_sessions_to_disk()
         return None
     return session
 
