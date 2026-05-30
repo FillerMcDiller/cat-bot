@@ -6636,6 +6636,7 @@ def save_adventures():
         pass
 # docs suggest on_ready can be called multiple times
 on_ready_debounce = False
+vote_server = None
 
 about_to_stop = False
 
@@ -9545,7 +9546,7 @@ async def on_message(message: discord.Message):
     if text.startswith("cat!restart"):
         await message.reply("restarting!")
         os.system("git pull")
-        if config.WEBHOOK_VERIFY:
+        if vote_server is not None:
             await vote_server.cleanup()
         await bot.cat_bot_reload_hook("db" in text)  # pyright: ignore
     if text.startswith("cat!print"):
@@ -18614,13 +18615,19 @@ async def stocks(message: discord.Interaction):
         user_profile = await Profile.get_or_create(user_id=user.id, guild_id=message.guild.id)
         embed = discord.Embed(
             title="📈 Stock Market",
-            description="Select a stock to open detailed view with orderbook + trade controls.",
+            description="Simple view: pick a stock below, then use Buy or Sell.",
             color=Colors.brown,
         )
 
+        total_holding_value = 0
         for stock in stock_data:
-            price = await get_stock_price(stock["ticker"])
-            reward = await StockReward.get_or_none(ticker=stock["ticker"])
+            ticker = stock["ticker"]
+            price = await get_stock_price(ticker)
+            owned = user_profile[stock_field_map[ticker]] or 0
+            holding_value = owned * price
+            total_holding_value += holding_value
+
+            reward = await StockReward.get_or_none(ticker=ticker)
             reward_text = "No active reward"
             if reward and reward.active:
                 reward_text = (
@@ -18628,32 +18635,17 @@ async def stocks(message: discord.Interaction):
                     f" for 🍖 {reward.amount if not reward.amount_hidden else '???'}/share"
                 )
 
-            buy_total = await StockOrder.sum(
-                "quantity",
-                "guild_id = $1 AND ticker = $2 AND type_buy = $3",
-                user_profile.guild_id,
-                stock["ticker"],
-                True,
-            )
-            sell_total = await StockOrder.sum(
-                "quantity",
-                "guild_id = $1 AND ticker = $2 AND type_buy = $3",
-                user_profile.guild_id,
-                stock["ticker"],
-                False,
-            )
-            owned = user_profile[stock_field_map[stock["ticker"]]] or 0
-
             embed.add_field(
-                name=f"{get_emoji(stock['emoji'])} {stock['name']} ({stock['ticker']})",
+                name=f"{get_emoji(stock['emoji'])} {stock['name']} ({ticker})",
                 value=(
-                    f"🍖 **{price:,}** | You own **{owned:,}**\n"
-                    f"Buy book: **{buy_total:,}x** | Sell book: **{sell_total:,}x**\n"
+                    f"Price: 🍖 **{price:,}**\n"
+                    f"Owned: **{owned:,}x** (🍖 **{holding_value:,}**)\n"
                     f"{reward_text}"
                 ),
                 inline=False,
             )
 
+        embed.set_footer(text=f"Wallet: 🍖 {user_profile.kibble or 0:,} | Holdings value: 🍖 {total_holding_value:,}")
         return embed
 
     async def build_stock_detail_embed(user: discord.abc.User, ticker: str) -> discord.Embed:
@@ -18666,18 +18658,13 @@ async def stocks(message: discord.Interaction):
         history_rows = await StockPriceHistory.collect(
             "ticker = $1 AND time > $2 ORDER BY time ASC",
             ticker,
-            int(time.time() - 3600 * 72),
+            int(time.time() - 3600 * 24),
         )
         prices = [row.price for row in history_rows]
-        if prices:
-            low_price = min(prices)
-            high_price = max(prices)
-            start_price = prices[0]
-            change_pct = ((price / start_price) - 1) * 100 if start_price > 0 else 0
-        else:
-            low_price = price
-            high_price = price
-            change_pct = 0.0
+        start_price = prices[0] if prices else price
+        low_price = min(prices) if prices else price
+        high_price = max(prices) if prices else price
+        change_pct = ((price / start_price) - 1) * 100 if start_price > 0 else 0.0
 
         reward = await StockReward.get_or_none(ticker=ticker)
         reward_line = "No active reward"
@@ -18688,54 +18675,43 @@ async def stocks(message: discord.Interaction):
                 f" (ends <t:{reward.end_time}:R>)"
             )
 
-        buy_orders = await pool.fetch(
-            'SELECT price, SUM(quantity) AS total_quantity FROM "stockorder" WHERE guild_id = $1 AND ticker = $2 AND type_buy = $3 GROUP BY price ORDER BY price DESC LIMIT 5;',
-            user_profile.guild_id,
-            ticker,
-            True,
-        )
-        sell_orders = await pool.fetch(
-            'SELECT price, SUM(quantity) AS total_quantity FROM "stockorder" WHERE guild_id = $1 AND ticker = $2 AND type_buy = $3 GROUP BY price ORDER BY price ASC LIMIT 5;',
-            user_profile.guild_id,
-            ticker,
-            False,
-        )
-
-        buy_text = "\n".join([f"🍖 **{item['price']:,}** - *{item['total_quantity']:,}x*" for item in buy_orders]) if buy_orders else "No buy orders"
-        sell_text = "\n".join([f"🍖 **{item['price']:,}** - *{item['total_quantity']:,}x*" for item in sell_orders]) if sell_orders else "No sell orders"
-
         embed = discord.Embed(
             title=f"{get_emoji(stock['emoji'])} {stock['name']} ({ticker})",
             description=(
                 f"Current price: 🍖 **{price:,}**\n"
                 f"You own: **{owned:,}x** (🍖 **{holding_value:,}**)\n"
-                f"72h range: 🍖 **{low_price:,}** - 🍖 **{high_price:,}**\n"
-                f"72h change: **{change_pct:+.2f}%**\n"
+                f"24h range: 🍖 **{low_price:,}** - 🍖 **{high_price:,}**\n"
+                f"24h change: **{change_pct:+.2f}%**\n"
                 f"{reward_line}"
             ),
             color=Colors.brown,
         )
-        embed.add_field(name="Buy Orders", value=buy_text, inline=True)
-        embed.add_field(name="Sell Orders", value=sell_text, inline=True)
         return embed
 
     def create_main_market_view() -> View:
         view = View(timeout=VIEW_TIMEOUT)
 
-        for stock in stock_data:
-            button = Button(
-                label=f"{stock['ticker']}",
-                style=ButtonStyle.blurple,
-                emoji=get_emoji(stock["emoji"]),
-            )
+        class StockSelect(discord.ui.Select):
+            def __init__(self):
+                options = [
+                    discord.SelectOption(
+                        label=f"{stock['name']} ({stock['ticker']})",
+                        value=stock["ticker"],
+                        emoji=get_emoji(stock["emoji"]),
+                    )
+                    for stock in stock_data
+                ]
+                super().__init__(placeholder="Choose a stock", min_values=1, max_values=1, options=options)
 
-            async def stock_detail_callback(interaction: discord.Interaction, ticker=stock["ticker"]):
+            async def callback(self, interaction: discord.Interaction):
+                ticker = self.values[0]
                 await interaction.response.defer()
                 embed = await build_stock_detail_embed(interaction.user, ticker)
                 await interaction.edit_original_response(embed=embed, view=create_stock_detail_view(ticker))
 
-            button.callback = stock_detail_callback
-            view.add_item(button)
+        view.add_item(StockSelect())
+
+        refresh_button = Button(label="Refresh", style=ButtonStyle.gray, emoji="🔄")
 
         async def refresh_callback(interaction: discord.Interaction):
             await interaction.response.defer()
@@ -18743,7 +18719,6 @@ async def stocks(message: discord.Interaction):
             embed = await build_main_market_embed(interaction.user)
             await interaction.edit_original_response(embed=embed, view=create_main_market_view())
 
-        refresh_button = Button(label="Refresh", style=ButtonStyle.gray, emoji="🔄")
         refresh_button.callback = refresh_callback
         view.add_item(refresh_button)
 
@@ -18758,7 +18733,6 @@ async def stocks(message: discord.Interaction):
         help_button = Button(label="Help", style=ButtonStyle.gray, emoji="💡")
         help_button.callback = stock_help
         view.add_item(help_button)
-
         return view
 
     def create_stock_detail_view(ticker: str) -> View:
@@ -18800,7 +18774,7 @@ async def stocks(message: discord.Interaction):
         sell_button.callback = sell_callback
         view.add_item(sell_button)
 
-        back_button = Button(style=ButtonStyle.gray, emoji="⬅️")
+        back_button = Button(label="Back", style=ButtonStyle.gray, emoji="⬅️")
 
         async def back_callback(interaction: discord.Interaction):
             await interaction.response.defer()
@@ -18824,7 +18798,6 @@ async def stocks(message: discord.Interaction):
         help_button = Button(label="Help", style=ButtonStyle.gray, emoji="💡")
         help_button.callback = stock_help
         view.add_item(help_button)
-
         return view
 
     embed = await build_main_market_embed(message.user)
@@ -23038,11 +23011,23 @@ async def nuke(message: discord.Interaction):
 
 
 async def recieve_vote(request):
-    if request.headers.get("authorization", "") != config.WEBHOOK_VERIFY:
+    secret = _get_vote_webhook_secret()
+    if not secret:
+        return web.Response(text="webhook disabled", status=503)
+
+    if request.headers.get("authorization", "") != secret:
         return web.Response(text="bad", status=403)
     request_json = await request.json()
 
-    user = await User.get_or_create(user_id=int(request_json["user"]))
+    try:
+        payload_user = int(request_json.get("user") or request_json.get("user_id") or 0)
+    except Exception:
+        payload_user = 0
+
+    if not payload_user:
+        return web.Response(text="missing user", status=400)
+
+    user = await User.get_or_create(user_id=payload_user)
     if user.vote_time_topgg + 43100 > time.time():
         # top.gg is NOT realiable with their webhooks, but we politely pretend they are
         return web.Response(text="you fucking dumb idiot", status=200)
@@ -23070,7 +23055,7 @@ async def recieve_vote(request):
     user.vote_time_topgg = time.time()
 
     try:
-        channeley = await bot.fetch_user(int(request_json["user"]))
+        channeley = await bot.fetch_user(payload_user)
 
         if user.vote_streak == 1:
             streak_progress = "🟦⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬆️"
@@ -23107,13 +23092,13 @@ async def recieve_vote(request):
 
     # Trigger reward handling across guild profiles for this user
     try:
-        asyncio.create_task(reward_vote(int(request_json["user"])))
+        asyncio.create_task(reward_vote(payload_user))
     except Exception:
         pass
 
     # Log the vote to the central cat log channel (best-effort)
     try:
-        asyncio.create_task(log_vote_to_channel(int(request_json["user"]), source="aiohttp"))
+        asyncio.create_task(log_vote_to_channel(payload_user, source="aiohttp"))
     except Exception:
         pass
 
@@ -23121,12 +23106,223 @@ async def recieve_vote(request):
 
 
 async def check_supporter(request):
-    if request.headers.get("authorization", "") != config.WEBHOOK_VERIFY:
+    secret = _get_vote_webhook_secret()
+    if not secret:
+        return web.Response(text="webhook disabled", status=503)
+
+    if request.headers.get("authorization", "") != secret:
         return web.Response(text="bad", status=403)
     request_json = await request.json()
 
-    user = await User.get_or_create(user_id=int(request_json["user"]))
+    user_id = int(request_json.get("user") or request_json.get("user_id") or 0)
+    if not user_id:
+        return web.Response(text="missing user", status=400)
+
+    user = await User.get_or_create(user_id=user_id)
     return web.Response(text="1" if user.premium else "0", status=200)
+
+
+def _get_vote_webhook_secret() -> str | None:
+    secret = (
+        getattr(config, "WEBHOOK_VERIFY", None)
+        or getattr(config, "TOPGG_WEBHOOK_SECRET", None)
+        or os.getenv("TOPGG_WEBHOOK_SECRET")
+    )
+    if not secret:
+        return None
+    return str(secret).strip()
+
+
+def _get_vote_webhook_port() -> int:
+    env_port = os.getenv("VOTE_WEBHOOK_PORT")
+    if env_port:
+        try:
+            return int(env_port)
+        except Exception:
+            pass
+    configured = getattr(config, "WEBHOOK_PORT", None)
+    if configured:
+        try:
+            return int(configured)
+        except Exception:
+            pass
+    return 3001
+
+
+def _get_inventory_api_key() -> str | None:
+    key = getattr(config, "INVENTORY_API_KEY", None) or os.getenv("INVENTORY_API_KEY")
+    if not key:
+        return None
+    return str(key).strip()
+
+
+def _get_web_ui_origin() -> str:
+    origin = getattr(config, "WEB_UI_ORIGIN", None) or os.getenv("WEB_UI_ORIGIN") or "*"
+    return str(origin).strip() or "*"
+
+
+def _web_ui_headers() -> dict:
+    return {
+        "Access-Control-Allow-Origin": _get_web_ui_origin(),
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,X-API-Key",
+        "Access-Control-Max-Age": "86400",
+    }
+
+
+def _web_json(payload: dict, status: int = 200) -> web.Response:
+    return web.json_response(payload, status=status, headers=_web_ui_headers())
+
+
+def _read_profile_int(profile, field_name: str) -> int:
+    try:
+        value = profile[field_name]
+    except Exception:
+        value = getattr(profile, field_name, 0)
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def _is_inventory_api_authorized(request: web.Request) -> bool:
+    expected_key = _get_inventory_api_key()
+    if not expected_key:
+        return False
+
+    x_api_key = request.headers.get("x-api-key", "").strip()
+    auth_header = request.headers.get("authorization", "").strip()
+    bearer_key = ""
+    if auth_header.lower().startswith("bearer "):
+        bearer_key = auth_header[7:].strip()
+
+    return x_api_key == expected_key or bearer_key == expected_key
+
+
+async def _inventory_payload(guild_id: int, user_id: int) -> dict:
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+    items = await get_user_items(guild_id, user_id)
+
+    packs = {}
+    for pack in pack_data:
+        field_name = f"pack_{pack['name'].lower()}"
+        amount = _read_profile_int(profile, field_name)
+        if amount > 0:
+            packs[pack["name"].lower()] = amount
+
+    cats = {}
+    for cat in cattypes:
+        count = _read_profile_int(profile, f"cat_{cat}")
+        if count > 0:
+            cats[cat] = count
+
+    total_cats = sum(cats.values())
+
+    return {
+        "guild_id": guild_id,
+        "user_id": user_id,
+        "kibble": _read_profile_int(profile, "kibble"),
+        "packs": packs,
+        "items": items,
+        "cats": {
+            "total": total_cats,
+            "by_type": cats,
+        },
+        "editable_fields": ["kibble", "packs", "items"],
+    }
+
+
+async def web_ui_preflight(request: web.Request) -> web.Response:
+    return web.Response(status=204, headers=_web_ui_headers())
+
+
+async def web_ui_inventory_get(request: web.Request) -> web.Response:
+    if not _is_inventory_api_authorized(request):
+        return _web_json({"error": "unauthorized"}, status=401)
+
+    try:
+        guild_id = int(request.query.get("guild_id", "0"))
+        user_id = int(request.query.get("user_id", "0"))
+    except Exception:
+        return _web_json({"error": "invalid guild_id or user_id"}, status=400)
+
+    if guild_id <= 0 or user_id <= 0:
+        return _web_json({"error": "guild_id and user_id are required"}, status=400)
+
+    payload = await _inventory_payload(guild_id, user_id)
+    return _web_json({"ok": True, "inventory": payload}, status=200)
+
+
+async def web_ui_inventory_update(request: web.Request) -> web.Response:
+    if not _is_inventory_api_authorized(request):
+        return _web_json({"error": "unauthorized"}, status=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _web_json({"error": "invalid json"}, status=400)
+
+    try:
+        guild_id = int(body.get("guild_id", 0))
+        user_id = int(body.get("user_id", 0))
+    except Exception:
+        return _web_json({"error": "invalid guild_id or user_id"}, status=400)
+
+    if guild_id <= 0 or user_id <= 0:
+        return _web_json({"error": "guild_id and user_id are required"}, status=400)
+
+    profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+    touched_profile = False
+
+    if "kibble" in body:
+        try:
+            new_kibble = max(0, int(body.get("kibble", 0)))
+        except Exception:
+            return _web_json({"error": "kibble must be an integer"}, status=400)
+        profile.kibble = new_kibble
+        touched_profile = True
+
+    if "packs" in body:
+        packs_obj = body.get("packs")
+        if not isinstance(packs_obj, dict):
+            return _web_json({"error": "packs must be an object"}, status=400)
+
+        for pack in pack_data:
+            key = pack["name"].lower()
+            if key in packs_obj:
+                try:
+                    amount = max(0, int(packs_obj[key]))
+                except Exception:
+                    return _web_json({"error": f"invalid pack amount for {key}"}, status=400)
+                setattr(profile, f"pack_{key}", amount)
+                touched_profile = True
+
+    if touched_profile:
+        await profile.save()
+
+    if "items" in body:
+        items_obj = body.get("items")
+        if not isinstance(items_obj, dict):
+            return _web_json({"error": "items must be an object"}, status=400)
+
+        cleaned_items = {}
+        for raw_key, raw_count in items_obj.items():
+            item_key = str(raw_key).strip()
+            if not item_key:
+                continue
+            if not re.fullmatch(r"[a-zA-Z0-9_]{1,80}", item_key):
+                return _web_json({"error": f"invalid item key: {item_key}"}, status=400)
+            try:
+                count = int(raw_count)
+            except Exception:
+                return _web_json({"error": f"invalid item count for {item_key}"}, status=400)
+            if count > 0:
+                cleaned_items[item_key] = count
+
+        await save_user_items(guild_id, user_id, cleaned_items)
+
+    payload = await _inventory_payload(guild_id, user_id)
+    return _web_json({"ok": True, "inventory": payload}, status=200)
 
 
 # KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
@@ -23210,13 +23406,33 @@ async def setup(bot2):
     bot2.on_connect = on_connect
     bot2.on_error = on_error
 
-    if config.WEBHOOK_VERIFY:
+    webhook_secret = _get_vote_webhook_secret()
+    if webhook_secret:
         app = web.Application()
-        app.add_routes([web.post("/", recieve_vote), web.get("/supporter", check_supporter)])
+        app.add_routes(
+            [
+                web.post("/", recieve_vote),
+                web.post("/webhook", recieve_vote),
+                web.post("/dblwebhook", recieve_vote),
+                web.get("/supporter", check_supporter),
+                web.post("/supporter", check_supporter),
+                web.options("/api/inventory", web_ui_preflight),
+                web.get("/api/inventory", web_ui_inventory_get),
+                web.post("/api/inventory", web_ui_inventory_update),
+            ]
+        )
         vote_server = web.AppRunner(app)
         await vote_server.setup()
-        site = web.TCPSite(vote_server, "0.0.0.0", 8069)
+        webhook_port = _get_vote_webhook_port()
+        site = web.TCPSite(vote_server, "0.0.0.0", webhook_port)
         await site.start()
+        print(
+            f"[VOTE WEBHOOK] Listening on 0.0.0.0:{webhook_port} (routes: /, /webhook, /dblwebhook, /api/inventory)",
+            flush=True,
+        )
+    else:
+        vote_server = None
+        print("[VOTE WEBHOOK] Disabled (set WEBHOOK_VERIFY or TOPGG_WEBHOOK_SECRET to enable)", flush=True)
 
     # Attempt to load the Fights extension into the real bot instance so its cog
     # registers with the running bot (helps when main is loaded as an extension).
@@ -23278,7 +23494,7 @@ async def teardown(bot):
     if cookie_updates:
         await Profile.bulk_update(cookie_updates, "cookies")
 
-    if config.WEBHOOK_VERIFY:
+    if vote_server is not None:
         await vote_server.cleanup()
 
 

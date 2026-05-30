@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KITTAYYYYYYY Web Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <header class="hero">
+    <p class="eyebrow">KITTAYYYYYYY</p>
+    <h1>Web Hub</h1>
+    <p class="subtitle">Wiki + inventory tools without spamming slash commands.</p>
+  </header>
+
+  <main class="layout">
+    <nav class="tabs">
+      <button id="tab-wiki" class="tab-btn is-active" type="button">Wiki</button>
+      <button id="tab-inventory" class="tab-btn" type="button">Inventory Manager</button>
+    </nav>
+
+    <section id="panel-wiki" class="panel is-active">
+      <div class="panel-header">
+        <h2>Command Wiki</h2>
+        <input id="wiki-search" type="search" placeholder="Search commands..." />
+      </div>
+      <div id="wiki-commands" class="wiki-grid"></div>
+
+      <div class="panel-header second">
+        <h2>Cat Types</h2>
+      </div>
+      <div id="wiki-cats" class="cats-grid"></div>
+    </section>
+
+    <section id="panel-inventory" class="panel">
+      <h2>Inventory Manager</h2>
+      <p class="note">For security, keep the API key private. Do not hardcode it in this site.</p>
+
+      <div class="form-grid">
+        <label>API Base URL
+          <input id="api-base" type="text" placeholder="https://your-domain.example" />
+        </label>
+        <label>API Key
+          <input id="api-key" type="password" placeholder="INVENTORY_API_KEY" />
+        </label>
+        <label>Guild ID
+          <input id="guild-id" type="text" placeholder="123456789012345678" />
+        </label>
+        <label>User ID
+          <input id="user-id" type="text" placeholder="123456789012345678" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="load-inventory" type="button">Load Inventory</button>
+        <button id="save-inventory" type="button" class="secondary">Save Changes</button>
+      </div>
+
+      <p id="inventory-status" class="status"></p>
+
+      <div id="inventory-editor" class="editor hidden">
+        <label>Kibble
+          <input id="inv-kibble" type="number" min="0" step="1" />
+        </label>
+
+        <h3>Packs</h3>
+        <div id="packs-editor" class="kv-list"></div>
+
+        <h3>Items</h3>
+        <div id="items-editor" class="kv-list"></div>
+        <button id="add-item-row" type="button" class="tiny">Add Item Row</button>
+
+        <details>
+          <summary>Cat Totals (read-only)</summary>
+          <div id="cats-readonly" class="readonly"></div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

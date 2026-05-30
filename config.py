@@ -24,8 +24,23 @@ BACKUP_ID = 1436486865489236299
 # top.gg vote webhook verification key, setting this to None disables all voting stuff
 WEBHOOK_VERIFY = os.getenv("WEBHOOK_VERIFY")  
 
+# Optional alias for external webhook integrations
+TOPGG_WEBHOOK_SECRET = os.getenv("TOPGG_WEBHOOK_SECRET")
+
+# Public webhook port (Top.gg/Cloudflare tunnel target)
+WEBHOOK_PORT = int(os.getenv("VOTE_WEBHOOK_PORT", "3001"))
+
+# Internal receiver port (local forwarding target)
+INTERNAL_WEBHOOK_PORT = int(os.getenv("BOT_INTERNAL_PORT", "3002"))
+
+# API key for web inventory management endpoints
+INVENTORY_API_KEY = os.getenv("INVENTORY_API_KEY")
+
+# Allowed CORS origin for web UI (set to your GitHub Pages URL in production)
+WEB_UI_ORIGIN = os.getenv("WEB_UI_ORIGIN", "*")
+
 # top.gg api token to occasionally post stats
-TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfdCI6Ijc3NzAzNTk1ODYzNDEyNzM2MCIsImlkIjoiNzc0NTI1ODI2OTQzMDA0NjcyIiwiaWF0IjoxNzY1Nzc0NTE2fQ.REorlnG3pwpfYiJNPM0IzkPqDAFEdiUsFMza-8ZlMX4")
+TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN")
 
 # only post stats if server count is above this, to prevent wrong stats
 MIN_SERVER_SEND = 0  # Changed from 100_000 to 0 to allow stats posting for all server counts
