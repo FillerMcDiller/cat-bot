@@ -23541,6 +23541,7 @@ async def setup(bot2):
                 web.post("/supporter", check_supporter),
                 web.options("/api/inventory", web_ui_preflight),
                 web.get("/api/inventory", web_ui_inventory_get),
+                web.options("/api/inventory/action", web_ui_preflight),
                 web.post("/api/inventory/action", web_ui_inventory_action),
             ]
         )

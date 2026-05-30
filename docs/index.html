@@ -51,61 +51,72 @@
 
       <pre id="session-debug" class="debug-panel"></pre>
 
-      <div class="panel-header second">
-        <h3>Search Cats</h3>
-        <input id="cat-search" type="search" placeholder="Search by name or type..." />
-      </div>
-
-      <div class="actions">
-        <button id="load-inventory" type="button">Refresh Inventory</button>
+      <div class="inventory-topbar">
+        <div class="panel-header second search-wrap">
+          <h3>Search Cats</h3>
+          <input id="cat-search" type="search" placeholder="Search by name or type..." />
+        </div>
+        <div class="actions inventory-refresh">
+          <button id="load-inventory" type="button">Refresh Inventory</button>
+        </div>
       </div>
 
       <p id="inventory-status" class="status"></p>
 
-      <div id="inventory-view" class="editor hidden">
-        <div class="inventory-summary">
-          <div><span>Kibble</span><strong id="inv-kibble">0</strong></div>
-          <div><span>Total Cats</span><strong id="inv-cat-total">0</strong></div>
-          <div><span>Pack Types</span><strong id="inv-pack-types">0</strong></div>
-          <div><span>Item Types</span><strong id="inv-item-types">0</strong></div>
-        </div>
-
-        <h3>Your Cats</h3>
-        <div id="cats-grid" class="wiki-grid"></div>
-
-        <div class="detail-card hidden" id="cat-detail-card">
-          <div class="panel-header">
-            <h3 id="cat-detail-title">Selected Cat</h3>
-            <span id="cat-detail-meta" class="muted"></span>
-          </div>
-          <div class="detail-stats">
-            <div><span>Name</span><strong id="cat-detail-name">-</strong></div>
-            <div><span>Bond</span><strong id="cat-detail-bond">-</strong></div>
-            <div><span>Favorite</span><strong id="cat-detail-favorite">-</strong></div>
-            <div><span>Adventure</span><strong id="cat-detail-adventure">-</strong></div>
+      <div id="inventory-view" class="editor hidden inventory-shell">
+        <section class="inventory-main">
+          <div class="inventory-summary">
+            <div><span>Kibble</span><strong id="inv-kibble">0</strong></div>
+            <div><span>Total Cats</span><strong id="inv-cat-total">0</strong></div>
+            <div><span>Pack Types</span><strong id="inv-pack-types">0</strong></div>
+            <div><span>Item Types</span><strong id="inv-item-types">0</strong></div>
           </div>
 
-          <div class="detail-actions">
-            <input id="cat-rename-input" type="text" maxlength="32" placeholder="New name" />
-            <button id="cat-rename-button" type="button">Rename</button>
-            <button id="cat-favorite-button" type="button" class="secondary">Toggle Favorite</button>
-            <button id="cat-play-button" type="button">Play</button>
+          <h3>Your Cats</h3>
+          <div id="cats-grid" class="wiki-grid"></div>
+        </section>
+
+        <aside class="inventory-sidebar">
+          <div class="detail-card hidden" id="cat-detail-card">
+            <div class="panel-header">
+              <h3 id="cat-detail-title">Selected Cat</h3>
+              <span id="cat-detail-meta" class="muted"></span>
+            </div>
+            <div class="detail-stats">
+              <div><span>Name</span><strong id="cat-detail-name">-</strong></div>
+              <div><span>Bond</span><strong id="cat-detail-bond">-</strong></div>
+              <div><span>Favorite</span><strong id="cat-detail-favorite">-</strong></div>
+              <div><span>Adventure</span><strong id="cat-detail-adventure">-</strong></div>
+            </div>
+
+            <div class="detail-actions">
+              <input id="cat-rename-input" type="text" maxlength="32" placeholder="New name" />
+              <button id="cat-rename-button" type="button">Rename</button>
+              <button id="cat-favorite-button" type="button" class="secondary">Toggle Favorite</button>
+              <button id="cat-play-button" type="button">Play</button>
+            </div>
+
+            <div class="detail-actions secondary-row">
+              <select id="cat-item-select"></select>
+              <button id="cat-item-button" type="button" class="secondary">Use Item</button>
+            </div>
           </div>
 
-          <div class="detail-actions secondary-row">
-            <select id="cat-item-select"></select>
-            <button id="cat-item-button" type="button" class="secondary">Use Item</button>
+          <div class="sidebar-block">
+            <h3>Packs</h3>
+            <div id="packs-readonly" class="readonly"></div>
           </div>
-        </div>
 
-        <h3>Packs</h3>
-        <div id="packs-readonly" class="readonly"></div>
+          <div class="sidebar-block">
+            <h3>Items</h3>
+            <div id="items-readonly" class="readonly"></div>
+          </div>
 
-        <h3>Items</h3>
-        <div id="items-readonly" class="readonly"></div>
-
-        <h3>Cats</h3>
-        <div id="cats-readonly" class="readonly"></div>
+          <div class="sidebar-block">
+            <h3>Cats</h3>
+            <div id="cats-readonly" class="readonly"></div>
+          </div>
+        </aside>
       </div>
     </section>
   </main>

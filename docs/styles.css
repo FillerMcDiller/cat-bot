@@ -257,6 +257,47 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
   margin-bottom: 16px;
 }
 
+.inventory-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.inventory-refresh {
+  margin-top: 0;
+}
+
+.search-wrap {
+  margin-bottom: 0;
+}
+
+.inventory-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.inventory-main {
+  min-width: 0;
+}
+
+.inventory-sidebar {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  display: grid;
+  gap: 12px;
+}
+
+.sidebar-block {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 18px;
+  padding: 14px;
+}
+
 .inventory-summary > div,
 .detail-stats > div {
   border: 1px solid var(--line);
@@ -316,6 +357,10 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
   box-shadow: 0 0 0 2px rgba(15, 138, 95, 0.15);
 }
 
+.inventory-main .wiki-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
 .debug-panel {
   margin: 12px 0 0;
   padding: 12px;
@@ -330,6 +375,13 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
 @media (max-width: 640px) {
   .actions { flex-direction: column; }
   .kv-row { grid-template-columns: 1fr; }
+  .inventory-topbar,
+  .inventory-shell {
+    grid-template-columns: 1fr;
+  }
+  .inventory-sidebar {
+    position: static;
+  }
   .detail-actions,
   .detail-actions.secondary-row {
     grid-template-columns: 1fr;
