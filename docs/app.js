@@ -72,6 +72,8 @@ function readSessionFromUrl() {
     sid,
     tab: tab || "wiki"
   };
+
+  return { rawUrl, params, tab };
 }
 
 function setConnectionStatus() {
@@ -79,6 +81,22 @@ function setConnectionStatus() {
   qs("session-guild").textContent = webSession.sid ? "Auto-detected" : "-";
   qs("session-user").textContent = webSession.sid ? "Auto-detected" : "-";
   qs("session-api").textContent = webSession.apiBase || "-";
+}
+
+function renderDebugInfo(debugState) {
+  const node = qs("session-debug");
+  if (!node) {
+    return;
+  }
+
+  node.textContent = [
+    `href: ${debugState.rawUrl}`,
+    `search: ${window.location.search || "(empty)"}`,
+    `hash: ${window.location.hash || "(empty)"}`,
+    `sid: ${webSession.sid || "(missing)"}`,
+    `apiBase: ${webSession.apiBase || "(missing)"}`,
+    `tab: ${webSession.tab || "(missing)"}`,
+  ].join("\n");
 }
 
 function renderCatsWiki() {
@@ -287,8 +305,9 @@ async function bootWiki() {
 }
 
 function init() {
-  readSessionFromUrl();
+  const debugState = readSessionFromUrl();
   setConnectionStatus();
+  renderDebugInfo(debugState);
 
   qs("tab-wiki").addEventListener("click", () => switchTab("wiki"));
   qs("tab-inventory").addEventListener("click", () => switchTab("inventory"));

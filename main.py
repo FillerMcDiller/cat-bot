@@ -23191,17 +23191,18 @@ def _get_web_ui_origin() -> str:
     return str(origin).strip() or "*"
 
 
-def _web_ui_headers() -> dict:
+def _web_ui_headers(origin: str | None = None) -> dict:
+    allow_origin = origin or _get_web_ui_origin()
     return {
-        "Access-Control-Allow-Origin": _get_web_ui_origin(),
+        "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type,Authorization",
         "Access-Control-Max-Age": "86400",
     }
 
 
-def _web_json(payload: dict, status: int = 200) -> web.Response:
-    return web.json_response(payload, status=status, headers=_web_ui_headers())
+def _web_json(payload: dict, status: int = 200, origin: str | None = None) -> web.Response:
+    return web.json_response(payload, status=status, headers=_web_ui_headers(origin))
 
 
 INVENTORY_WEB_SESSIONS: dict[str, dict] = {}
@@ -23310,47 +23311,49 @@ def build_inventory_web_url(guild_id: int, user_id: int) -> str | None:
 
 
 async def web_ui_preflight(request: web.Request) -> web.Response:
-    return web.Response(status=204, headers=_web_ui_headers())
+    return web.Response(status=204, headers=_web_ui_headers(request.headers.get("Origin")))
 
 
 async def web_ui_inventory_get(request: web.Request) -> web.Response:
+    origin = request.headers.get("Origin")
     sid = _extract_inventory_token(request)
     session = _resolve_inventory_session(sid)
     if not session:
-        return _web_json({"error": "unauthorized"}, status=401)
+        return _web_json({"error": "unauthorized"}, status=401, origin=origin)
 
     try:
         guild_id = int(session.get("guild_id", 0))
         user_id = int(session.get("user_id", 0))
     except Exception:
-        return _web_json({"error": "invalid guild_id or user_id"}, status=400)
+        return _web_json({"error": "invalid guild_id or user_id"}, status=400, origin=origin)
 
     if guild_id <= 0 or user_id <= 0:
-        return _web_json({"error": "guild_id and user_id are required"}, status=400)
+        return _web_json({"error": "guild_id and user_id are required"}, status=400, origin=origin)
 
     payload = await _inventory_payload(guild_id, user_id)
-    return _web_json({"ok": True, "inventory": payload}, status=200)
+    return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
 
 
 async def web_ui_inventory_update(request: web.Request) -> web.Response:
+    origin = request.headers.get("Origin")
     sid = _extract_inventory_token(request)
     session = _resolve_inventory_session(sid)
     if not session:
-        return _web_json({"error": "unauthorized"}, status=401)
+        return _web_json({"error": "unauthorized"}, status=401, origin=origin)
 
     try:
         body = await request.json()
     except Exception:
-        return _web_json({"error": "invalid json"}, status=400)
+        return _web_json({"error": "invalid json"}, status=400, origin=origin)
 
     try:
         guild_id = int(session.get("guild_id", 0))
         user_id = int(session.get("user_id", 0))
     except Exception:
-        return _web_json({"error": "invalid guild_id or user_id"}, status=400)
+        return _web_json({"error": "invalid guild_id or user_id"}, status=400, origin=origin)
 
     if guild_id <= 0 or user_id <= 0:
-        return _web_json({"error": "guild_id and user_id are required"}, status=400)
+        return _web_json({"error": "guild_id and user_id are required"}, status=400, origin=origin)
 
     profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
     touched_profile = False
@@ -23359,14 +23362,14 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
         try:
             new_kibble = max(0, int(body.get("kibble", 0)))
         except Exception:
-            return _web_json({"error": "kibble must be an integer"}, status=400)
+            return _web_json({"error": "kibble must be an integer"}, status=400, origin=origin)
         profile.kibble = new_kibble
         touched_profile = True
 
     if "packs" in body:
         packs_obj = body.get("packs")
         if not isinstance(packs_obj, dict):
-            return _web_json({"error": "packs must be an object"}, status=400)
+            return _web_json({"error": "packs must be an object"}, status=400, origin=origin)
 
         for pack in pack_data:
             key = pack["name"].lower()
@@ -23374,7 +23377,7 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
                 try:
                     amount = max(0, int(packs_obj[key]))
                 except Exception:
-                    return _web_json({"error": f"invalid pack amount for {key}"}, status=400)
+                    return _web_json({"error": f"invalid pack amount for {key}"}, status=400, origin=origin)
                 setattr(profile, f"pack_{key}", amount)
                 touched_profile = True
 
@@ -23384,7 +23387,7 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
     if "items" in body:
         items_obj = body.get("items")
         if not isinstance(items_obj, dict):
-            return _web_json({"error": "items must be an object"}, status=400)
+            return _web_json({"error": "items must be an object"}, status=400, origin=origin)
 
         cleaned_items = {}
         for raw_key, raw_count in items_obj.items():
@@ -23392,18 +23395,18 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
             if not item_key:
                 continue
             if not re.fullmatch(r"[a-zA-Z0-9_]{1,80}", item_key):
-                return _web_json({"error": f"invalid item key: {item_key}"}, status=400)
+                return _web_json({"error": f"invalid item key: {item_key}"}, status=400, origin=origin)
             try:
                 count = int(raw_count)
             except Exception:
-                return _web_json({"error": f"invalid item count for {item_key}"}, status=400)
+                return _web_json({"error": f"invalid item count for {item_key}"}, status=400, origin=origin)
             if count > 0:
                 cleaned_items[item_key] = count
 
         await save_user_items(guild_id, user_id, cleaned_items)
 
     payload = await _inventory_payload(guild_id, user_id)
-    return _web_json({"ok": True, "inventory": payload}, status=200)
+    return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
 
 
 # KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
