@@ -23157,13 +23157,6 @@ def _get_vote_webhook_port() -> int:
     return 3001
 
 
-def _get_inventory_api_key() -> str | None:
-    key = getattr(config, "INVENTORY_API_KEY", None) or os.getenv("INVENTORY_API_KEY")
-    if not key:
-        return None
-    return str(key).strip()
-
-
 def _get_inventory_web_token_secret() -> str | None:
     secret = getattr(config, "INVENTORY_WEB_TOKEN_SECRET", None) or os.getenv("INVENTORY_WEB_TOKEN_SECRET")
     if not secret:
@@ -23202,7 +23195,7 @@ def _web_ui_headers() -> dict:
     return {
         "Access-Control-Allow-Origin": _get_web_ui_origin(),
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization,X-API-Key",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
         "Access-Control-Max-Age": "86400",
     }
 
@@ -23211,48 +23204,41 @@ def _web_json(payload: dict, status: int = 200) -> web.Response:
     return web.json_response(payload, status=status, headers=_web_ui_headers())
 
 
-def _b64url_encode(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+INVENTORY_WEB_SESSIONS: dict[str, dict] = {}
 
 
-def _b64url_decode(text: str) -> bytes:
-    padding = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode(text + padding)
+def _cleanup_inventory_sessions() -> None:
+    now = int(time.time())
+    expired = [sid for sid, session in INVENTORY_WEB_SESSIONS.items() if int(session.get("exp", 0)) <= now]
+    for sid in expired:
+        INVENTORY_WEB_SESSIONS.pop(sid, None)
 
 
-def _sign_inventory_payload(payload: dict) -> str:
-    secret = _get_inventory_web_token_secret()
-    if not secret:
-        raise RuntimeError("INVENTORY_WEB_TOKEN_SECRET is not configured")
+def _create_inventory_session(guild_id: int, user_id: int) -> str:
+    _cleanup_inventory_sessions()
+    api_base = _get_inventory_api_base_url()
+    if not api_base:
+        raise RuntimeError("INVENTORY_API_BASE_URL is not configured")
 
-    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    payload_part = _b64url_encode(payload_json)
-    signature = hmac.new(secret.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
-    return f"{payload_part}.{_b64url_encode(signature)}"
+    sid = uuid.uuid4().hex[:16]
+    INVENTORY_WEB_SESSIONS[sid] = {
+        "guild_id": int(guild_id),
+        "user_id": int(user_id),
+        "api_base": api_base,
+        "exp": int(time.time()) + 3600 * 6,
+    }
+    return sid
 
 
-def _verify_inventory_token(token: str) -> dict | None:
-    secret = _get_inventory_web_token_secret()
-    if not secret or not token:
+def _resolve_inventory_session(sid: str) -> dict | None:
+    _cleanup_inventory_sessions()
+    session = INVENTORY_WEB_SESSIONS.get(sid)
+    if not session:
         return None
-
-    try:
-        payload_part, signature_part = token.split(".", 1)
-        expected_signature = hmac.new(secret.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
-        if not hmac.compare_digest(_b64url_encode(expected_signature), signature_part):
-            return None
-
-        payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
-        expires_at = int(payload.get("exp", 0))
-        if expires_at and expires_at < int(time.time()):
-            return None
-
-        if int(payload.get("guild_id", 0)) <= 0 or int(payload.get("user_id", 0)) <= 0:
-            return None
-
-        return payload
-    except Exception:
+    if int(session.get("exp", 0)) <= int(time.time()):
+        INVENTORY_WEB_SESSIONS.pop(sid, None)
         return None
+    return session
 
 
 def _read_profile_int(profile, field_name: str) -> int:
@@ -23267,11 +23253,7 @@ def _read_profile_int(profile, field_name: str) -> int:
 
 
 def _extract_inventory_token(request: web.Request) -> str:
-    auth_header = request.headers.get("authorization", "").strip()
-    if auth_header.lower().startswith("bearer "):
-        return auth_header[7:].strip()
-
-    return (request.headers.get("x-inventory-token", "").strip() or request.query.get("token", "").strip())
+    return (request.headers.get("x-inventory-session", "").strip() or request.query.get("sid", "").strip())
 
 
 async def _inventory_payload(guild_id: int, user_id: int) -> dict:
@@ -23309,30 +23291,22 @@ async def _inventory_payload(guild_id: int, user_id: int) -> dict:
 
 def build_inventory_web_url(guild_id: int, user_id: int) -> str | None:
     site_url = _get_inventory_web_ui_url()
-    api_base = _get_inventory_api_base_url()
-    secret = _get_inventory_web_token_secret()
-    if not site_url or not api_base or not secret:
+    if not site_url:
         return None
 
-    payload = {
-        "guild_id": int(guild_id),
-        "user_id": int(user_id),
-        "scope": "inventory",
-        "api_base": api_base,
-        "exp": int(time.time()) + 3600 * 6,
-        "iat": int(time.time()),
-        "nonce": uuid.uuid4().hex,
-    }
-    token = _sign_inventory_payload(payload)
+    api_base = _get_inventory_api_base_url()
+    if not api_base:
+        return site_url
+
+    sid = _create_inventory_session(guild_id, user_id)
     query = urlencode(
         {
-            "token": token,
+            "sid": sid,
             "api": api_base,
-            "guild": str(guild_id),
-            "user": str(user_id),
+            "tab": "inventory",
         }
     )
-    return f"{site_url}/?{query}"
+    return f"{site_url}/?{query}#inventory"
 
 
 async def web_ui_preflight(request: web.Request) -> web.Response:
@@ -23340,14 +23314,14 @@ async def web_ui_preflight(request: web.Request) -> web.Response:
 
 
 async def web_ui_inventory_get(request: web.Request) -> web.Response:
-    token = _extract_inventory_token(request)
-    payload = _verify_inventory_token(token)
-    if not payload or payload.get("scope") != "inventory":
+    sid = _extract_inventory_token(request)
+    session = _resolve_inventory_session(sid)
+    if not session:
         return _web_json({"error": "unauthorized"}, status=401)
 
     try:
-        guild_id = int(payload.get("guild_id", 0))
-        user_id = int(payload.get("user_id", 0))
+        guild_id = int(session.get("guild_id", 0))
+        user_id = int(session.get("user_id", 0))
     except Exception:
         return _web_json({"error": "invalid guild_id or user_id"}, status=400)
 
@@ -23359,9 +23333,9 @@ async def web_ui_inventory_get(request: web.Request) -> web.Response:
 
 
 async def web_ui_inventory_update(request: web.Request) -> web.Response:
-    token = _extract_inventory_token(request)
-    payload = _verify_inventory_token(token)
-    if not payload or payload.get("scope") != "inventory":
+    sid = _extract_inventory_token(request)
+    session = _resolve_inventory_session(sid)
+    if not session:
         return _web_json({"error": "unauthorized"}, status=401)
 
     try:
@@ -23370,8 +23344,8 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
         return _web_json({"error": "invalid json"}, status=400)
 
     try:
-        guild_id = int(payload.get("guild_id", 0))
-        user_id = int(payload.get("user_id", 0))
+        guild_id = int(session.get("guild_id", 0))
+        user_id = int(session.get("user_id", 0))
     except Exception:
         return _web_json({"error": "invalid guild_id or user_id"}, status=400)
 

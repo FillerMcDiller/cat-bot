@@ -41,10 +41,9 @@ const catTypes = [
 
 let commands = [];
 let webSession = {
-  token: "",
+  sid: "",
   apiBase: "",
-  guildId: "",
-  userId: ""
+  tab: "wiki"
 };
 let loadedInventory = null;
 
@@ -60,42 +59,23 @@ function switchTab(tab) {
   qs("panel-inventory").classList.toggle("is-active", !isWiki);
 }
 
-function decodeBase64Url(text) {
-  const padding = "=".repeat((4 - (text.length % 4)) % 4);
-  const normalized = text.replace(/-/g, "+").replace(/_/g, "/") + padding;
-  return atob(normalized);
-}
-
-function decodeSessionFromToken(token) {
-  try {
-    const payloadPart = token.split(".")[0];
-    if (!payloadPart) {
-      return null;
-    }
-    return JSON.parse(decodeBase64Url(payloadPart));
-  } catch (_err) {
-    return null;
-  }
-}
-
 function readSessionFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const token = params.get("token") || params.get("session") || "";
+  const sid = params.get("sid") || params.get("session") || "";
   const apiBase = (params.get("api") || params.get("base") || "").replace(/\/$/, "");
-  const payload = token ? decodeSessionFromToken(token) : null;
+  const tab = params.get("tab") || window.location.hash.replace(/^#/, "");
 
   webSession = {
-    token,
-    apiBase: apiBase || (payload && payload.api_base) || "",
-    guildId: (payload && String(payload.guild_id)) || "",
-    userId: (payload && String(payload.user_id)) || ""
+    apiBase,
+    sid,
+    tab: tab || "wiki"
   };
 }
 
 function setConnectionStatus() {
-  qs("session-status").textContent = webSession.token ? "Connected" : "Waiting for signed link";
-  qs("session-guild").textContent = webSession.guildId || "-";
-  qs("session-user").textContent = webSession.userId || "-";
+  qs("session-status").textContent = webSession.sid ? "Connected" : "Waiting for signed link";
+  qs("session-guild").textContent = webSession.sid ? "Auto-detected" : "-";
+  qs("session-user").textContent = webSession.sid ? "Auto-detected" : "-";
   qs("session-api").textContent = webSession.apiBase || "-";
 }
 
@@ -150,12 +130,12 @@ function getApiBase() {
 }
 
 function getAuthHeaders() {
-  if (!webSession.token) {
-    throw new Error("Missing signed inventory token");
+  if (!webSession.sid) {
+    throw new Error("Missing inventory session");
   }
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${webSession.token}`
+    "X-Inventory-Session": webSession.sid
   };
 }
 
@@ -221,12 +201,10 @@ function populateInventoryEditor(inventory) {
 async function loadInventory() {
   try {
     setStatus("Loading inventory...");
-    if (!webSession.token) {
+    if (!webSession.sid) {
       throw new Error("Open this page from /inventory so it can sign your session automatically.");
     }
-    const guildId = webSession.guildId;
-    const userId = webSession.userId;
-    const url = `${getApiBase()}/api/inventory?guild_id=${encodeURIComponent(guildId)}&user_id=${encodeURIComponent(userId)}`;
+    const url = `${getApiBase()}/api/inventory?sid=${encodeURIComponent(webSession.sid)}`;
     const res = await fetch(url, {
       method: "GET",
       headers: getAuthHeaders()
@@ -265,8 +243,6 @@ function gatherEditorPayload() {
   }
 
   return {
-    guild_id: Number.parseInt(webSession.guildId, 10),
-    user_id: Number.parseInt(webSession.userId, 10),
     kibble: Number.parseInt(qs("inv-kibble").value || "0", 10) || 0,
     packs,
     items
@@ -276,7 +252,7 @@ function gatherEditorPayload() {
 async function saveInventory() {
   try {
     setStatus("Saving...");
-    if (!webSession.token) {
+    if (!webSession.sid) {
       throw new Error("Open this page from /inventory so it can sign your session automatically.");
     }
     const payload = gatherEditorPayload();
@@ -320,7 +296,12 @@ function init() {
   qs("add-item-row").addEventListener("click", () => addItemRow("", 0));
 
   bootWiki();
-  if (webSession.token && webSession.apiBase) {
+  if (webSession.sid) {
+    switchTab("inventory");
+  } else if (webSession.tab === "inventory") {
+    switchTab("inventory");
+  }
+  if (webSession.sid && webSession.apiBase) {
     loadInventory();
   } else {
     setStatus("Open this page from /inventory to auto-connect.");
