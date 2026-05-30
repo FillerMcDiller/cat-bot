@@ -23196,7 +23196,7 @@ def _web_ui_headers(origin: str | None = None) -> dict:
     return {
         "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Inventory-Session",
         "Access-Control-Max-Age": "86400",
     }
 
