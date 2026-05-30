@@ -40,6 +40,12 @@ const catTypes = [
 ];
 
 let commands = [];
+let webSession = {
+  token: "",
+  apiBase: "",
+  guildId: "",
+  userId: ""
+};
 let loadedInventory = null;
 
 function qs(id) {
@@ -52,6 +58,45 @@ function switchTab(tab) {
   qs("tab-inventory").classList.toggle("is-active", !isWiki);
   qs("panel-wiki").classList.toggle("is-active", isWiki);
   qs("panel-inventory").classList.toggle("is-active", !isWiki);
+}
+
+function decodeBase64Url(text) {
+  const padding = "=".repeat((4 - (text.length % 4)) % 4);
+  const normalized = text.replace(/-/g, "+").replace(/_/g, "/") + padding;
+  return atob(normalized);
+}
+
+function decodeSessionFromToken(token) {
+  try {
+    const payloadPart = token.split(".")[0];
+    if (!payloadPart) {
+      return null;
+    }
+    return JSON.parse(decodeBase64Url(payloadPart));
+  } catch (_err) {
+    return null;
+  }
+}
+
+function readSessionFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token") || params.get("session") || "";
+  const apiBase = (params.get("api") || params.get("base") || "").replace(/\/$/, "");
+  const payload = token ? decodeSessionFromToken(token) : null;
+
+  webSession = {
+    token,
+    apiBase: apiBase || (payload && payload.api_base) || "",
+    guildId: (payload && String(payload.guild_id)) || "",
+    userId: (payload && String(payload.user_id)) || ""
+  };
+}
+
+function setConnectionStatus() {
+  qs("session-status").textContent = webSession.token ? "Connected" : "Waiting for signed link";
+  qs("session-guild").textContent = webSession.guildId || "-";
+  qs("session-user").textContent = webSession.userId || "-";
+  qs("session-api").textContent = webSession.apiBase || "-";
 }
 
 function renderCatsWiki() {
@@ -97,32 +142,21 @@ function setStatus(text, isError = false) {
   node.style.color = isError ? "#b42318" : "#665f57";
 }
 
-function buildApiUrl(path) {
-  const base = qs("api-base").value.trim().replace(/\/$/, "");
-  if (!base) {
-    throw new Error("API Base URL is required");
+function getApiBase() {
+  if (!webSession.apiBase) {
+    throw new Error("Missing API base URL in the signed link");
   }
-  return `${base}${path}`;
+  return webSession.apiBase.replace(/\/$/, "");
 }
 
 function getAuthHeaders() {
-  const key = qs("api-key").value.trim();
-  if (!key) {
-    throw new Error("API Key is required");
+  if (!webSession.token) {
+    throw new Error("Missing signed inventory token");
   }
   return {
     "Content-Type": "application/json",
-    "X-API-Key": key
+    Authorization: `Bearer ${webSession.token}`
   };
-}
-
-function inventoryIdentifiers() {
-  const guildId = qs("guild-id").value.trim();
-  const userId = qs("user-id").value.trim();
-  if (!guildId || !userId) {
-    throw new Error("Guild ID and User ID are required");
-  }
-  return { guildId, userId };
 }
 
 function renderPacksEditor(packs) {
@@ -140,6 +174,17 @@ function renderPacksEditor(packs) {
   }
 }
 
+function addItemRow(itemKey = "", amount = 0) {
+  const holder = qs("items-editor");
+  const row = document.createElement("div");
+  row.className = "kv-row";
+  row.innerHTML = `
+    <input type="text" placeholder="item_key (example: candy_cane_I)" data-item-key value="${itemKey}">
+    <input type="number" min="0" step="1" data-item-count value="${amount}">
+  `;
+  holder.appendChild(row);
+}
+
 function renderItemsEditor(items) {
   const holder = qs("items-editor");
   holder.innerHTML = "";
@@ -151,17 +196,6 @@ function renderItemsEditor(items) {
   for (const key of keys) {
     addItemRow(key, items[key]);
   }
-}
-
-function addItemRow(itemKey = "", amount = 0) {
-  const holder = qs("items-editor");
-  const row = document.createElement("div");
-  row.className = "kv-row";
-  row.innerHTML = `
-    <input type="text" placeholder="item_key (example: candy_cane_I)" data-item-key value="${itemKey}">
-    <input type="number" min="0" step="1" data-item-count value="${amount}">
-  `;
-  holder.appendChild(row);
 }
 
 function renderCatsReadonly(cats) {
@@ -187,8 +221,12 @@ function populateInventoryEditor(inventory) {
 async function loadInventory() {
   try {
     setStatus("Loading inventory...");
-    const { guildId, userId } = inventoryIdentifiers();
-    const url = buildApiUrl(`/api/inventory?guild_id=${encodeURIComponent(guildId)}&user_id=${encodeURIComponent(userId)}`);
+    if (!webSession.token) {
+      throw new Error("Open this page from /inventory so it can sign your session automatically.");
+    }
+    const guildId = webSession.guildId;
+    const userId = webSession.userId;
+    const url = `${getApiBase()}/api/inventory?guild_id=${encodeURIComponent(guildId)}&user_id=${encodeURIComponent(userId)}`;
     const res = await fetch(url, {
       method: "GET",
       headers: getAuthHeaders()
@@ -208,7 +246,7 @@ function gatherEditorPayload() {
   if (!loadedInventory) {
     throw new Error("Load inventory first");
   }
-  const { guildId, userId } = inventoryIdentifiers();
+
   const packs = {};
   for (const node of document.querySelectorAll("[data-pack]")) {
     packs[node.dataset.pack] = Number.parseInt(node.value || "0", 10) || 0;
@@ -227,8 +265,8 @@ function gatherEditorPayload() {
   }
 
   return {
-    guild_id: Number.parseInt(guildId, 10),
-    user_id: Number.parseInt(userId, 10),
+    guild_id: Number.parseInt(webSession.guildId, 10),
+    user_id: Number.parseInt(webSession.userId, 10),
     kibble: Number.parseInt(qs("inv-kibble").value || "0", 10) || 0,
     packs,
     items
@@ -238,8 +276,11 @@ function gatherEditorPayload() {
 async function saveInventory() {
   try {
     setStatus("Saving...");
+    if (!webSession.token) {
+      throw new Error("Open this page from /inventory so it can sign your session automatically.");
+    }
     const payload = gatherEditorPayload();
-    const url = buildApiUrl("/api/inventory");
+    const url = `${getApiBase()}/api/inventory`;
     const res = await fetch(url, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -268,13 +309,22 @@ async function bootWiki() {
 }
 
 function init() {
+  readSessionFromUrl();
+  setConnectionStatus();
+
   qs("tab-wiki").addEventListener("click", () => switchTab("wiki"));
   qs("tab-inventory").addEventListener("click", () => switchTab("inventory"));
   qs("wiki-search").addEventListener("input", renderCommandsWiki);
   qs("load-inventory").addEventListener("click", loadInventory);
   qs("save-inventory").addEventListener("click", saveInventory);
   qs("add-item-row").addEventListener("click", () => addItemRow("", 0));
+
   bootWiki();
+  if (webSession.token && webSession.apiBase) {
+    loadInventory();
+  } else {
+    setStatus("Open this page from /inventory to auto-connect.");
+  }
 }
 
 init();

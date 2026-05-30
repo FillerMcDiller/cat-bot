@@ -36,8 +36,17 @@ INTERNAL_WEBHOOK_PORT = int(os.getenv("BOT_INTERNAL_PORT", "3002"))
 # API key for web inventory management endpoints
 INVENTORY_API_KEY = os.getenv("INVENTORY_API_KEY")
 
+# Signed web session secret for inventory links created by /inventory
+INVENTORY_WEB_TOKEN_SECRET = os.getenv("INVENTORY_WEB_TOKEN_SECRET")
+
+# Public GitHub Pages URL for the inventory web UI
+INVENTORY_WEB_UI_URL = os.getenv("INVENTORY_WEB_UI_URL")
+
+# Public API base URL that the GitHub Pages UI should call
+INVENTORY_API_BASE_URL = os.getenv("INVENTORY_API_BASE_URL")
+
 # Allowed CORS origin for web UI (set to your GitHub Pages URL in production)
-WEB_UI_ORIGIN = os.getenv("WEB_UI_ORIGIN", "*")
+WEB_UI_ORIGIN = os.getenv("WEB_UI_ORIGIN", "fillermcdiller.github.io")
 
 # top.gg api token to occasionally post stats
 TOP_GG_TOKEN = os.getenv("TOP_GG_TOKEN")

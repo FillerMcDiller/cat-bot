@@ -17,6 +17,8 @@
     
 import asyncio
 import base64
+import hashlib
+import hmac
 from collections import defaultdict, deque
 import datetime
 import io
@@ -33,6 +35,7 @@ import time
 import traceback
 import uuid
 from typing import Deque, Dict, Literal, Optional, Union
+from urllib.parse import urlencode
 
 import aiohttp
 import discord
@@ -13214,6 +13217,11 @@ __Highlighted Stat__
         switch_btn = Button(label="Switch to Items", style=ButtonStyle.gray)
         switch_btn.callback = switch_to_items
         view.add_item(switch_btn)
+
+        web_ui_url = build_inventory_web_url(message.guild.id, message.user.id)
+        if web_ui_url:
+            view.add_item(Button(label="Use Web UI", url=web_ui_url))
+
         await message.followup.send(embed=embedVar, view=view)
     else:
         # show view for other user's inventory with switch button
@@ -23156,6 +23164,35 @@ def _get_inventory_api_key() -> str | None:
     return str(key).strip()
 
 
+def _get_inventory_web_token_secret() -> str | None:
+    secret = getattr(config, "INVENTORY_WEB_TOKEN_SECRET", None) or os.getenv("INVENTORY_WEB_TOKEN_SECRET")
+    if not secret:
+        return None
+    return str(secret).strip()
+
+
+def _get_inventory_web_ui_url() -> str | None:
+    url = getattr(config, "INVENTORY_WEB_UI_URL", None) or os.getenv("INVENTORY_WEB_UI_URL")
+    if not url:
+        origin = getattr(config, "WEB_UI_ORIGIN", None) or os.getenv("WEB_UI_ORIGIN")
+        if origin:
+            origin = str(origin).strip().rstrip("/")
+            if origin.startswith("http://") or origin.startswith("https://"):
+                url = origin
+            else:
+                url = f"https://{origin}"
+    if not url:
+        return None
+    return str(url).strip().rstrip("/")
+
+
+def _get_inventory_api_base_url() -> str | None:
+    url = getattr(config, "INVENTORY_API_BASE_URL", None) or os.getenv("INVENTORY_API_BASE_URL")
+    if not url:
+        return None
+    return str(url).strip().rstrip("/")
+
+
 def _get_web_ui_origin() -> str:
     origin = getattr(config, "WEB_UI_ORIGIN", None) or os.getenv("WEB_UI_ORIGIN") or "*"
     return str(origin).strip() or "*"
@@ -23174,6 +23211,50 @@ def _web_json(payload: dict, status: int = 200) -> web.Response:
     return web.json_response(payload, status=status, headers=_web_ui_headers())
 
 
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(text: str) -> bytes:
+    padding = "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode(text + padding)
+
+
+def _sign_inventory_payload(payload: dict) -> str:
+    secret = _get_inventory_web_token_secret()
+    if not secret:
+        raise RuntimeError("INVENTORY_WEB_TOKEN_SECRET is not configured")
+
+    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_part = _b64url_encode(payload_json)
+    signature = hmac.new(secret.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
+    return f"{payload_part}.{_b64url_encode(signature)}"
+
+
+def _verify_inventory_token(token: str) -> dict | None:
+    secret = _get_inventory_web_token_secret()
+    if not secret or not token:
+        return None
+
+    try:
+        payload_part, signature_part = token.split(".", 1)
+        expected_signature = hmac.new(secret.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url_encode(expected_signature), signature_part):
+            return None
+
+        payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
+        expires_at = int(payload.get("exp", 0))
+        if expires_at and expires_at < int(time.time()):
+            return None
+
+        if int(payload.get("guild_id", 0)) <= 0 or int(payload.get("user_id", 0)) <= 0:
+            return None
+
+        return payload
+    except Exception:
+        return None
+
+
 def _read_profile_int(profile, field_name: str) -> int:
     try:
         value = profile[field_name]
@@ -23185,18 +23266,12 @@ def _read_profile_int(profile, field_name: str) -> int:
         return 0
 
 
-def _is_inventory_api_authorized(request: web.Request) -> bool:
-    expected_key = _get_inventory_api_key()
-    if not expected_key:
-        return False
-
-    x_api_key = request.headers.get("x-api-key", "").strip()
+def _extract_inventory_token(request: web.Request) -> str:
     auth_header = request.headers.get("authorization", "").strip()
-    bearer_key = ""
     if auth_header.lower().startswith("bearer "):
-        bearer_key = auth_header[7:].strip()
+        return auth_header[7:].strip()
 
-    return x_api_key == expected_key or bearer_key == expected_key
+    return (request.headers.get("x-inventory-token", "").strip() or request.query.get("token", "").strip())
 
 
 async def _inventory_payload(guild_id: int, user_id: int) -> dict:
@@ -23232,17 +23307,47 @@ async def _inventory_payload(guild_id: int, user_id: int) -> dict:
     }
 
 
+def build_inventory_web_url(guild_id: int, user_id: int) -> str | None:
+    site_url = _get_inventory_web_ui_url()
+    api_base = _get_inventory_api_base_url()
+    secret = _get_inventory_web_token_secret()
+    if not site_url or not api_base or not secret:
+        return None
+
+    payload = {
+        "guild_id": int(guild_id),
+        "user_id": int(user_id),
+        "scope": "inventory",
+        "api_base": api_base,
+        "exp": int(time.time()) + 3600 * 6,
+        "iat": int(time.time()),
+        "nonce": uuid.uuid4().hex,
+    }
+    token = _sign_inventory_payload(payload)
+    query = urlencode(
+        {
+            "token": token,
+            "api": api_base,
+            "guild": str(guild_id),
+            "user": str(user_id),
+        }
+    )
+    return f"{site_url}/?{query}"
+
+
 async def web_ui_preflight(request: web.Request) -> web.Response:
     return web.Response(status=204, headers=_web_ui_headers())
 
 
 async def web_ui_inventory_get(request: web.Request) -> web.Response:
-    if not _is_inventory_api_authorized(request):
+    token = _extract_inventory_token(request)
+    payload = _verify_inventory_token(token)
+    if not payload or payload.get("scope") != "inventory":
         return _web_json({"error": "unauthorized"}, status=401)
 
     try:
-        guild_id = int(request.query.get("guild_id", "0"))
-        user_id = int(request.query.get("user_id", "0"))
+        guild_id = int(payload.get("guild_id", 0))
+        user_id = int(payload.get("user_id", 0))
     except Exception:
         return _web_json({"error": "invalid guild_id or user_id"}, status=400)
 
@@ -23254,7 +23359,9 @@ async def web_ui_inventory_get(request: web.Request) -> web.Response:
 
 
 async def web_ui_inventory_update(request: web.Request) -> web.Response:
-    if not _is_inventory_api_authorized(request):
+    token = _extract_inventory_token(request)
+    payload = _verify_inventory_token(token)
+    if not payload or payload.get("scope") != "inventory":
         return _web_json({"error": "unauthorized"}, status=401)
 
     try:
@@ -23263,8 +23370,8 @@ async def web_ui_inventory_update(request: web.Request) -> web.Response:
         return _web_json({"error": "invalid json"}, status=400)
 
     try:
-        guild_id = int(body.get("guild_id", 0))
-        user_id = int(body.get("user_id", 0))
+        guild_id = int(payload.get("guild_id", 0))
+        user_id = int(payload.get("user_id", 0))
     except Exception:
         return _web_json({"error": "invalid guild_id or user_id"}, status=400)
 

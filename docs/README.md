@@ -8,8 +8,9 @@ This folder is a static site intended for GitHub Pages.
   - Command list from docs/data/commands.json
   - Cat type rarity list
 - Inventory Manager section:
-  - Loads inventory via GET /api/inventory
-  - Updates kibble, packs, and items via POST /api/inventory
+  - Opens from the bot's signed "Use Web UI" inventory button
+  - Auto-loads the matching guild/user inventory from the URL token
+  - Updates kibble, packs, and items via GET/POST /api/inventory
 
 ## Publish on GitHub Pages
 
@@ -21,13 +22,15 @@ This folder is a static site intended for GitHub Pages.
 
 ## Required bot env vars
 
-- INVENTORY_API_KEY=<strong secret>
+- INVENTORY_WEB_TOKEN_SECRET=<strong secret>
+- INVENTORY_WEB_UI_URL=https://<your-username>.github.io or your custom Pages URL
+- INVENTORY_API_BASE_URL=https://<your-bot-public-url>
 - WEB_UI_ORIGIN=https://<your-username>.github.io (or your custom domain)
 - TOPGG_WEBHOOK_SECRET or WEBHOOK_VERIFY (if vote webhook is enabled)
 - VOTE_WEBHOOK_PORT (optional, defaults to 3001)
 
 ## Security notes
 
-- Do not hardcode INVENTORY_API_KEY in this frontend.
-- Enter the key manually in the UI when you need to manage inventory.
-- Rotate the API key if it is ever exposed.
+- Do not hardcode the inventory token secret in this frontend.
+- The website should only be opened from the bot's signed link.
+- Rotate INVENTORY_WEB_TOKEN_SECRET if it is ever exposed.

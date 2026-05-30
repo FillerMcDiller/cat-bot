@@ -40,25 +40,17 @@
 
     <section id="panel-inventory" class="panel">
       <h2>Inventory Manager</h2>
-      <p class="note">For security, keep the API key private. Do not hardcode it in this site.</p>
+      <p class="note">Open this page from the <strong>Use Web UI</strong> button in /inventory and it will auto-connect to your profile.</p>
 
-      <div class="form-grid">
-        <label>API Base URL
-          <input id="api-base" type="text" placeholder="https://your-domain.example" />
-        </label>
-        <label>API Key
-          <input id="api-key" type="password" placeholder="INVENTORY_API_KEY" />
-        </label>
-        <label>Guild ID
-          <input id="guild-id" type="text" placeholder="123456789012345678" />
-        </label>
-        <label>User ID
-          <input id="user-id" type="text" placeholder="123456789012345678" />
-        </label>
+      <div class="connection-card">
+        <div><span>Session</span><strong id="session-status">Waiting for signed link</strong></div>
+        <div><span>Guild</span><strong id="session-guild">-</strong></div>
+        <div><span>User</span><strong id="session-user">-</strong></div>
+        <div><span>API</span><strong id="session-api">-</strong></div>
       </div>
 
       <div class="actions">
-        <button id="load-inventory" type="button">Load Inventory</button>
+        <button id="load-inventory" type="button">Refresh Inventory</button>
         <button id="save-inventory" type="button" class="secondary">Save Changes</button>
       </div>
 
