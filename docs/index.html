@@ -16,7 +16,7 @@
   <header class="hero">
     <p class="eyebrow">KITTAYYYYYYY</p>
     <h1>Web Hub</h1>
-    <p class="subtitle">Wiki + cat browser without spamming slash commands.</p>
+    <p class="subtitle">Wiki, features, and cat browser without spamming slash commands.</p>
   </header>
 
   <main class="layout">
@@ -26,16 +26,53 @@
     </nav>
 
     <section id="panel-wiki" class="panel is-active">
+      <nav class="wiki-tabs" aria-label="Wiki sections">
+        <button id="wiki-tab-commands" class="wiki-tab-btn is-active" type="button">Commands</button>
+        <button id="wiki-tab-cats" class="wiki-tab-btn" type="button">Cats</button>
+        <button id="wiki-tab-features" class="wiki-tab-btn" type="button">Features</button>
+      </nav>
+
+      <section id="wiki-section-commands" class="wiki-section is-active">
       <div class="panel-header">
         <h2>Command Wiki</h2>
         <input id="wiki-search" type="search" placeholder="Search commands..." />
       </div>
       <div id="wiki-commands" class="wiki-grid"></div>
+      </section>
 
-      <div class="panel-header second">
-        <h2>Cat Types</h2>
-      </div>
-      <div id="wiki-cats" class="cats-grid"></div>
+      <section id="wiki-section-cats" class="wiki-section">
+        <div class="panel-header">
+          <h2>Cat Types</h2>
+          <p class="muted">Browse rarity weights and seasonal types.</p>
+        </div>
+        <div id="wiki-cats" class="cats-grid"></div>
+      </section>
+
+      <section id="wiki-section-features" class="wiki-section">
+        <div class="panel-header">
+          <h2>Features</h2>
+          <a class="invite-link" href="https://discord.gg/hAydAUTzT" target="_blank" rel="noreferrer">Join the server</a>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>Inventory Browser</h3>
+            <p>Open your inventory from the bot and browse cats in a cleaner web view. You can search by name or type, inspect a cat, rename it, play with it, and use supported items on it. You cannot give yourself items, packs, or cats from the site.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Trading</h3>
+            <p>Trading is built for moving cats and resources between players inside Discord. The web hub does not replace trades; it only documents the flow so you know when to use /trade instead of the browser.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Gifting</h3>
+            <p>/gift is for handing cats or allowed resources to someone else. The web UI intentionally blocks self-grants, so any item or cat you use here still comes from your own inventory.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Cat Actions</h3>
+            <p>From the inventory browser, the action panel lets you rename a cat, toggle favorite, play to increase bond, and use supported bond items such as balls, dog treats, pancakes, and seasonal toys.</p>
+          </article>
+        </div>
+      </section>
     </section>
 
     <section id="panel-inventory" class="panel">
@@ -74,9 +111,7 @@
 
           <h3>Your Cats</h3>
           <div id="cats-grid" class="wiki-grid"></div>
-        </section>
 
-        <aside class="inventory-sidebar">
           <div class="detail-card hidden" id="cat-detail-card">
             <div class="panel-header">
               <h3 id="cat-detail-title">Selected Cat</h3>
@@ -116,7 +151,7 @@
             <h3>Cats</h3>
             <div id="cats-readonly" class="readonly"></div>
           </div>
-        </aside>
+        </section>
       </div>
     </section>
   </main>

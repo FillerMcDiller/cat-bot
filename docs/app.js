@@ -47,6 +47,7 @@ let webSession = {
 };
 let currentInventory = null;
 let selectedCatId = "";
+let currentWikiTab = "commands";
 
 function qs(id) {
   return document.getElementById(id);
@@ -62,6 +63,17 @@ function switchTab(tab) {
   if (tabInventory) tabInventory.classList.toggle("is-active", !isWiki);
   if (panelWiki) panelWiki.classList.toggle("is-active", isWiki);
   if (panelInventory) panelInventory.classList.toggle("is-active", !isWiki);
+}
+
+function switchWikiTab(tab) {
+  currentWikiTab = tab;
+  const tabs = ["commands", "cats", "features"];
+  for (const key of tabs) {
+    const button = qs(`wiki-tab-${key}`);
+    const section = qs(`wiki-section-${key}`);
+    if (button) button.classList.toggle("is-active", key === tab);
+    if (section) section.classList.toggle("is-active", key === tab);
+  }
 }
 
 function readSessionFromUrl() {
@@ -236,6 +248,7 @@ function renderCatDetails(cat) {
 
 function renderCatsPanel() {
   const holder = qs("cats-grid");
+  const detailCard = qs("cat-detail-card");
   if (!holder) {
     return;
   }
@@ -247,12 +260,14 @@ function renderCatsPanel() {
     return;
   }
 
+  let selectedCard = null;
   for (const cat of cats) {
     const card = document.createElement("article");
     card.className = "cat-card inventory-cat";
     const selected = cat.id === selectedCatId;
     if (selected) {
       card.classList.add("selected");
+      selectedCard = card;
     }
     card.innerHTML = `
       <h3 class="cmd-name">${normalizeCatName(cat)}</h3>
@@ -274,6 +289,17 @@ function renderCatsPanel() {
     renderCatDetails(selected);
     return;
   }
+
+  if (detailCard) {
+    detailCard.classList.toggle("hidden", !selected);
+    if (selected) {
+      holder.appendChild(detailCard);
+      if (selectedCard && selectedCard.nextSibling !== detailCard) {
+        holder.insertBefore(detailCard, selectedCard.nextSibling);
+      }
+    }
+  }
+
   renderCatDetails(selected);
 }
 
@@ -366,6 +392,9 @@ function init() {
 
   qs("tab-wiki")?.addEventListener("click", () => switchTab("wiki"));
   qs("tab-inventory")?.addEventListener("click", () => switchTab("inventory"));
+  qs("wiki-tab-commands")?.addEventListener("click", () => switchWikiTab("commands"));
+  qs("wiki-tab-cats")?.addEventListener("click", () => switchWikiTab("cats"));
+  qs("wiki-tab-features")?.addEventListener("click", () => switchWikiTab("features"));
   qs("wiki-search")?.addEventListener("input", renderCommandsWiki);
   qs("cat-search")?.addEventListener("input", renderCatsPanel);
   qs("load-inventory")?.addEventListener("click", loadInventory);
@@ -415,6 +444,7 @@ function init() {
   });
 
   bootWiki();
+  switchWikiTab("commands");
   if (webSession.sid) {
     switchTab("inventory");
   } else if (webSession.tab === "inventory") {

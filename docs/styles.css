@@ -81,6 +81,36 @@ h1 {
   margin-bottom: 12px;
 }
 
+.wiki-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.wiki-tab-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wiki-tab-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.wiki-section {
+  display: none;
+}
+
+.wiki-section.is-active {
+  display: block;
+}
+
 .tab-btn {
   border: 1px solid var(--line);
   background: #fff;
@@ -141,6 +171,31 @@ input[type="number"] {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.feature-card {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.invite-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: var(--ink);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
 }
 
 .wiki-card,
@@ -273,22 +328,11 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
 }
 
 .inventory-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
 }
 
 .inventory-main {
   min-width: 0;
-}
-
-.inventory-sidebar {
-  position: sticky;
-  top: 16px;
-  align-self: start;
-  display: grid;
-  gap: 12px;
 }
 
 .sidebar-block {
@@ -321,7 +365,8 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
   background: linear-gradient(180deg, #fff 0%, #fff8f0 100%);
   border-radius: 18px;
   padding: 14px;
-  margin: 16px 0;
+  margin: 16px 0 18px;
+  grid-column: 1 / -1;
 }
 
 .detail-stats {
@@ -375,12 +420,8 @@ button.tiny { margin-top: 8px; padding: 6px 10px; font-size: 12px; }
 @media (max-width: 640px) {
   .actions { flex-direction: column; }
   .kv-row { grid-template-columns: 1fr; }
-  .inventory-topbar,
-  .inventory-shell {
+  .inventory-topbar {
     grid-template-columns: 1fr;
-  }
-  .inventory-sidebar {
-    position: static;
   }
   .detail-actions,
   .detail-actions.secondary-row {

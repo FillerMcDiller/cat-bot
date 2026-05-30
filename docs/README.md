@@ -4,13 +4,15 @@ This folder is a static site intended for GitHub Pages.
 
 ## What it includes
 
-- Wiki section:
-  - Command list from docs/data/commands.json
-  - Cat type rarity list
-- Inventory Manager section:
+- Wiki sections:
+  - Commands
+  - Cats
+  - Features
+- Inventory Viewer section:
   - Opens from the bot's signed "Use Web UI" inventory button
   - Auto-loads the matching guild/user inventory from the URL token
-  - Updates kibble, packs, and items via GET/POST /api/inventory
+  - Lets you search cats, rename them, play with them, toggle favorites, and use supported items
+  - Does not allow self-grants or direct inventory editing
 
 ## Publish on GitHub Pages
 

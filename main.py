@@ -8660,7 +8660,7 @@ async def on_message(message: discord.Message):
         try:
             person = await bot.fetch_user(int(things[1]))
             await person.send(
-                f"**You have recieved {things[2]} minutes of Cat Rain!** ☔\n\nThanks for your support!\nYou can start a rain with `/rain`. By buying you also get access to `/editprofile` command as well as a role in [our Discord server](<https://discord.gg/Zx6em4AEq2>), where you can also get a decorative custom cat!\n\nEnjoy your goods!"
+                f"**You have recieved {things[2]} minutes of Cat Rain!** ☔\n\nThanks for your support!\nYou can start a rain with `/rain`. By buying you also get access to `/editprofile` command as well as a role in [our Discord server](<https://discord.gg/hAydAUTzT>), where you can also get a decorative custom cat!\n\nEnjoy your goods!"
             )
         except Exception:
             pass
@@ -9280,18 +9280,18 @@ async def on_message(message: discord.Message):
                         url="https://top.gg/bot/1387305159264309399/vote",
                     )
                 elif random.randint(0, 20) == 0:
-                    button = Button(label="Join our Discord!", url="https://discord.gg/Zx6em4AEq2")
+                    button = Button(label="Join our Discord!", url="https://discord.gg/hAydAUTzT")
                 elif random.randint(0, 500) == 0:
-                    button = Button(label="John Discord 🤠", url="https://discord.gg/Zx6em4AEq2")
+                    button = Button(label="John Discord 🤠", url="https://discord.gg/hAydAUTzT")
                 elif random.randint(0, 50000) == 0:
                     button = Button(
                         label="DAVE DISCORD 😀💀⚠️🥺",
-                        url="https://discord.gg/Zx6em4AEq2",
+                        url="https://discord.gg/hAydAUTzT",
                     )
                 elif random.randint(0, 5000000) == 0:
                     button = Button(
                         label="JOHN AND DAVE HAD A SON 💀🤠😀⚠️🥺",
-                        url="https://discord.gg/Zx6em4AEq2",
+                        url="https://discord.gg/hAydAUTzT",
                     )
 
                 if button:
@@ -9670,7 +9670,7 @@ async def on_guild_join(guild):
         if ch.permissions_for(guild.me).send_messages:
             await ch.send(
                 unofficial_note
-                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/Zx6em4AEq2 \nHave a nice day/night :)"
+                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/hAydAUTzT \nHave a nice day/night :)"
             )
     except Exception:
         pass
@@ -9715,7 +9715,7 @@ async def help(message):
         )
         .add_field(
             name="Other features",
-            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/Zx6em4AEq2).\n\n**Need help?** Use `/support` for assistance!",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/hAydAUTzT).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
         .set_footer(
@@ -9881,7 +9881,7 @@ async def support(message: discord.Interaction):
         embed.description = (
             "Need help with KITTAYYYYYYY?\n\n"
             "🔗 **Join our Discord server for support:**\n"
-            "https://discord.gg/Zx6em4AEq2\n\n"
+            "https://discord.gg/hAydAUTzT\n\n"
             "Once there, visit **#‼️kittay-support‼️** to create a support thread!\n\n"
             "📚 **Also check out:**\n"
             "• [KITTAYYYYYYY Wiki](https://wiki.minkos.lol) for guides and info\n"
@@ -22933,7 +22933,7 @@ async def reset(message: discord.Interaction, person_id: discord.User):
                     p.guild_id = og.id
                     await p.save()
                 await interaction.edit_original_response(
-                    content=f"Done! rip {person_id.mention}. f's in chat.\njoin our discord to rollback: <https://discord.gg/Zx6em4AEq2>", view=None
+                    content=f"Done! rip {person_id.mention}. f's in chat.\njoin our discord to rollback: <https://discord.gg/hAydAUTzT>", view=None
                 )
             except Exception:
                 await interaction.edit_original_response(
@@ -23000,11 +23000,11 @@ async def nuke(message: discord.Interaction):
 
                 try:
                     await interaction.edit_original_response(
-                        content="Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/Zx6em4AEq2>.",
+                        content="Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/hAydAUTzT>.",
                         view=None,
                     )
                 except Exception:
-                    await interaction.followup.send("Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/Zx6em4AEq2>.")
+                    await interaction.followup.send("Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/hAydAUTzT>.")
             else:
                 view = await gen(counter)
                 try:
