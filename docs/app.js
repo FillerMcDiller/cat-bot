@@ -61,8 +61,10 @@ function switchTab(tab) {
 
 function readSessionFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const sid = params.get("sid") || params.get("session") || "";
-  const apiBase = (params.get("api") || params.get("base") || "").replace(/\/$/, "");
+  const rawUrl = window.location.href;
+  const sid = params.get("sid") || params.get("session") || (rawUrl.match(/[?&]sid=([^&#]+)/)?.[1] ? decodeURIComponent(rawUrl.match(/[?&]sid=([^&#]+)/)[1]) : "") || "";
+  const apiValue = params.get("api") || params.get("base") || (rawUrl.match(/[?&]api=([^&#]+)/)?.[1] ? decodeURIComponent(rawUrl.match(/[?&]api=([^&#]+)/)[1]) : "") || "";
+  const apiBase = apiValue.replace(/\/$/, "");
   const tab = params.get("tab") || window.location.hash.replace(/^#/, "");
 
   webSession = {
