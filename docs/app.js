@@ -45,6 +45,8 @@ let webSession = {
   apiBase: "",
   tab: "wiki"
 };
+let currentInventory = null;
+let selectedCatId = "";
 
 function qs(id) {
   return document.getElementById(id);
@@ -52,10 +54,14 @@ function qs(id) {
 
 function switchTab(tab) {
   const isWiki = tab === "wiki";
-  qs("tab-wiki").classList.toggle("is-active", isWiki);
-  qs("tab-inventory").classList.toggle("is-active", !isWiki);
-  qs("panel-wiki").classList.toggle("is-active", isWiki);
-  qs("panel-inventory").classList.toggle("is-active", !isWiki);
+  const tabWiki = qs("tab-wiki");
+  const tabInventory = qs("tab-inventory");
+  const panelWiki = qs("panel-wiki");
+  const panelInventory = qs("panel-inventory");
+  if (tabWiki) tabWiki.classList.toggle("is-active", isWiki);
+  if (tabInventory) tabInventory.classList.toggle("is-active", !isWiki);
+  if (panelWiki) panelWiki.classList.toggle("is-active", isWiki);
+  if (panelInventory) panelInventory.classList.toggle("is-active", !isWiki);
 }
 
 function readSessionFromUrl() {
@@ -76,10 +82,14 @@ function readSessionFromUrl() {
 }
 
 function setConnectionStatus() {
-  qs("session-status").textContent = webSession.sid ? "Connected" : "Waiting for signed link";
-  qs("session-guild").textContent = webSession.sid ? "Auto-detected" : "-";
-  qs("session-user").textContent = webSession.sid ? "Auto-detected" : "-";
-  qs("session-api").textContent = webSession.apiBase || "-";
+  const status = qs("session-status");
+  const guild = qs("session-guild");
+  const user = qs("session-user");
+  const api = qs("session-api");
+  if (status) status.textContent = webSession.sid ? "Connected" : "Waiting for signed link";
+  if (guild) guild.textContent = webSession.sid ? "Auto-detected" : "-";
+  if (user) user.textContent = webSession.sid ? "Auto-detected" : "-";
+  if (api) api.textContent = webSession.apiBase || "-";
 }
 
 function renderDebugInfo(debugState) {
@@ -98,8 +108,22 @@ function renderDebugInfo(debugState) {
   ].join("\n");
 }
 
+function showElement(id, shouldShow) {
+  const node = qs(id);
+  if (node) {
+    node.classList.toggle("hidden", !shouldShow);
+  }
+}
+
+function textOf(value) {
+  return value === undefined || value === null || value === "" ? "-" : String(value);
+}
+
 function renderCatsWiki() {
   const holder = qs("wiki-cats");
+  if (!holder) {
+    return;
+  }
   holder.innerHTML = "";
   for (const cat of catTypes) {
     const card = document.createElement("article");
@@ -111,8 +135,13 @@ function renderCatsWiki() {
 }
 
 function renderCommandsWiki() {
-  const query = qs("wiki-search").value.trim().toLowerCase();
   const holder = qs("wiki-commands");
+  const search = qs("wiki-search");
+  if (!holder || !search) {
+    return;
+  }
+
+  const query = search.value.trim().toLowerCase();
   holder.innerHTML = "";
 
   const filtered = commands.filter((c) => {
@@ -157,15 +186,116 @@ function getAuthHeaders() {
   };
 }
 
-function renderCatsReadonly(cats) {
-  const holder = qs("cats-readonly");
-  const byType = (cats && cats.by_type) || {};
-  const entries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
-  if (!entries.length) {
-    holder.textContent = "No cats recorded for this profile yet.";
+function normalizeCatName(cat) {
+  return (cat?.name || cat?.type || "Unnamed").trim();
+}
+
+function getFilteredCats() {
+  const cats = currentInventory?.cats?.list || [];
+  const query = (qs("cat-search")?.value || "").trim().toLowerCase();
+  if (!query) {
+    return cats;
+  }
+  return cats.filter((cat) => {
+    const hay = `${cat?.name || ""} ${cat?.type || ""} ${cat?.id || ""}`.toLowerCase();
+    return hay.includes(query);
+  });
+}
+
+function renderCatDetails(cat) {
+  const card = qs("cat-detail-card");
+  if (!card) {
     return;
   }
-  holder.innerHTML = entries.slice(0, 40).map(([name, amount]) => `${name}: ${amount}`).join("<br>");
+  if (!cat) {
+    card.classList.add("hidden");
+    return;
+  }
+
+  card.classList.remove("hidden");
+  if (qs("cat-detail-title")) qs("cat-detail-title").textContent = `${normalizeCatName(cat)} — ${cat.type || "Unknown"}`;
+  if (qs("cat-detail-meta")) qs("cat-detail-meta").textContent = `ID ${cat.id || "?"}`;
+  if (qs("cat-detail-name")) qs("cat-detail-name").textContent = normalizeCatName(cat);
+  if (qs("cat-detail-bond")) qs("cat-detail-bond").textContent = String(cat.bond || 0);
+  if (qs("cat-detail-favorite")) qs("cat-detail-favorite").textContent = cat.favorite ? "Yes" : "No";
+  if (qs("cat-detail-adventure")) qs("cat-detail-adventure").textContent = cat.on_adventure ? "Yes" : "No";
+  if (qs("cat-rename-input")) qs("cat-rename-input").value = normalizeCatName(cat);
+
+  const itemSelect = qs("cat-item-select");
+  if (itemSelect) {
+    const items = currentInventory?.items || {};
+    const supported = Object.entries(items)
+      .filter(([key, amount]) => amount > 0 && /^(ball|dogtreat|pancakes|candy_cane|gingerbread|hot_cocoa|present|ornament|festive_toy|snowglobe)_[A-Z0-9]+$/i.test(key))
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    itemSelect.innerHTML = supported.length
+      ? supported.map(([key, amount]) => `<option value="${key}">${key} x${amount}</option>`).join("")
+      : `<option value="">No supported items</option>`;
+    itemSelect.disabled = !supported.length;
+  }
+}
+
+function renderCatsPanel() {
+  const holder = qs("cats-grid");
+  if (!holder) {
+    return;
+  }
+  const cats = getFilteredCats();
+  holder.innerHTML = "";
+  if (!cats.length) {
+    holder.innerHTML = `<p class="muted">No cats matched your search.</p>`;
+    renderCatDetails(null);
+    return;
+  }
+
+  for (const cat of cats) {
+    const card = document.createElement("article");
+    card.className = "cat-card inventory-cat";
+    const selected = cat.id === selectedCatId;
+    if (selected) {
+      card.classList.add("selected");
+    }
+    card.innerHTML = `
+      <h3 class="cmd-name">${normalizeCatName(cat)}</h3>
+      <p class="cmd-desc">${cat.type || "Unknown"}</p>
+      <p class="muted">Bond ${textOf(cat.bond)}${cat.favorite ? " · Favorite" : ""}${cat.on_adventure ? " · Adventuring" : ""}</p>
+    `;
+    card.addEventListener("click", () => {
+      selectedCatId = cat.id || "";
+      renderCatsPanel();
+      renderCatDetails(cat);
+    });
+    holder.appendChild(card);
+  }
+
+  const selected = cats.find((cat) => cat.id === selectedCatId) || cats[0];
+  if (selected && selectedCatId !== selected.id) {
+    selectedCatId = selected.id || "";
+    renderCatsPanel();
+    renderCatDetails(selected);
+    return;
+  }
+  renderCatDetails(selected);
+}
+
+function renderInventorySummary(inventory) {
+  if (qs("inv-kibble")) qs("inv-kibble").textContent = textOf(inventory.kibble || 0);
+  if (qs("inv-cat-total")) qs("inv-cat-total").textContent = textOf(inventory.cats?.total || 0);
+  if (qs("inv-pack-types")) qs("inv-pack-types").textContent = textOf(Object.keys(inventory.packs || {}).length);
+  if (qs("inv-item-types")) qs("inv-item-types").textContent = textOf(Object.keys(inventory.items || {}).length);
+
+  const packs = inventory.packs || {};
+  const packEntries = Object.entries(packs).sort((a, b) => a[0].localeCompare(b[0]));
+  const packNode = qs("packs-readonly");
+  if (packNode) {
+    packNode.innerHTML = packEntries.length ? packEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>") : "No packs recorded for this profile yet.";
+  }
+
+  const items = inventory.items || {};
+  const itemEntries = Object.entries(items).sort((a, b) => a[0].localeCompare(b[0]));
+  const itemNode = qs("items-readonly");
+  if (itemNode) {
+    itemNode.innerHTML = itemEntries.length ? itemEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>") : "No items recorded for this profile yet.";
+  }
 }
 
 async function loadInventory() {
@@ -183,30 +313,39 @@ async function loadInventory() {
     if (!res.ok || !body.ok) {
       throw new Error(body.error || "Failed to load inventory");
     }
-    const inventory = body.inventory || {};
-    qs("inventory-view").classList.remove("hidden");
-    qs("inv-kibble").textContent = String(inventory.kibble || 0);
-    qs("inv-cat-total").textContent = String(inventory.cats?.total || 0);
-    qs("inv-pack-types").textContent = String(Object.keys(inventory.packs || {}).length);
-    qs("inv-item-types").textContent = String(Object.keys(inventory.items || {}).length);
-
-    const packs = inventory.packs || {};
-    const packEntries = Object.entries(packs).sort((a, b) => a[0].localeCompare(b[0]));
-    qs("packs-readonly").innerHTML = packEntries.length
-      ? packEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>")
-      : "No packs recorded for this profile yet.";
-
-    const items = inventory.items || {};
-    const itemEntries = Object.entries(items).sort((a, b) => a[0].localeCompare(b[0]));
-    qs("items-readonly").innerHTML = itemEntries.length
-      ? itemEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>")
-      : "No items recorded for this profile yet.";
-
-    renderCatsReadonly(inventory.cats || {});
+    currentInventory = body.inventory || {};
+    showElement("inventory-view", true);
+    renderInventorySummary(currentInventory);
+    renderCatsPanel();
     setStatus("Inventory loaded.");
   } catch (err) {
     setStatus(err.message || String(err), true);
   }
+}
+
+async function performInventoryAction(action, extra = {}) {
+  if (!webSession.sid) {
+    throw new Error("Missing inventory session");
+  }
+  if (!selectedCatId) {
+    throw new Error("Select a cat first");
+  }
+
+  const res = await fetch(`${getApiBase()}/api/inventory/action`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify({ action, cat_id: selectedCatId, ...extra })
+  });
+  const body = await res.json();
+  if (!res.ok || !body.ok) {
+    throw new Error(body.error || "Inventory action failed");
+  }
+  currentInventory = body.inventory || currentInventory;
+  renderInventorySummary(currentInventory);
+  renderCatsPanel();
 }
 
 async function bootWiki() {
@@ -225,10 +364,55 @@ function init() {
   setConnectionStatus();
   renderDebugInfo(debugState);
 
-  qs("tab-wiki").addEventListener("click", () => switchTab("wiki"));
-  qs("tab-inventory").addEventListener("click", () => switchTab("inventory"));
-  qs("wiki-search").addEventListener("input", renderCommandsWiki);
-  qs("load-inventory").addEventListener("click", loadInventory);
+  qs("tab-wiki")?.addEventListener("click", () => switchTab("wiki"));
+  qs("tab-inventory")?.addEventListener("click", () => switchTab("inventory"));
+  qs("wiki-search")?.addEventListener("input", renderCommandsWiki);
+  qs("cat-search")?.addEventListener("input", renderCatsPanel);
+  qs("load-inventory")?.addEventListener("click", loadInventory);
+  qs("cat-rename-button")?.addEventListener("click", async () => {
+    try {
+      const nextName = (qs("cat-rename-input")?.value || "").trim();
+      if (!nextName) {
+        throw new Error("Enter a new name first");
+      }
+      await performInventoryAction("rename", { new_name: nextName });
+      setStatus("Cat renamed.");
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  });
+  qs("cat-favorite-button")?.addEventListener("click", async () => {
+    try {
+      await performInventoryAction("favorite");
+      setStatus("Favorite updated.");
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  });
+  qs("cat-play-button")?.addEventListener("click", async () => {
+    try {
+      await performInventoryAction("play");
+      setStatus("Played with cat.");
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  });
+  qs("cat-item-button")?.addEventListener("click", async () => {
+    try {
+      const itemKey = qs("cat-item-select")?.value || "";
+      if (!itemKey) {
+        throw new Error("No supported item selected");
+      }
+      const match = itemKey.match(/^(.+)_([A-Z0-9]+)$/i);
+      if (!match) {
+        throw new Error("Invalid item selection");
+      }
+      await performInventoryAction("use_item", { item_key: match[1], tier: match[2] });
+      setStatus("Item used.");
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  });
 
   bootWiki();
   if (webSession.sid) {

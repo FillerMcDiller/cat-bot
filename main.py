@@ -23290,6 +23290,7 @@ def _extract_inventory_token(request: web.Request) -> str:
 async def _inventory_payload(guild_id: int, user_id: int) -> dict:
     profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
     items = await get_user_items(guild_id, user_id)
+    cat_instances = await get_user_cats(guild_id, user_id)
 
     packs = {}
     for pack in pack_data:
@@ -23298,13 +23299,13 @@ async def _inventory_payload(guild_id: int, user_id: int) -> dict:
         if amount > 0:
             packs[pack["name"].lower()] = amount
 
-    cats = {}
+    cat_counts = {}
     for cat in cattypes:
         count = _read_profile_int(profile, f"cat_{cat}")
         if count > 0:
-            cats[cat] = count
+            cat_counts[cat] = count
 
-    total_cats = sum(cats.values())
+    total_cats = sum(cat_counts.values())
 
     return {
         "guild_id": guild_id,
@@ -23313,10 +23314,94 @@ async def _inventory_payload(guild_id: int, user_id: int) -> dict:
         "packs": packs,
         "items": items,
         "cats": {
+            "total": len(cat_instances),
+            "list": cat_instances,
+        },
+        "cat_counts": {
             "total": total_cats,
-            "by_type": cats,
+            "by_type": cat_counts,
         },
     }
+
+
+WEB_ACTIONABLE_BOND_ITEMS = {"ball", "dogtreat", "pancakes", "candy_cane", "gingerbread", "hot_cocoa", "present", "ornament", "festive_toy", "snowglobe"}
+
+
+async def web_ui_inventory_action(request: web.Request) -> web.Response:
+    origin = request.headers.get("Origin")
+    sid = _extract_inventory_token(request)
+    session = _resolve_inventory_session(sid)
+    if not session:
+        return _web_json({"error": "unauthorized"}, status=401, origin=origin)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _web_json({"error": "invalid json"}, status=400, origin=origin)
+
+    action = str(body.get("action", "")).strip().lower()
+    cat_id = str(body.get("cat_id", "")).strip()
+
+    try:
+        guild_id = int(session.get("guild_id", 0))
+        user_id = int(session.get("user_id", 0))
+    except Exception:
+        return _web_json({"error": "invalid guild_id or user_id"}, status=400, origin=origin)
+
+    if guild_id <= 0 or user_id <= 0:
+        return _web_json({"error": "guild_id and user_id are required"}, status=400, origin=origin)
+
+    cats = await get_user_cats(guild_id, user_id)
+    inst = next((c for c in cats if str(c.get("id", "")) == cat_id), None)
+    if not inst:
+        return _web_json({"error": "cat not found"}, status=404, origin=origin)
+
+    if action == "rename":
+        new_name = str(body.get("new_name", "")).strip()
+        if not new_name:
+            return _web_json({"error": "new_name is required"}, status=400, origin=origin)
+        inst["name"] = new_name[:32]
+        await save_user_cats(guild_id, user_id, cats)
+    elif action == "favorite":
+        inst["favorite"] = not bool(inst.get("favorite", False))
+        await save_user_cats(guild_id, user_id, cats)
+    elif action == "play":
+        old_bond = int(inst.get("bond", 0))
+        gain = random.randint(1, 3)
+        inst["bond"] = old_bond + gain
+        apply_bond_level_stats(inst, old_bond, inst["bond"])
+        await save_user_cats(guild_id, user_id, cats)
+    elif action == "use_item":
+        item_key = str(body.get("item_key", "")).strip()
+        tier = str(body.get("tier", "")).strip()
+        if not item_key or not tier:
+            return _web_json({"error": "item_key and tier are required"}, status=400, origin=origin)
+        if item_key not in WEB_ACTIONABLE_BOND_ITEMS:
+            return _web_json({"error": "this item cannot be used from the web UI"}, status=400, origin=origin)
+
+        items = await get_user_items(guild_id, user_id)
+        item_full_key = f"{item_key}_{tier}"
+        have = int(items.get(item_full_key, 0))
+        if have <= 0:
+            return _web_json({"error": "you do not have that item anymore"}, status=400, origin=origin)
+
+        items[item_full_key] = max(0, have - 1)
+        await save_user_items(guild_id, user_id, items)
+
+        old_bond = int(inst.get("bond", 0))
+        if item_key == "pancakes":
+            level, _, max_for_level = get_bond_level_and_progress(old_bond)
+            inst["bond"] = (level - 1) * 100 + max_for_level
+        else:
+            bond_amt = SHOP_ITEMS.get(item_key, {}).get("tiers", {}).get(tier, {}).get("bond", 0)
+            inst["bond"] = old_bond + int(bond_amt)
+        apply_bond_level_stats(inst, old_bond, inst["bond"])
+        await save_user_cats(guild_id, user_id, cats)
+    else:
+        return _web_json({"error": "unsupported action"}, status=400, origin=origin)
+
+    payload = await _inventory_payload(guild_id, user_id)
+    return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
 
 
 def build_inventory_web_url(guild_id: int, user_id: int) -> str | None:
@@ -23456,6 +23541,7 @@ async def setup(bot2):
                 web.post("/supporter", check_supporter),
                 web.options("/api/inventory", web_ui_preflight),
                 web.get("/api/inventory", web_ui_inventory_get),
+                web.post("/api/inventory/action", web_ui_inventory_action),
             ]
         )
         vote_server = web.AppRunner(app)
