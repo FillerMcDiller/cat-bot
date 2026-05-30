@@ -23316,7 +23316,6 @@ async def _inventory_payload(guild_id: int, user_id: int) -> dict:
             "total": total_cats,
             "by_type": cats,
         },
-        "editable_fields": ["kibble", "packs", "items"],
     }
 
 
@@ -23359,81 +23358,6 @@ async def web_ui_inventory_get(request: web.Request) -> web.Response:
 
     if guild_id <= 0 or user_id <= 0:
         return _web_json({"error": "guild_id and user_id are required"}, status=400, origin=origin)
-
-    payload = await _inventory_payload(guild_id, user_id)
-    return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
-
-
-async def web_ui_inventory_update(request: web.Request) -> web.Response:
-    origin = request.headers.get("Origin")
-    sid = _extract_inventory_token(request)
-    session = _resolve_inventory_session(sid)
-    if not session:
-        return _web_json({"error": "unauthorized"}, status=401, origin=origin)
-
-    try:
-        body = await request.json()
-    except Exception:
-        return _web_json({"error": "invalid json"}, status=400, origin=origin)
-
-    try:
-        guild_id = int(session.get("guild_id", 0))
-        user_id = int(session.get("user_id", 0))
-    except Exception:
-        return _web_json({"error": "invalid guild_id or user_id"}, status=400, origin=origin)
-
-    if guild_id <= 0 or user_id <= 0:
-        return _web_json({"error": "guild_id and user_id are required"}, status=400, origin=origin)
-
-    profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
-    touched_profile = False
-
-    if "kibble" in body:
-        try:
-            new_kibble = max(0, int(body.get("kibble", 0)))
-        except Exception:
-            return _web_json({"error": "kibble must be an integer"}, status=400, origin=origin)
-        profile.kibble = new_kibble
-        touched_profile = True
-
-    if "packs" in body:
-        packs_obj = body.get("packs")
-        if not isinstance(packs_obj, dict):
-            return _web_json({"error": "packs must be an object"}, status=400, origin=origin)
-
-        for pack in pack_data:
-            key = pack["name"].lower()
-            if key in packs_obj:
-                try:
-                    amount = max(0, int(packs_obj[key]))
-                except Exception:
-                    return _web_json({"error": f"invalid pack amount for {key}"}, status=400, origin=origin)
-                setattr(profile, f"pack_{key}", amount)
-                touched_profile = True
-
-    if touched_profile:
-        await profile.save()
-
-    if "items" in body:
-        items_obj = body.get("items")
-        if not isinstance(items_obj, dict):
-            return _web_json({"error": "items must be an object"}, status=400, origin=origin)
-
-        cleaned_items = {}
-        for raw_key, raw_count in items_obj.items():
-            item_key = str(raw_key).strip()
-            if not item_key:
-                continue
-            if not re.fullmatch(r"[a-zA-Z0-9_]{1,80}", item_key):
-                return _web_json({"error": f"invalid item key: {item_key}"}, status=400, origin=origin)
-            try:
-                count = int(raw_count)
-            except Exception:
-                return _web_json({"error": f"invalid item count for {item_key}"}, status=400, origin=origin)
-            if count > 0:
-                cleaned_items[item_key] = count
-
-        await save_user_items(guild_id, user_id, cleaned_items)
 
     payload = await _inventory_payload(guild_id, user_id)
     return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
@@ -23532,7 +23456,6 @@ async def setup(bot2):
                 web.post("/supporter", check_supporter),
                 web.options("/api/inventory", web_ui_preflight),
                 web.get("/api/inventory", web_ui_inventory_get),
-                web.post("/api/inventory", web_ui_inventory_update),
             ]
         )
         vote_server = web.AppRunner(app)

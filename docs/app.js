@@ -45,7 +45,6 @@ let webSession = {
   apiBase: "",
   tab: "wiki"
 };
-let loadedInventory = null;
 
 function qs(id) {
   return document.getElementById(id);
@@ -154,48 +153,8 @@ function getAuthHeaders() {
     throw new Error("Missing inventory session");
   }
   return {
-    "Content-Type": "application/json",
     "X-Inventory-Session": webSession.sid
   };
-}
-
-function renderPacksEditor(packs) {
-  const holder = qs("packs-editor");
-  holder.innerHTML = "";
-  const known = ["wooden", "stone", "bronze", "silver", "gold", "platinum", "diamond", "celestial", "festive"];
-  for (const key of known) {
-    const row = document.createElement("div");
-    row.className = "kv-row";
-    row.innerHTML = `
-      <input type="text" value="${key}" disabled>
-      <input type="number" min="0" step="1" data-pack="${key}" value="${packs[key] || 0}">
-    `;
-    holder.appendChild(row);
-  }
-}
-
-function addItemRow(itemKey = "", amount = 0) {
-  const holder = qs("items-editor");
-  const row = document.createElement("div");
-  row.className = "kv-row";
-  row.innerHTML = `
-    <input type="text" placeholder="item_key (example: candy_cane_I)" data-item-key value="${itemKey}">
-    <input type="number" min="0" step="1" data-item-count value="${amount}">
-  `;
-  holder.appendChild(row);
-}
-
-function renderItemsEditor(items) {
-  const holder = qs("items-editor");
-  holder.innerHTML = "";
-  const keys = Object.keys(items || {});
-  if (!keys.length) {
-    addItemRow("", 0);
-    return;
-  }
-  for (const key of keys) {
-    addItemRow(key, items[key]);
-  }
 }
 
 function renderCatsReadonly(cats) {
@@ -207,15 +166,6 @@ function renderCatsReadonly(cats) {
     return;
   }
   holder.innerHTML = entries.slice(0, 40).map(([name, amount]) => `${name}: ${amount}`).join("<br>");
-}
-
-function populateInventoryEditor(inventory) {
-  loadedInventory = inventory;
-  qs("inventory-editor").classList.remove("hidden");
-  qs("inv-kibble").value = inventory.kibble || 0;
-  renderPacksEditor(inventory.packs || {});
-  renderItemsEditor(inventory.items || {});
-  renderCatsReadonly(inventory.cats || {});
 }
 
 async function loadInventory() {
@@ -233,61 +183,27 @@ async function loadInventory() {
     if (!res.ok || !body.ok) {
       throw new Error(body.error || "Failed to load inventory");
     }
-    populateInventoryEditor(body.inventory);
+    const inventory = body.inventory || {};
+    qs("inventory-view").classList.remove("hidden");
+    qs("inv-kibble").textContent = String(inventory.kibble || 0);
+    qs("inv-cat-total").textContent = String(inventory.cats?.total || 0);
+    qs("inv-pack-types").textContent = String(Object.keys(inventory.packs || {}).length);
+    qs("inv-item-types").textContent = String(Object.keys(inventory.items || {}).length);
+
+    const packs = inventory.packs || {};
+    const packEntries = Object.entries(packs).sort((a, b) => a[0].localeCompare(b[0]));
+    qs("packs-readonly").innerHTML = packEntries.length
+      ? packEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>")
+      : "No packs recorded for this profile yet.";
+
+    const items = inventory.items || {};
+    const itemEntries = Object.entries(items).sort((a, b) => a[0].localeCompare(b[0]));
+    qs("items-readonly").innerHTML = itemEntries.length
+      ? itemEntries.map(([name, amount]) => `${name}: ${amount}`).join("<br>")
+      : "No items recorded for this profile yet.";
+
+    renderCatsReadonly(inventory.cats || {});
     setStatus("Inventory loaded.");
-  } catch (err) {
-    setStatus(err.message || String(err), true);
-  }
-}
-
-function gatherEditorPayload() {
-  if (!loadedInventory) {
-    throw new Error("Load inventory first");
-  }
-
-  const packs = {};
-  for (const node of document.querySelectorAll("[data-pack]")) {
-    packs[node.dataset.pack] = Number.parseInt(node.value || "0", 10) || 0;
-  }
-
-  const items = {};
-  const rows = qs("items-editor").querySelectorAll(".kv-row");
-  for (const row of rows) {
-    const keyNode = row.querySelector("[data-item-key]");
-    const countNode = row.querySelector("[data-item-count]");
-    const key = (keyNode.value || "").trim();
-    const count = Number.parseInt(countNode.value || "0", 10) || 0;
-    if (key && count > 0) {
-      items[key] = count;
-    }
-  }
-
-  return {
-    kibble: Number.parseInt(qs("inv-kibble").value || "0", 10) || 0,
-    packs,
-    items
-  };
-}
-
-async function saveInventory() {
-  try {
-    setStatus("Saving...");
-    if (!webSession.sid) {
-      throw new Error("Open this page from /inventory so it can sign your session automatically.");
-    }
-    const payload = gatherEditorPayload();
-    const url = `${getApiBase()}/api/inventory`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload)
-    });
-    const body = await res.json();
-    if (!res.ok || !body.ok) {
-      throw new Error(body.error || "Failed to save inventory");
-    }
-    populateInventoryEditor(body.inventory);
-    setStatus("Saved successfully.");
   } catch (err) {
     setStatus(err.message || String(err), true);
   }
@@ -313,8 +229,6 @@ function init() {
   qs("tab-inventory").addEventListener("click", () => switchTab("inventory"));
   qs("wiki-search").addEventListener("input", renderCommandsWiki);
   qs("load-inventory").addEventListener("click", loadInventory);
-  qs("save-inventory").addEventListener("click", saveInventory);
-  qs("add-item-row").addEventListener("click", () => addItemRow("", 0));
 
   bootWiki();
   if (webSession.sid) {

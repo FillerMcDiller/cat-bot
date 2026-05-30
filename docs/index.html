@@ -16,13 +16,13 @@
   <header class="hero">
     <p class="eyebrow">KITTAYYYYYYY</p>
     <h1>Web Hub</h1>
-    <p class="subtitle">Wiki + inventory tools without spamming slash commands.</p>
+    <p class="subtitle">Wiki + read-only inventory viewer without spamming slash commands.</p>
   </header>
 
   <main class="layout">
     <nav class="tabs">
       <button id="tab-wiki" class="tab-btn is-active" type="button">Wiki</button>
-      <button id="tab-inventory" class="tab-btn" type="button">Inventory Manager</button>
+      <button id="tab-inventory" class="tab-btn" type="button">Inventory Viewer</button>
     </nav>
 
     <section id="panel-wiki" class="panel is-active">
@@ -39,8 +39,8 @@
     </section>
 
     <section id="panel-inventory" class="panel">
-      <h2>Inventory Manager</h2>
-      <p class="note">Open this page from the <strong>Use Web UI</strong> button in /inventory and it will auto-connect to your profile.</p>
+      <h2>Inventory Viewer</h2>
+      <p class="note">Open this page from the <strong>Use Web UI</strong> button in /inventory and it will auto-connect to your profile. Inventory edits are disabled here.</p>
 
       <div class="connection-card">
         <div><span>Session</span><strong id="session-status">Waiting for signed link</strong></div>
@@ -53,27 +53,26 @@
 
       <div class="actions">
         <button id="load-inventory" type="button">Refresh Inventory</button>
-        <button id="save-inventory" type="button" class="secondary">Save Changes</button>
       </div>
 
       <p id="inventory-status" class="status"></p>
 
-      <div id="inventory-editor" class="editor hidden">
-        <label>Kibble
-          <input id="inv-kibble" type="number" min="0" step="1" />
-        </label>
+      <div id="inventory-view" class="editor hidden">
+        <div class="inventory-summary">
+          <div><span>Kibble</span><strong id="inv-kibble">0</strong></div>
+          <div><span>Total Cats</span><strong id="inv-cat-total">0</strong></div>
+          <div><span>Pack Types</span><strong id="inv-pack-types">0</strong></div>
+          <div><span>Item Types</span><strong id="inv-item-types">0</strong></div>
+        </div>
 
         <h3>Packs</h3>
-        <div id="packs-editor" class="kv-list"></div>
+        <div id="packs-readonly" class="readonly"></div>
 
         <h3>Items</h3>
-        <div id="items-editor" class="kv-list"></div>
-        <button id="add-item-row" type="button" class="tiny">Add Item Row</button>
+        <div id="items-readonly" class="readonly"></div>
 
-        <details>
-          <summary>Cat Totals (read-only)</summary>
-          <div id="cats-readonly" class="readonly"></div>
-        </details>
+        <h3>Cats</h3>
+        <div id="cats-readonly" class="readonly"></div>
       </div>
     </section>
   </main>
