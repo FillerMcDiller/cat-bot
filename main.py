@@ -75,15 +75,26 @@ import os
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
 
+
+def _load_json_file(path: str, fallback):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except json.JSONDecodeError as exc:
+        print(f"[STARTUP] Invalid JSON in {path}: {exc}. Using fallback.")
+    except FileNotFoundError:
+        print(f"[STARTUP] Missing JSON file: {path}. Using fallback.")
+    except Exception as exc:
+        print(f"[STARTUP] Failed to load {path}: {exc}. Using fallback.")
+    return fallback
+
 # Load aches.json
 ACHES_FILE = os.path.join(CONFIG_PATH, "aches.json")
-with open(ACHES_FILE, "r", encoding="utf-8-sig") as f:
-    aches_data = json.load(f)
+aches_data = _load_json_file(ACHES_FILE, {})
 
 # Load battlepass.json
 BATTLEPASS_FILE = os.path.join(CONFIG_PATH, "battlepass.json")
-with open(BATTLEPASS_FILE, "r", encoding="utf-8-sig") as f:
-    battlepass_data = json.load(f)
+battlepass_data = _load_json_file(BATTLEPASS_FILE, {})
 
 CHAT_PERSONALITY_FILE = os.path.join(CONFIG_PATH, "chat_personality.txt")
 try:
@@ -98,8 +109,7 @@ except Exception:
 
 # Load cosmetics.json
 COSMETICS_FILE = os.path.join(BASE_PATH, "data", "cosmetics.json")
-with open(COSMETICS_FILE, "r", encoding="utf-8") as f:
-    COSMETICS_DATA = json.load(f)
+COSMETICS_DATA = _load_json_file(COSMETICS_FILE, {})
 
 # Christmas features disabled until next year
 # Merge Christmas cosmetics into main cosmetics data
