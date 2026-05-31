@@ -1,0 +1,30 @@
+# Wiki.js config template
+# This is a template only. Do NOT mount this file directly as /var/wiki/config.yml
+# If you want to provide a config file, copy this to data/config.yml and replace placeholders.
+
+# Recommended: let Wiki.js generate its config automatically and use environment variables instead.
+
+# Example placeholders (replace values before copying):
+# db:
+#   type: postgres
+#   host: 127.0.0.1
+#   port: 5432
+#   user: wikijs
+#   pass: your_password
+#   db: wikijs
+#
+# server:
+#   host: 0.0.0.0
+#   port: 3000
+#
+# security:
+#   secret: REPLACE_WITH_A_LONG_RANDOM_SECRET
+#
+# storage:
+#   provider: local
+#   local:
+#     path: /var/wiki/uploads
+#
+# Notes:
+# - Using environment variables is simpler and preferred with Docker Compose.
+# - If you must use a config file, copy this template to data/config.yml, fill values, then start the container.
