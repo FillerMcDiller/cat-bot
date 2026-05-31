@@ -22228,12 +22228,12 @@ async def leaderboards(
     await lb_handler(message, leaderboard_type, leaderboard_scope, False, cat_type)
 
 
-@bot.tree.command(description="(ADMIN) Give cats to people")
-@discord.app_commands.default_permissions(manage_guild=True)
-@discord.app_commands.rename(person_id="user")
-@discord.app_commands.describe(person_id="who", amount="how many (negatives to remove)", cat_type="what")
-@discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
-async def givecat(message: discord.Interaction, person_id: discord.User, cat_type: str, amount: Optional[int]):
+#@bot.tree.command(description="(ADMIN) Give cats to people")
+#@discord.app_commands.default_permissions(manage_guild=True)
+#@discord.app_commands.rename(person_id="user")
+#@discord.app_commands.describe(person_id="who", amount="how many (negatives to remove)", cat_type="what")
+#@discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
+#async def givecat(message: discord.Interaction, person_id: discord.User, cat_type: str, amount: Optional[int]):
     if amount is None:
         amount = 1
     if cat_type not in cattypes:
@@ -22918,15 +22918,15 @@ async def forcespawn(message: discord.Interaction, cat_type: Optional[str], modi
     await ch.save()
     await spawn_cat(str(message.channel.id), cat_type, True, modifiers=modifier_list)
     
-    await message.followup.send(f"done!{modifier_display}\n**Note:** you can use `/givecat` to give yourself cats, there is no need to spam this")
+    await message.followup.send(f"done!{modifier_display}\n**Note:** you can use `/gift` to transfer cats, there is no need to spam this")
 
 
-@bot.tree.command(description="(ADMIN) Give achievements to people")
-@discord.app_commands.default_permissions(manage_guild=True)
-@discord.app_commands.rename(person_id="user", ach_id="name")
-@discord.app_commands.describe(person_id="who", ach_id="name or id of the achievement")
-@discord.app_commands.autocomplete(ach_id=ach_autocomplete)
-async def giveachievement(message: discord.Interaction, person_id: discord.User, ach_id: str):
+#@bot.tree.command(description="(ADMIN) Give achievements to people")
+#@discord.app_commands.default_permissions(manage_guild=True)
+#@discord.app_commands.rename(person_id="user", ach_id="name")
+#@discord.app_commands.describe(person_id="who", ach_id="name or id of the achievement")
+#@discord.app_commands.autocomplete(ach_id=ach_autocomplete)
+#async def giveachievement(message: discord.Interaction, person_id: discord.User, ach_id: str):
     # check if ach is real
     try:
         valid = ach_id in ach_names

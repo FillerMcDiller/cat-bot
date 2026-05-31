@@ -205,20 +205,11 @@
     "type": 1
   },
   {
-    "name": "giveachievement",
-    "description": "(ADMIN) Give achievements to people",
-    "type": 1
-  },
-  {
     "name": "giveaway",
     "description": "(ADMIN) Start a cat giveaway",
     "type": 1
   },
-  {
-    "name": "givecat",
-    "description": "(ADMIN) Give cats to people",
-    "type": 1
-  },
+  
   {
     "name": "givekibbles",
     "description": "(OWNER) Give kibbles to a user",

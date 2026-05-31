@@ -67,6 +67,12 @@ async def setup_hook():
             import traceback
             traceback.print_exc()
             raise
+        # Try to load the cat competition extension (optional)
+        try:
+            await bot.load_extension('cat_competition')
+            print("[BOT.PY] OK cat_competition loaded successfully!")
+        except Exception as ext_err:
+            print(f"[BOT.PY] WARNING failed to load cat_competition extension: {ext_err}")
         
         # Import the vote receiver function
         print("[BOT.PY] Importing start_internal_server...")
