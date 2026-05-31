@@ -291,6 +291,23 @@ textarea {
   line-height: 1.7;
 }
 
+.page .section {
+  margin: 0 0 18px;
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(115, 96, 73, 0.12);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.page .section:last-child {
+  margin-bottom: 0;
+}
+
+.page .section h2:first-child,
+.page .section h3:first-child {
+  margin-top: 0;
+}
+
 .page h2,
 .page h3,
 .page h4 {
