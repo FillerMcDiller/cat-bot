@@ -1,0 +1,23 @@
+<div class="section">
+  <h2>Catnip</h2>
+  <p>Catnip is the mafia/bounty system. It tracks a user's level, active timer, assigned bounties, and available perks using the configuration in <code>config/catnip.json</code>.</p>
+</div>
+
+<div class="section">
+  <h2>Bounties</h2>
+  <ul>
+    <li>Users can get up to three main bounties plus an optional bonus bounty.</li>
+    <li>Bounties can ask for any cats, a specific type, or a rarity threshold.</li>
+    <li>When the bounty set is complete, the bot tells you to go to <code>/catnip</code> to pay up and pick a perk.</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>Levels and perks</h2>
+  <p>The config defines level difficulty, bounty counts, cost, rarity weights, and perk pools. Perks are generated from weighted rarity tables and can include catch boosts, pack chances, rain triggers, and timer effects.</p>
+</div>
+
+<div class="section">
+  <h2>Key fields</h2>
+  <div class="codeblock">catnip_level / catnip_active / catnip_price / catnip_amount / bounty_progress_* / bounty_type_* / reroll</div>
+</div>

@@ -7,41 +7,73 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="wiki-app">
+  <div class="wiki-shell">
     <aside class="sidebar">
-      <div class="brand">Cat Wiki</div>
-      <nav>
-        <ul>
-          <li data-page="overview"><span class="icon">🏠</span><span class="label">Home</span></li>
-          <li data-page="info"><span class="icon">❓</span><span class="label">Wiki Info</span></li>
-          <li data-page="kittay"><span class="icon">🐱</span><span class="label">KITTAYYYYYYY</span></li>
-          <li data-page="spawning"><span class="icon">➕</span><span class="label">Cat Spawning</span></li>
-          <li data-page="commands"><span class="icon">✏️</span><span class="label">Commands</span></li>
-          <li data-page="cat-types"><span class="icon">📋</span><span class="label">Cat Types</span></li>
-          <li data-page="badges"><span class="icon">🏅</span><span class="label">Badges</span></li>
-          <li data-page="battlepass"><span class="icon">🎮</span><span class="label">Cattlepass</span></li>
-          <li data-page="achievements"><span class="icon">🏆</span><span class="label">Achievements</span></li>
-          <li data-page="rains"><span class="icon">🌧️</span><span class="label">Rains</span></li>
-          <li data-page="packs"><span class="icon">📦</span><span class="label">Packs</span></li>
-          <li data-page="trading"><span class="icon">↔️</span><span class="label">Trading</span></li>
-          <li data-page="catnip"><span class="icon">🍃</span><span class="label">Catnip</span></li>
-          <li data-page="prisms"><span class="icon">🔮</span><span class="label">Prisms</span></li>
-        </ul>
-      </nav>
+      <div class="brand-block">
+        <div class="brand-mark">🐱</div>
+        <div>
+          <div class="brand">Cat Wiki</div>
+          <div class="brand-subtitle">Unofficial docs for KITTAYYYYYYY</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Sections</div>
+        <nav>
+          <ul>
+            <li data-page="overview"><span class="icon">🏠</span><span class="label">Home</span></li>
+            <li data-page="info"><span class="icon">❓</span><span class="label">Wiki Info</span></li>
+            <li data-page="kittay"><span class="icon">🐱</span><span class="label">KITTAYYYYYYY</span></li>
+            <li data-page="spawning"><span class="icon">➕</span><span class="label">Cat Spawning</span></li>
+            <li data-page="commands"><span class="icon">✏️</span><span class="label">Commands</span></li>
+            <li data-page="cat-types"><span class="icon">📋</span><span class="label">Cat Types</span></li>
+            <li data-page="inventory"><span class="icon">🎒</span><span class="label">Inventory / Cats</span></li>
+            <li data-page="items-shop"><span class="icon">🛒</span><span class="label">Items / Shop</span></li>
+            <li data-page="badges"><span class="icon">🏅</span><span class="label">Badges</span></li>
+            <li data-page="profile-cosmetics"><span class="icon">🪞</span><span class="label">Profile / Cosmetics</span></li>
+            <li data-page="battlepass"><span class="icon">🎮</span><span class="label">Cattlepass</span></li>
+            <li data-page="battle"><span class="icon">⚔️</span><span class="label">Battle System</span></li>
+            <li data-page="achievements"><span class="icon">🏆</span><span class="label">Achievements</span></li>
+            <li data-page="rains"><span class="icon">🌧️</span><span class="label">Rains</span></li>
+            <li data-page="packs"><span class="icon">📦</span><span class="label">Packs</span></li>
+            <li data-page="trading"><span class="icon">↔️</span><span class="label">Trading</span></li>
+            <li data-page="catnip"><span class="icon">🍃</span><span class="label">Catnip</span></li>
+            <li data-page="prisms"><span class="icon">🔮</span><span class="label">Prisms</span></li>
+            <li data-page="racing"><span class="icon">🏁</span><span class="label">Racing</span></li>
+          </ul>
+        </nav>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-label">Quick Notes</div>
+        <p>Click a page to read, or press <strong>Edit</strong> to update the Markdown/HTML content directly.</p>
+      </div>
     </aside>
 
     <main class="content">
       <header class="topbar">
-        <div class="page-title">Overview</div>
+        <div>
+          <div class="crumbs">Cat Wiki / <span id="crumbPage">Overview</span></div>
+          <div class="page-title">Overview</div>
+        </div>
         <div class="actions">
+          <span class="status-pill">Live docs</span>
           <button id="editBtn">Edit</button>
-          <button id="saveBtn" style="display:none">Save</button>
+          <button id="saveBtn" class="primary" style="display:none">Save</button>
           <button id="cancelBtn" style="display:none">Cancel</button>
         </div>
       </header>
 
-      <section id="page" class="page">
-        Loading...
+      <section class="article-frame">
+        <div class="article-header">
+          <p class="article-kicker">KITTAYYYYYYY documentation</p>
+          <h1 id="articleHeading">Overview</h1>
+          <p class="article-summary">A lightweight, wiki-style reference for the bot, with pages organized like a proper docs site.</p>
+        </div>
+
+        <article id="page" class="page">
+          Loading...
+        </article>
       </section>
 
     </main>

@@ -3,12 +3,26 @@ const editBtn = document.getElementById('editBtn');
 const saveBtn = document.getElementById('saveBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const navItems = document.querySelectorAll('.sidebar nav li');
+const crumbPage = document.getElementById('crumbPage');
+const articleHeading = document.getElementById('articleHeading');
+const wikiEditToken = new URLSearchParams(window.location.search).get('edit') || '';
 let currentPage = 'overview';
 let originalHtml = '';
 
+function formatPageTitle(page) {
+  return page.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
 async function loadPage(page){
   currentPage = page;
-  document.querySelector('.page-title').textContent = page.replace(/-/g,' ').replace(/\b\w/g,l=>l.toUpperCase());
+  const title = formatPageTitle(page);
+  document.querySelector('.page-title').textContent = title;
+  if (crumbPage) {
+    crumbPage.textContent = title;
+  }
+  if (articleHeading) {
+    articleHeading.textContent = title;
+  }
   // fetch static page if exists
   try{
     const res = await fetch(`./pages/${page}.html`);
@@ -22,6 +36,12 @@ async function loadPage(page){
     pageEl.innerHTML = `<div class="section"><h2>Error</h2><div class="codeblock">Failed to load page.</div></div>`;
   }
   originalHtml = pageEl.innerHTML;
+  pageEl.classList.remove('editable');
+  pageEl.contentEditable = 'false';
+  editBtn.style.display = '';
+  saveBtn.style.display = 'none';
+  cancelBtn.style.display = 'none';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 navItems.forEach(li=>{
@@ -33,6 +53,10 @@ navItems.forEach(li=>{
 });
 
 editBtn.addEventListener('click',()=>{
+  if (!wikiEditToken) {
+    alert('You need the Discord role edit link to save changes.');
+    return;
+  }
   pageEl.contentEditable = 'true';
   pageEl.classList.add('editable');
   editBtn.style.display = 'none';
@@ -55,10 +79,9 @@ saveBtn.addEventListener('click',async()=>{
     const res = await fetch('/api/wiki/save',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({page: currentPage, html: body})
+      body:JSON.stringify({page: currentPage, html: body, edit_token: wikiEditToken})
     });
     if(res.ok){
-      const data = await res.json();
       originalHtml = body;
       pageEl.contentEditable = 'false';
       pageEl.classList.remove('editable');
@@ -76,4 +99,8 @@ saveBtn.addEventListener('click',async()=>{
 
 // init
 navItems[0].classList.add('active');
+if (!wikiEditToken) {
+  editBtn.disabled = true;
+  editBtn.title = 'Open the wiki from the Discord role edit link to make changes';
+}
 loadPage(currentPage);

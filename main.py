@@ -78,6 +78,8 @@ import os
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
 WIKI_PAGES_PATH = os.path.join(BASE_PATH, "docs", "wiki", "pages")
+WIKI_EDIT_ROLE_ID = int(os.getenv("WIKI_EDIT_ROLE_ID", "1510495579623395409"))
+WIKI_EDIT_TOKEN_TTL_SECONDS = 3600 * 6
 
 async def web_ui_preflight(request):
     return web.Response(status=204, headers={
@@ -6312,6 +6314,20 @@ async def start_internal_server(port: int = 3002):
             except Exception:
                 return web.json_response({'error': 'invalid payload'}, status=400)
 
+            token = _extract_wiki_edit_token(request, payload)
+            token_data = _resolve_wiki_edit_token(token)
+            if not token_data:
+                return web.json_response({'error': 'unauthorized'}, status=401)
+
+            try:
+                guild_id = int(token_data.get('g', 0))
+                user_id = int(token_data.get('u', 0))
+            except Exception:
+                return web.json_response({'error': 'unauthorized'}, status=401)
+
+            if guild_id <= 0 or user_id <= 0 or not await _user_has_wiki_edit_role(guild_id, user_id):
+                return web.json_response({'error': 'unauthorized'}, status=401)
+
             # sanitize page name
             if not re.fullmatch(r"[a-z0-9\-]+", page):
                 return web.json_response({'error': 'invalid page name'}, status=400)
@@ -10065,6 +10081,10 @@ async def wiki(message: discord.Interaction):
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
+
+    if message.guild is None:
+        await message.response.send_message("This wiki command only works in a server.", ephemeral=True)
+        return
     
     embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
     embed.description = "\n".join(
@@ -10084,7 +10104,20 @@ async def wiki(message: discord.Interaction):
             "[Prisms](https://wiki.minkos.lol/prisms)",
         ]
     )
-    await message.response.send_message(embed=embed)
+    view = None
+    edit_token = await _create_wiki_edit_token(message.guild.id, message.user.id)
+    if edit_token:
+        view = View()
+        edit_url = f"{_get_wiki_web_ui_url()}/?{urlencode({'edit': edit_token})}#overview"
+        view.add_item(Button(label="Open Wiki", url="https://wiki.minkos.lol/"))
+        view.add_item(Button(label="Edit Wiki", url=edit_url, style=ButtonStyle.link))
+        embed.set_footer(text=f"Edit access limited to role {WIKI_EDIT_ROLE_ID}")
+    else:
+        view = View()
+        view.add_item(Button(label="Open Wiki", url="https://wiki.minkos.lol/"))
+        embed.set_footer(text="Edit access is limited to a Discord role.")
+
+    await message.response.send_message(embed=embed, view=view)
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     await progress(message, profile, "wiki")
 
@@ -23253,6 +23286,117 @@ def _get_inventory_web_token_secret() -> str | None:
     if not secret:
         return None
     return str(secret).strip()
+
+
+def _get_wiki_edit_token_secret() -> str | None:
+    secret = (
+        getattr(config, "WIKI_EDIT_TOKEN_SECRET", None)
+        or os.getenv("WIKI_EDIT_TOKEN_SECRET")
+        or _get_inventory_web_token_secret()
+    )
+    if not secret:
+        return None
+    return str(secret).strip()
+
+
+def _wiki_edit_token_payload(guild_id: int, user_id: int, exp: int) -> str:
+    return json.dumps({"g": int(guild_id), "u": int(user_id), "exp": int(exp)}, separators=(",", ":"), sort_keys=True)
+
+
+def _encode_wiki_edit_token(payload: str, secret: str) -> str:
+    payload_bytes = payload.encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(payload_bytes).rstrip(b"=").decode("ascii")
+    signature = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    signature_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+    return f"{payload_b64}.{signature_b64}"
+
+
+def _decode_wiki_edit_token(token: str, secret: str) -> dict | None:
+    try:
+        payload_b64, signature_b64 = token.split(".", 1)
+        pad_payload = "=" * (-len(payload_b64) % 4)
+        pad_signature = "=" * (-len(signature_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + pad_payload)
+        signature_bytes = base64.urlsafe_b64decode(signature_b64 + pad_signature)
+        expected = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+        if not hmac.compare_digest(signature_bytes, expected):
+            return None
+        payload = json.loads(payload_bytes.decode("utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+async def _user_has_wiki_edit_role(guild_id: int, user_id: int) -> bool:
+    if WIKI_EDIT_ROLE_ID <= 0:
+        return False
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        try:
+            guild = await bot.fetch_guild(int(guild_id))
+        except Exception:
+            guild = None
+    if guild is None:
+        return False
+    member = guild.get_member(int(user_id))
+    if member is None:
+        try:
+            member = await guild.fetch_member(int(user_id))
+        except Exception:
+            member = None
+    if member is None:
+        return False
+    return any(getattr(role, "id", None) == WIKI_EDIT_ROLE_ID for role in getattr(member, "roles", []))
+
+
+async def _create_wiki_edit_token(guild_id: int, user_id: int) -> str | None:
+    if not await _user_has_wiki_edit_role(guild_id, user_id):
+        return None
+    secret = _get_wiki_edit_token_secret()
+    if not secret:
+        return None
+    exp = int(time.time()) + WIKI_EDIT_TOKEN_TTL_SECONDS
+    payload = _wiki_edit_token_payload(guild_id, user_id, exp)
+    return _encode_wiki_edit_token(payload, secret)
+
+
+def _resolve_wiki_edit_token(token: str) -> dict | None:
+    secret = _get_wiki_edit_token_secret()
+    if not secret or not token:
+        return None
+    payload = _decode_wiki_edit_token(token, secret)
+    if not payload:
+        return None
+    try:
+        if int(payload.get("exp", 0)) <= int(time.time()):
+            return None
+        if int(payload.get("g", 0)) <= 0 or int(payload.get("u", 0)) <= 0:
+            return None
+    except Exception:
+        return None
+    return payload
+
+
+def _extract_wiki_edit_token(request: web.Request, body: dict | None = None) -> str:
+    if body is not None:
+        token = str(body.get("edit_token", "")).strip()
+        if token:
+            return token
+    return (
+        request.headers.get("x-wiki-edit-token", "").strip()
+        or request.headers.get("authorization", "").strip().removeprefix("Bearer ").strip()
+        or request.query.get("token", "").strip()
+        or request.query.get("edit", "").strip()
+    )
+
+
+def _get_wiki_web_ui_url() -> str:
+    url = getattr(config, "WIKI_WEB_UI_URL", None) or os.getenv("WIKI_WEB_UI_URL") or getattr(config, "WIKI_URL", None) or os.getenv("WIKI_URL")
+    if not url:
+        url = "https://wiki.minkos.lol"
+    return str(url).strip().rstrip("/")
 
 
 def _get_inventory_web_ui_url() -> str | None:
