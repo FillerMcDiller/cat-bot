@@ -1,0 +1,21 @@
+:root{--bg:#0f0f10;--panel:#151516;--muted:#aab;--accent:#2b8cff}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Segoe UI,Arial,Helvetica,sans-serif;background:var(--bg);color:#e6e6e6}
+.wiki-app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+.sidebar{background:var(--panel);padding:12px 8px;border-right:1px solid #222}
+.brand{font-weight:700;padding:12px 16px;font-size:20px}
+.sidebar nav ul{list-style:none;padding:0;margin:8px 0}
+.sidebar nav li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:pointer;color:var(--muted)}
+.sidebar nav li:hover,.sidebar nav li.active{background:#202022;color:#fff}
+.sidebar .icon{width:28px;text-align:center}
+.content{padding:18px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.page-title{font-size:22px;font-weight:700}
+.actions button{background:transparent;border:1px solid #333;color:#fff;padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:6px}
+.page{background:#0b0b0c;padding:20px;border-radius:8px;border:1px solid #222}
+.section{margin-bottom:18px}
+.section h2{margin:0 0 6px 0}
+.codeblock{background:#0d0d0e;padding:10px;border-radius:6px;color:#cfcfcf;font-family:monospace}
+.editable{outline:none}
+.topbar .actions button.primary{background:var(--accent);border-color:var(--accent)}
+@media(max-width:900px){.wiki-app{grid-template-columns:72px 1fr}.sidebar .label{display:none}.sidebar{padding-top:6px}.brand{font-size:12px;padding:6px}}

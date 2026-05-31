@@ -1,0 +1,36 @@
+<div class="section">
+  <h2>Overview</h2>
+  <p>When a cat is caught, the bot randomly picks a new time according to the channel's timing settings. The bot saves this target time to the database and creates a task which waits until that time hits to spawn another cat.</p>
+  <p>It will choose the default if there is no custom spawn message.</p>
+</div>
+
+<div class="section">
+  <h2>Spawn and Caught Messages</h2>
+  <p>The default spawn message looks like this:</p>
+  <div class="codeblock">{emoji} {type} cat has appeared! Type "cat" to catch it!</div>
+
+  <p>The default catch message looks like this for most cats:</p>
+  <div class="codeblock">{username} cought {emoji} {type} cat!!!!1!<br>
+You now have {number} cats of dat type!!!<br>
+this fella was cought in {time}!!!!</div>
+
+  <p>For special catch messages (by default), please refer to Cat Types.</p>
+</div>
+
+<div class="section">
+  <h2>Rains</h2>
+  <p>Starting a rain pauses the normal spawn cycle and forcibly spawns cats randomly every ~2.5-3 seconds.</p>
+  <p>There is a set amount of cats spawned in each rain, calculated as <code>rain duration in seconds / 2.75</code>.</p>
+</div>
+
+<div class="section">
+  <h2>Restarts</h2>
+  <p>When Cat Bot finishes starting up, it goes through every channel in which the target time is in and spawns a cat in them. This covers spawns which should have occurred during the restart. Additionally, every 5 minutes, a loop is run to check for any channels which are past due.</p>
+</div>
+
+<div class="section">
+  <h2>Commands</h2>
+  <p><code>/setup</code> bootstraps the spawn loop for a channel.</p>
+  <p><code>/forcespawn</code> forces a cat to spawn immediately.</p>
+  <p>Spawn and catching messages can be modified with the <code>/changemessage</code> command.</p>
+</div>

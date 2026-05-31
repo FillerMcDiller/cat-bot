@@ -77,6 +77,18 @@ import os
 
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
+WIKI_PAGES_PATH = os.path.join(BASE_PATH, "docs", "wiki", "pages")
+
+async def web_ui_preflight(request):
+    return web.Response(status=204, headers={
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Inventory-Session',
+    })
+
+async def web_ui_headers(resp: web.Response):
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
 
 
 def _load_json_file(path: str, fallback):
@@ -6291,6 +6303,39 @@ async def start_internal_server(port: int = 3002):
         app.router.add_post("/vote", _handle)  # New endpoint for draft webhook
         app.router.add_get("/health", _health)  # Health check
 
+        # Simple wiki save endpoint (unauthenticated) - saves HTML to docs/wiki/pages/<page>.html
+        async def _wiki_save(request):
+            try:
+                payload = await request.json()
+                page = str(payload.get('page', ''))
+                html = payload.get('html', '')
+            except Exception:
+                return web.json_response({'error': 'invalid payload'}, status=400)
+
+            # sanitize page name
+            if not re.fullmatch(r"[a-z0-9\-]+", page):
+                return web.json_response({'error': 'invalid page name'}, status=400)
+
+            try:
+                os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
+                target = os.path.join(WIKI_PAGES_PATH, f"{page}.html")
+                with open(target, 'w', encoding='utf-8') as f:
+                    f.write(str(html))
+                return web.json_response({'status': 'ok', 'page': page})
+            except Exception as e:
+                logging.exception('Failed to save wiki page')
+                return web.json_response({'error': 'save_failed', 'details': str(e)}, status=500)
+
+        async def _wiki_preflight(request):
+            return web.Response(status=204, headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+            })
+
+        app.router.add_options('/api/wiki/save', _wiki_preflight)
+        app.router.add_post('/api/wiki/save', _wiki_save)
+
         print(f"[VOTE SERVER] Creating AppRunner...", flush=True)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -6665,12 +6710,39 @@ last_random_giveaway_time = 0
 
 def get_emoji(name):
     global emojis
+    if not name:
+        return "🔳"
+
+    # direct app emoji (custom guild/app emojis)
     if name in emojis:
         return emojis[name]
-    elif name in emoji.EMOJI_DATA:
-        return name
-    else:
-        return "🔳"
+
+    # try common variations (with/without suffixes or underscores)
+    variants = [
+        name,
+        name.lower(),
+        name.replace(" ", ""),
+        name.replace("_", ""),
+        name.replace("-", ""),
+        name + "cat",
+        name + "pack",
+        name + "_cat",
+        name + "_pack",
+    ]
+    for v in variants:
+        if v in emojis:
+            return emojis[v]
+
+    # try to resolve a standard unicode emoji by alias using the emoji library
+    try:
+        em = emoji.emojize(f":{name}:", language="alias")
+        if em and em != f":{name}:":
+            return em
+    except Exception:
+        pass
+
+    # fallback: unknown
+    return "🔳"
 
 
 def get_cat_emoji(cat_type):
@@ -8964,11 +9036,30 @@ async def on_message(message: discord.Message):
         # Fast initial checks before any DB queries
         if message.channel.id in temp_catches_storage:
             return
-            
+
         # Combine DB queries into one operation where possible
         user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.author.id)
         channel = await Channel.get_or_none(channel_id=message.channel.id)
-        
+
+        # If we have a channel record but no recorded spawn yet, attempt to find
+        # a recent spawn message in history to handle races where the user
+        # typed "cat" slightly before the bot saved the spawn ID.
+        if channel and not channel.cat and perms.read_message_history:
+            try:
+                async for m in message.channel.history(limit=6, oldest_first=False):
+                    if m.author == bot.user and m.content:
+                        lc = m.content.lower()
+                        # crude check for spawn messages (covers custom appear strings)
+                        if 'type "cat"' in lc or 'to catch' in lc or 'has appeared' in lc:
+                            channel.cat = m.id
+                            try:
+                                await channel.save()
+                            except Exception:
+                                pass
+                            break
+            except Exception:
+                pass
+
         # Early return conditions
         if not channel or not channel.cat or channel.cat in temp_catches_storage or user.timeout > time.time():
             # laugh at this user but only if conditions are right
@@ -23000,11 +23091,11 @@ async def nuke(message: discord.Interaction):
 
                 try:
                     await interaction.edit_original_response(
-                        content="Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/hAydAUTzT>.",
+                        content="Done. If you want to roll this back... well, you can't.",
                         view=None,
                     )
                 except Exception:
-                    await interaction.followup.send("Done. If you want to roll this back, please contact us in our discord: <https://discord.gg/hAydAUTzT>.")
+                    await interaction.followup.send("Done. If you want to roll this back... well, you can't.", ephemeral=True)
             else:
                 view = await gen(counter)
                 try:
