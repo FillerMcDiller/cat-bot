@@ -10372,6 +10372,29 @@ async def news(message: discord.Interaction):
                 }
             ]
        },
+          {
+            "title": "JUNE UPDATE: BP SEASON 18, CATCOMP, WEBSITE SUPPORT, WIKI ",
+            "emoji": "💻",
+            "desc": "woobsite",
+            "body": (
+                "Hallo! The June update is here!\n"
+                "With the June update comes a new battlepass season, as well as other features.\n"
+                "The catcomp `/catcomp` is something that I'm introducing globally for all users. You can now draw your own cats to have them added into the bot while being paid prizes. Ends on June 28th.\n"
+                "As well as this, I have taken the time to make a proper website featuring a wiki and other features.\n"
+                "The wiki lists a bunch of info about the bot. If you want to edit the wiki, you may ask for the wiki editor role in my server!\n"
+                "As well as this, if you click 'web ui' button when using `/inventory`, you can access the web interface to manage your inventory way easier!\n"
+                "If you see bugs, report them to me via `/suggestion` and i'll fix them when I can, thanks. Also enjoy the free stuff!! \n"
+                "**Filler <3**"
+            ),
+            "rewards": [
+                {
+                    "type": "pack",
+                    "amount": 5,
+                    "pack_name": "Platinum",
+                    "name": "5 Platinum Packs"
+                }
+            ]
+       },
     ]
 
     class NewsView(View):
@@ -23859,6 +23882,81 @@ async def setup(bot2):
     webhook_secret = _get_vote_webhook_secret()
     if webhook_secret:
         app = web.Application()
+
+        async def _catcomp_submit_public(request: web.Request):
+            origin = request.headers.get("Origin")
+            try:
+                form = await request.post()
+            except Exception:
+                return _web_json({"error": "invalid form data"}, status=400, origin=origin)
+
+            submitter_name = str(form.get("submitter_name", "")).strip()
+            submitter_id = str(form.get("submitter_id", "")).strip()
+            cat_name = str(form.get("cat_name", "")).strip()
+            pitch = str(form.get("pitch", "")).strip()
+            attacks_raw = str(form.get("attacks", "")).strip()
+
+            if not submitter_name or not submitter_id or not cat_name:
+                return _web_json({"error": "missing required fields"}, status=400, origin=origin)
+
+            try:
+                submitter_id_int = int(submitter_id)
+            except Exception:
+                return _web_json({"error": "invalid submitter_id"}, status=400, origin=origin)
+
+            file_keys = ["main_image", "enchanted_image", "emoji_image"]
+            uploads = {}
+            for key in file_keys:
+                field = form.get(key)
+                if field is None or not getattr(field, "filename", None):
+                    return _web_json({"error": f"missing {key}"}, status=400, origin=origin)
+                try:
+                    content = field.file.read()
+                except Exception:
+                    return _web_json({"error": f"failed to read {key}"}, status=400, origin=origin)
+                if not content:
+                    return _web_json({"error": f"empty {key}"}, status=400, origin=origin)
+                if len(content) > 10 * 1024 * 1024:
+                    return _web_json({"error": f"{key} is too large"}, status=413, origin=origin)
+                uploads[key] = {
+                    "filename": str(field.filename),
+                    "content_type": str(getattr(field, "content_type", "application/octet-stream")),
+                    "content": content,
+                }
+
+            attacks = [part.strip() for part in attacks_raw.split(",") if part.strip()]
+
+            owner = None
+            try:
+                owner = await bot.fetch_user(OWNER_ID)
+            except Exception:
+                owner = None
+
+            if owner is None:
+                return _web_json({"error": "owner dm unavailable"}, status=500, origin=origin)
+
+            embed = discord.Embed(
+                title=f"CatComp submission: {cat_name}",
+                description=pitch[:3900] if pitch else "No pitch provided.",
+                color=0xC85D2E,
+            )
+            embed.add_field(name="Submitter", value=f"{submitter_name} (`{submitter_id_int}`)", inline=False)
+            embed.add_field(name="Attacks", value=", ".join(attacks) if attacks else "None", inline=False)
+            embed.set_footer(text=f"Submitted from {request.headers.get('Origin', 'unknown origin')}")
+
+            try:
+                files = [
+                    discord.File(io.BytesIO(uploads["main_image"]["content"]), filename=uploads["main_image"]["filename"]),
+                    discord.File(io.BytesIO(uploads["enchanted_image"]["content"]), filename=uploads["enchanted_image"]["filename"]),
+                    discord.File(io.BytesIO(uploads["emoji_image"]["content"]), filename=uploads["emoji_image"]["filename"]),
+                ]
+                await owner.send(embed=embed, files=files)
+            except Exception as send_error:
+                logging.exception("Failed to DM CatComp submission to owner (public)")
+                return _web_json({"error": "failed to dm owner", "details": str(send_error)[:200]}, status=500, origin=origin)
+
+            return _web_json({"ok": True, "message": "submission delivered"}, status=200, origin=origin)
+
         app.add_routes(
             [
                 web.post("/", recieve_vote),
@@ -23870,6 +23968,8 @@ async def setup(bot2):
                 web.get("/api/inventory", web_ui_inventory_get),
                 web.options("/api/inventory/action", web_ui_preflight),
                 web.post("/api/inventory/action", web_ui_inventory_action),
+                web.options("/api/catcomp/submit", web_ui_preflight),
+                web.post("/api/catcomp/submit", _catcomp_submit_public),
             ]
         )
         vote_server = web.AppRunner(app)
