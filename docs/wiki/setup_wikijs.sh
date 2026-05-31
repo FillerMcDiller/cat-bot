@@ -51,9 +51,16 @@ mkdir -p "$EXPORT_DIR"
 # Make data dir writable
 chmod -R 755 "$WIKI_DIR/data"
 
-# Start Wiki.js
 echo "Starting Wiki.js with docker compose (using $ENV_FILE_DEST)..."
 docker compose --env-file "$ENV_FILE_DEST" up -d
+# Start Wiki.js using the explicit compose file to avoid stray compose.yml files
+echo "Starting Wiki.js with docker compose (using $ENV_FILE_DEST)..."
+if [ ! -f "docker-compose.yml" ]; then
+  echo "Error: docker-compose.yml not found in $(pwd)."
+  exit 1
+fi
+
+docker compose -f docker-compose.yml --env-file "$ENV_FILE_DEST" up -d
 
 # Wait and show logs
 echo "Waiting 5 seconds for startup..."
