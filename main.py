@@ -1158,6 +1158,11 @@ async def update_topgg_stats(token: str, server_count: int, shard_count: int = N
                     return True
                 else:
                     error_text = await resp.text()
+                    if resp.status == 401:
+                        print(
+                            "[TOP.GG] Unauthorized: check that TOP_GG_TOKEN is the Top.gg bot stats token from the dashboard, not the webhook secret.",
+                            flush=True,
+                        )
                     print(f"[TOP.GG] Failed to update stats: {resp.status} - {error_text}", flush=True)
                     return False
     except Exception as e:
@@ -2097,7 +2102,7 @@ vote_button_texts = [
 
 # various hints/fun facts
 hints = [
-    "KITTAYYYYYYY has a wiki! <https://wiki.minkos.lol>",
+    "KITTAYYYYYYY has a wiki! <https://fillermcdiller.github.io/cat-bot/wiki/>",
     "KITTAYYYYYYY is open source! <https://github.com/FillerMcDiller/cat-bot>",
 ]
 
@@ -9922,7 +9927,7 @@ async def help(message):
         )
         .add_field(
             name="Other features",
-            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://wiki.minkos.lol) or drop us a line at our [Discord server](https://discord.gg/hAydAUTzT).\n\n**Need help?** Use `/support` for assistance!",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://fillermcdiller.github.io/cat-bot/wiki/) or drop us a line at our [Discord server](https://discord.gg/hAydAUTzT).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
         .set_footer(
@@ -10080,7 +10085,7 @@ async def support(message: discord.Interaction):
             f"📋 **Get Help:** Visit <#1182425780488151090> to create a support thread\n"
             "💬 Ask your questions and our team will assist you!\n\n"
             "📚 **Also check out:**\n"
-            "• [KITTAYYYYYYY Wiki](https://wiki.minkos.lol) for guides and info\n"
+            "• [KITTAYYYYYYY Wiki](https://fillermcdiller.github.io/cat-bot/wiki/) for guides and info\n"
             "• `/help` command for basic instructions"
         )
     else:
@@ -10091,7 +10096,7 @@ async def support(message: discord.Interaction):
             "https://discord.gg/hAydAUTzT\n\n"
             "Once there, visit **#‼️kittay-support‼️** to create a support thread!\n\n"
             "📚 **Also check out:**\n"
-            "• [KITTAYYYYYYY Wiki](https://wiki.minkos.lol) for guides and info\n"
+            "• [KITTAYYYYYYY Wiki](https://fillermcdiller.github.io/cat-bot/wiki/) for guides and info\n"
             "• `/help` command for basic instructions"
         )
     
@@ -10189,19 +10194,19 @@ async def wiki(message: discord.Interaction):
     embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
     embed.description = "\n".join(
         [
-            "Main Page: https://wiki.minkos.lol/",
+            "Main Page: https://fillermcdiller.github.io/cat-bot/wiki/",
             "",
-            "[KITTAYYYYYYY](https://wiki.minkos.lol/cat-bot)",
-            "[Cat Spawning](https://wiki.minkos.lol/spawning)",
-            "[Commands](https://wiki.minkos.lol/commands)",
-            "[Cat Types](https://wiki.minkos.lol/cat-types)",
-            "[Cattlepass](https://wiki.minkos.lol/cattlepass)",
-            "[Achievements](https://wiki.minkos.lol/achievements)",
-            "[Packs](https://wiki.minkos.lol/packs)",
-            "[Trading](https://wiki.minkos.lol/trading)",
-            "[Gambling](https://wiki.minkos.lol/gambling)",
-            "[The Dark Market](https://wiki.minkos.lol/dark-market)",
-            "[Prisms](https://wiki.minkos.lol/prisms)",
+            "[KITTAYYYYYYY](https://fillermcdiller.github.io/cat-bot/wiki/kittay.html)",
+            "[Cat Spawning](https://fillermcdiller.github.io/cat-bot/wiki/spawning.html)",
+            "[Commands](https://fillermcdiller.github.io/cat-bot/wiki/commands.html)",
+            "[Cat Types](https://fillermcdiller.github.io/cat-bot/wiki/cat-types.html)",
+            "[Cattlepass](https://fillermcdiller.github.io/cat-bot/wiki/battlepass.html)",
+            "[Achievements](https://fillermcdiller.github.io/cat-bot/wiki/achievements.html)",
+            "[Packs](https://fillermcdiller.github.io/cat-bot/wiki/packs.html)",
+            "[Trading](https://fillermcdiller.github.io/cat-bot/wiki/trading.html)",
+            "[Gambling](https://fillermcdiller.github.io/cat-bot/wiki/info.html)",
+            "[The Dark Market](https://fillermcdiller.github.io/cat-bot/wiki/info.html)",
+            "[Prisms](https://fillermcdiller.github.io/cat-bot/wiki/prisms.html)",
         ]
     )
     view = None
@@ -10209,12 +10214,12 @@ async def wiki(message: discord.Interaction):
     if edit_token:
         view = View()
         edit_url = f"{_get_wiki_web_ui_url()}/?{urlencode({'edit': edit_token})}#overview"
-        view.add_item(Button(label="Open Wiki", url="https://wiki.minkos.lol/"))
+        view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
         view.add_item(Button(label="Edit Wiki", url=edit_url, style=ButtonStyle.link))
         embed.set_footer(text=f"Edit access limited to role {WIKI_EDIT_ROLE_ID}")
     else:
         view = View()
-        view.add_item(Button(label="Open Wiki", url="https://wiki.minkos.lol/"))
+        view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
         embed.set_footer(text="Edit access is limited to a Discord role.")
 
     await message.response.send_message(embed=embed, view=view)
@@ -21580,7 +21585,7 @@ async def dark_market(message):
             title="The Dark Market",
             description="after entering the secret code, they let you in. today's deal is:",
         )
-        embed.set_author(name="Click here to open Wiki", url="https://wiki.minkos.lol/en/dark-market")
+        embed.set_author(name="Click here to open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/")
         deal = cataine_prices[level] if level < len(cataine_prices) else cataine_prices[-1]
         type = deal[1]
         amount = deal[0]
@@ -23518,7 +23523,7 @@ def _extract_wiki_edit_token(request: web.Request, body: dict | None = None) -> 
 def _get_wiki_web_ui_url() -> str:
     url = getattr(config, "WIKI_WEB_UI_URL", None) or os.getenv("WIKI_WEB_UI_URL") or getattr(config, "WIKI_URL", None) or os.getenv("WIKI_URL")
     if not url:
-        url = "https://wiki.minkos.lol"
+        url = "https://fillermcdiller.github.io/cat-bot/wiki"
     return str(url).strip().rstrip("/")
 
 
