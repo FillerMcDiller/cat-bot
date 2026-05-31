@@ -6453,36 +6453,59 @@ async def start_public_webhook(port: int = 3001, auth: str | None = None):
         app = web.Application()
 
         async def _handle(request):
+            print(f"[TOP.GG] Incoming vote webhook: method={request.method} path={request.rel_url} remote={request.remote}", flush=True)
             # Basic auth header check
             if auth:
                 try:
                     header = request.headers.get("Authorization")
                     if header != auth:
+                        print("[TOP.GG] Vote webhook auth failed", flush=True)
                         return web.json_response({"error": "unauthorized"}, status=401)
+                    print("[TOP.GG] Vote webhook auth ok", flush=True)
                 except Exception:
+                    print("[TOP.GG] Vote webhook auth check errored", flush=True)
                     return web.json_response({"error": "unauthorized"}, status=401)
 
             try:
                 data = await request.json()
+                print(f"[TOP.GG] Vote payload: {data}", flush=True)
                 user_id = int(data.get("user") or data.get("user_id") or 0)
             except Exception:
+                print("[TOP.GG] Invalid vote payload", flush=True)
                 return web.json_response({"error": "invalid payload"}, status=400)
 
             if not user_id:
+                print(f"[TOP.GG] Vote payload missing user_id: {data}", flush=True)
                 return web.json_response({"error": "missing user"}, status=400)
 
             try:
-                try:
-                    print(f"vote received from {user_id}, granting rewards..", flush=True)
-                except Exception:
-                    logging.info("vote received from %s, granting rewards..", user_id)
+                print(f"[TOP.GG] Vote received from {user_id}; scheduling reward_vote()", flush=True)
 
-                # schedule reward_vote on the bot loop
-                asyncio.create_task(reward_vote(user_id))
+                # schedule reward_vote on the bot loop and log completion
+                task = asyncio.create_task(reward_vote(user_id))
+
+                def _log_vote_task_result(done_task: asyncio.Task):
+                    try:
+                        exc = done_task.exception()
+                    except asyncio.CancelledError:
+                        print(f"[TOP.GG] reward_vote({user_id}) was cancelled", flush=True)
+                        return
+                    except Exception as callback_error:
+                        print(f"[TOP.GG] reward_vote({user_id}) callback error: {callback_error}", flush=True)
+                        return
+
+                    if exc is not None:
+                        print(f"[TOP.GG] reward_vote({user_id}) failed: {exc}", flush=True)
+                        logging.error("reward_vote failed for %s: %s", user_id, exc)
+                    else:
+                        print(f"[TOP.GG] reward_vote({user_id}) completed successfully", flush=True)
+
+                task.add_done_callback(_log_vote_task_result)
             except Exception:
                 logging.exception("Failed to schedule reward_vote for %s", user_id)
                 return web.json_response({"status": "error"}, status=500)
 
+            print(f"[TOP.GG] Vote webhook accepted for user {user_id}", flush=True)
             return web.json_response({"status": "ok"})
 
         app.router.add_post("/dblwebhook", _handle)
