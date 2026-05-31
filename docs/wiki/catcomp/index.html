@@ -321,6 +321,37 @@
     .check strong { display: block; margin-bottom: 2px; }
     .check span { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 
+    .prize-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .prize {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(95, 122, 74, 0.11);
+      border: 1px solid rgba(95, 122, 74, 0.16);
+    }
+
+    .prize strong {
+      display: block;
+      margin-bottom: 2px;
+      color: #2f4a33;
+    }
+
+    .prize span {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .prize-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
     .faq-card {
       margin-top: 18px;
     }
@@ -393,6 +424,15 @@
         </div>
         <div class="notice">
           This page sends directly to the bot API when the site is opened from the Discord command. If the API URL is missing, the submit button will tell you.
+        </div>
+        <div>
+          <h2>Prizes</h2>
+          <div class="prize-list">
+            <div class="prize"><strong>1st place</strong><span>100,000 Kibble, profile cosmetic "CatComp Winner 2026", and 30 Celestial Packs.</span></div>
+            <div class="prize"><strong>2nd-3rd place</strong><span>50,000 Kibble and 15 Celestial Packs.</span></div>
+            <div class="prize"><strong>4th-15th place</strong><span>10,000 Kibble and 5 Celestial Packs.</span></div>
+          </div>
+          <p class="prize-note">All winners also receive the profile badge "CatComp 2026".</p>
         </div>
         <div class="checklist">
           <div class="check"><div>1</div><div><strong>Fill the form</strong><span>Add your details and the entry metadata.</span></div></div>

@@ -116,6 +116,32 @@ async def setup_hook():
         except Exception as e:
             print(f"[BOT.PY] WARNING Could not update top.gg stats: {e}")
 
+        async def _delayed_topgg_stats_update():
+            try:
+                await bot.wait_until_ready()
+                from main import update_topgg_stats
+                from config import TOP_GG_TOKEN, MIN_SERVER_SEND
+
+                if not TOP_GG_TOKEN:
+                    print("[BOT.PY] TOP_GG_TOKEN not configured, skipping delayed stats update")
+                    return
+
+                server_count = len(bot.guilds)
+                if server_count < MIN_SERVER_SEND:
+                    print(f"[BOT.PY] Skipping delayed top.gg update (only {server_count} servers, need {MIN_SERVER_SEND}+)" )
+                    return
+
+                print(f"[BOT.PY] Updating top.gg stats after ready ({server_count} servers)...")
+                success = await update_topgg_stats(TOP_GG_TOKEN, server_count)
+                if success:
+                    print("[BOT.PY] OK delayed top.gg stats updated!")
+                else:
+                    print("[BOT.PY] WARNING Delayed top.gg stats update failed")
+            except Exception as delayed_err:
+                print(f"[BOT.PY] WARNING delayed top.gg stats update failed: {delayed_err}")
+
+        bot.loop.create_task(_delayed_topgg_stats_update())
+
         global SOURCE_WATCHER_TASK
         if SOURCE_WATCHER_TASK is None or SOURCE_WATCHER_TASK.done():
             SOURCE_WATCHER_TASK = bot.loop.create_task(_watch_source_changes())

@@ -23880,10 +23880,12 @@ async def setup(bot2):
     bot2.on_error = on_error
 
     webhook_secret = _get_vote_webhook_secret()
-    if webhook_secret:
-        app = web.Application()
+    if not webhook_secret:
+        print("[VOTE WEBHOOK] No secret configured; starting without request verification.", flush=True)
 
-        async def _catcomp_submit_public(request: web.Request):
+    app = web.Application()
+
+    async def _catcomp_submit_public(request: web.Request):
             origin = request.headers.get("Origin")
             try:
                 form = await request.post()
@@ -23957,33 +23959,30 @@ async def setup(bot2):
 
             return _web_json({"ok": True, "message": "submission delivered"}, status=200, origin=origin)
 
-        app.add_routes(
-            [
-                web.post("/", recieve_vote),
-                web.post("/webhook", recieve_vote),
-                web.post("/dblwebhook", recieve_vote),
-                web.get("/supporter", check_supporter),
-                web.post("/supporter", check_supporter),
-                web.options("/api/inventory", web_ui_preflight),
-                web.get("/api/inventory", web_ui_inventory_get),
-                web.options("/api/inventory/action", web_ui_preflight),
-                web.post("/api/inventory/action", web_ui_inventory_action),
-                web.options("/api/catcomp/submit", web_ui_preflight),
-                web.post("/api/catcomp/submit", _catcomp_submit_public),
-            ]
-        )
-        vote_server = web.AppRunner(app)
-        await vote_server.setup()
-        webhook_port = _get_vote_webhook_port()
-        site = web.TCPSite(vote_server, "0.0.0.0", webhook_port)
-        await site.start()
-        print(
-            f"[VOTE WEBHOOK] Listening on 0.0.0.0:{webhook_port} (routes: /, /webhook, /dblwebhook, /api/inventory)",
-            flush=True,
-        )
-    else:
-        vote_server = None
-        print("[VOTE WEBHOOK] Disabled (set WEBHOOK_VERIFY or TOPGG_WEBHOOK_SECRET to enable)", flush=True)
+    app.add_routes(
+        [
+            web.post("/", recieve_vote),
+            web.post("/webhook", recieve_vote),
+            web.post("/dblwebhook", recieve_vote),
+            web.get("/supporter", check_supporter),
+            web.post("/supporter", check_supporter),
+            web.options("/api/inventory", web_ui_preflight),
+            web.get("/api/inventory", web_ui_inventory_get),
+            web.options("/api/inventory/action", web_ui_preflight),
+            web.post("/api/inventory/action", web_ui_inventory_action),
+            web.options("/api/catcomp/submit", web_ui_preflight),
+            web.post("/api/catcomp/submit", _catcomp_submit_public),
+        ]
+    )
+    vote_server = web.AppRunner(app)
+    await vote_server.setup()
+    webhook_port = _get_vote_webhook_port()
+    site = web.TCPSite(vote_server, "0.0.0.0", webhook_port)
+    await site.start()
+    print(
+        f"[VOTE WEBHOOK] Listening on 0.0.0.0:{webhook_port} (routes: /, /webhook, /dblwebhook, /api/inventory, /api/catcomp/submit)",
+        flush=True,
+    )
 
     # Attempt to load the Fights extension into the real bot instance so its cog
     # registers with the running bot (helps when main is loaded as an extension).
