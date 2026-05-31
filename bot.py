@@ -73,6 +73,13 @@ async def setup_hook():
             print("[BOT.PY] OK cat_competition loaded successfully!")
         except Exception as ext_err:
             print(f"[BOT.PY] WARNING failed to load cat_competition extension: {ext_err}")
+
+        # Sync again after all extensions are loaded so late-added commands appear.
+        try:
+            synced_commands = await bot.tree.sync()
+            print(f"[BOT.PY] OK synced {len(synced_commands)} application commands after loading extensions!")
+        except Exception as sync_err:
+            print(f"[BOT.PY] WARNING failed to sync application commands after loading extensions: {sync_err}")
         
         # Import the vote receiver function
         print("[BOT.PY] Importing start_internal_server...")

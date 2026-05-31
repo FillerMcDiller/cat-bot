@@ -6352,6 +6352,83 @@ async def start_internal_server(port: int = 3002):
         app.router.add_options('/api/wiki/save', _wiki_preflight)
         app.router.add_post('/api/wiki/save', _wiki_save)
 
+        async def _catcomp_submit(request):
+            origin = request.headers.get("Origin")
+            try:
+                form = await request.post()
+            except Exception:
+                return _web_json({"error": "invalid form data"}, status=400, origin=origin)
+
+            submitter_name = str(form.get("submitter_name", "")).strip()
+            submitter_id = str(form.get("submitter_id", "")).strip()
+            cat_name = str(form.get("cat_name", "")).strip()
+            pitch = str(form.get("pitch", "")).strip()
+            attacks_raw = str(form.get("attacks", "")).strip()
+
+            if not submitter_name or not submitter_id or not cat_name:
+                return _web_json({"error": "missing required fields"}, status=400, origin=origin)
+
+            try:
+                submitter_id_int = int(submitter_id)
+            except Exception:
+                return _web_json({"error": "invalid submitter_id"}, status=400, origin=origin)
+
+            file_keys = ["main_image", "enchanted_image", "emoji_image"]
+            uploads = {}
+            for key in file_keys:
+                field = form.get(key)
+                if field is None or not getattr(field, "filename", None):
+                    return _web_json({"error": f"missing {key}"}, status=400, origin=origin)
+                try:
+                    content = field.file.read()
+                except Exception:
+                    return _web_json({"error": f"failed to read {key}"}, status=400, origin=origin)
+                if not content:
+                    return _web_json({"error": f"empty {key}"}, status=400, origin=origin)
+                if len(content) > 10 * 1024 * 1024:
+                    return _web_json({"error": f"{key} is too large"}, status=413, origin=origin)
+                uploads[key] = {
+                    "filename": str(field.filename),
+                    "content_type": str(getattr(field, "content_type", "application/octet-stream")),
+                    "content": content,
+                }
+
+            attacks = [part.strip() for part in attacks_raw.split(",") if part.strip()]
+
+            owner = None
+            try:
+                owner = await bot.fetch_user(OWNER_ID)
+            except Exception:
+                owner = None
+
+            if owner is None:
+                return _web_json({"error": "owner dm unavailable"}, status=500, origin=origin)
+
+            embed = discord.Embed(
+                title=f"CatComp submission: {cat_name}",
+                description=pitch[:3900] if pitch else "No pitch provided.",
+                color=0xC85D2E,
+            )
+            embed.add_field(name="Submitter", value=f"{submitter_name} (`{submitter_id_int}`)", inline=False)
+            embed.add_field(name="Attacks", value=", ".join(attacks) if attacks else "None", inline=False)
+            embed.set_footer(text=f"Submitted from {request.headers.get('Origin', 'unknown origin')}")
+
+            try:
+                files = [
+                    discord.File(io.BytesIO(uploads["main_image"]["content"]), filename=uploads["main_image"]["filename"]),
+                    discord.File(io.BytesIO(uploads["enchanted_image"]["content"]), filename=uploads["enchanted_image"]["filename"]),
+                    discord.File(io.BytesIO(uploads["emoji_image"]["content"]), filename=uploads["emoji_image"]["filename"]),
+                ]
+                await owner.send(embed=embed, files=files)
+            except Exception as send_error:
+                logging.exception("Failed to DM CatComp submission to owner")
+                return _web_json({"error": "failed to dm owner", "details": str(send_error)[:200]}, status=500, origin=origin)
+
+            return _web_json({"ok": True, "message": "submission delivered"}, status=200, origin=origin)
+
+        app.router.add_options('/api/catcomp/submit', web_ui_preflight)
+        app.router.add_post('/api/catcomp/submit', _catcomp_submit)
+
         print(f"[VOTE SERVER] Creating AppRunner...", flush=True)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -23421,9 +23498,24 @@ def _get_inventory_api_base_url() -> str | None:
     return str(url).strip().rstrip("/")
 
 
+def _get_catcomp_api_base_url() -> str | None:
+    url = getattr(config, "CATCOMP_API_BASE_URL", None) or os.getenv("CATCOMP_API_BASE_URL")
+    if not url:
+        url = _get_inventory_api_base_url()
+    if not url:
+        return None
+    return str(url).strip().rstrip("/")
+
+
 def _get_web_ui_origin() -> str:
     origin = getattr(config, "WEB_UI_ORIGIN", None) or os.getenv("WEB_UI_ORIGIN") or "*"
-    return str(origin).strip() or "*"
+    origin = str(origin).strip().rstrip("/")
+    if not origin or origin == "*":
+        return "*"
+    if "://" not in origin:
+        origin = origin.split("/")[0]
+        origin = f"https://{origin}"
+    return origin
 
 
 def _web_ui_headers(origin: str | None = None) -> dict:

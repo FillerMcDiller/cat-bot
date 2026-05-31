@@ -42,6 +42,10 @@ INVENTORY_WEB_UI_URL = os.getenv("INVENTORY_WEB_UI_URL")
 # Public API base URL that the GitHub Pages UI should call
 INVENTORY_API_BASE_URL = os.getenv("INVENTORY_API_BASE_URL")
 
+# Public API base URL for the Cat Competition submission form.
+# Falls back to the inventory API base when both features share the same backend.
+CATCOMP_API_BASE_URL = os.getenv("CATCOMP_API_BASE_URL") or INVENTORY_API_BASE_URL
+
 # Allowed CORS origin for web UI (set to your GitHub Pages URL in production)
 WEB_UI_ORIGIN = os.getenv("WEB_UI_ORIGIN", "fillermcdiller.github.io/cat-bot")
 

@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cat Competition Submission Portal</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe7;
+      --bg-2: #efe5d7;
+      --panel: rgba(255, 252, 246, 0.88);
+      --panel-strong: #fffaf2;
+      --text: #241f1a;
+      --muted: #6a5f52;
+      --accent: #c85d2e;
+      --accent-2: #5f7a4a;
+      --line: rgba(91, 73, 50, 0.14);
+      --shadow: 0 24px 70px rgba(62, 44, 23, 0.14);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(200, 93, 46, 0.16), transparent 30%),
+        radial-gradient(circle at top right, rgba(95, 122, 74, 0.16), transparent 24%),
+        linear-gradient(180deg, var(--bg), var(--bg-2));
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      align-items: start;
+      margin-bottom: 22px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      backdrop-filter: blur(8px);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-copy,
+    .sidebar,
+    .form-card,
+    .preview-card,
+    .faq-card {
+      padding: 24px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(200, 93, 46, 0.12);
+      color: var(--accent);
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      font-size: 0.76rem;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 12px;
+      font-size: clamp(2.4rem, 5vw, 4.4rem);
+      line-height: 0.98;
+      letter-spacing: -0.05em;
+    }
+
+    .lede {
+      max-width: 64ch;
+      font-size: 1.05rem;
+      line-height: 1.7;
+      color: var(--muted);
+      margin-bottom: 0;
+    }
+
+    .meta-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid rgba(93, 74, 54, 0.12);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 1.2rem;
+      margin-bottom: 4px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .sidebar {
+      display: grid;
+      gap: 16px;
+      position: sticky;
+      top: 18px;
+    }
+
+    .sidebar h2 {
+      margin-bottom: 8px;
+      font-size: 1.1rem;
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 11px;
+      border-radius: 999px;
+      background: rgba(95, 122, 74, 0.11);
+      color: #35503a;
+      font-weight: 700;
+      font-size: 0.88rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+      margin-top: 18px;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 1.3rem;
+    }
+
+    .section-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    form {
+      display: grid;
+      gap: 14px;
+    }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+      font-size: 0.94rem;
+      font-weight: 700;
+      color: #372d22;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid rgba(94, 77, 56, 0.16);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: rgba(200, 93, 46, 0.55);
+      box-shadow: 0 0 0 4px rgba(200, 93, 46, 0.11);
+    }
+
+    textarea {
+      min-height: 112px;
+      resize: vertical;
+    }
+
+    .helper {
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    .upload-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .upload {
+      padding: 14px;
+      border: 1px dashed rgba(94, 77, 56, 0.25);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .upload small {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    button, .button-link {
+      appearance: none;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+
+    button:hover, .button-link:hover { transform: translateY(-1px); }
+
+    .primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), #e07441);
+      box-shadow: 0 14px 30px rgba(200, 93, 46, 0.24);
+    }
+
+    .secondary {
+      color: #2d2a27;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(94, 77, 56, 0.14);
+    }
+
+    .ghost {
+      color: #3d6a43;
+      background: rgba(95, 122, 74, 0.12);
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .preview-box {
+      min-height: 240px;
+      border-radius: 18px;
+      border: 1px solid rgba(94, 77, 56, 0.12);
+      background: rgba(255, 255, 255, 0.7);
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .preview-box pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.86rem;
+      color: #30261d;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 10px;
+    }
+
+    .check {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(94, 77, 56, 0.1);
+    }
+
+    .check strong { display: block; margin-bottom: 2px; }
+    .check span { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+
+    .faq-card {
+      margin-top: 18px;
+    }
+
+    .faq-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .faq-item {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.58);
+      border: 1px solid rgba(94, 77, 56, 0.1);
+    }
+
+    .faq-item h3 { margin-bottom: 8px; font-size: 1rem; }
+    .faq-item p { margin: 0; color: var(--muted); line-height: 1.6; }
+
+    .notice {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(200, 93, 46, 0.1);
+      border: 1px solid rgba(200, 93, 46, 0.18);
+      color: #6a3318;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 980px) {
+      .hero, .grid, .faq-grid, .fields, .upload-grid, .meta-grid { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="panel hero-copy">
+        <div class="eyebrow">Cat Competition 2026</div>
+        <h1>Submission Portal</h1>
+        <p class="lede">Use this page to submit your competition entry directly to staff. Fill out the form, attach the three required images, and hit submit. The deadline is <strong>June 20, 2026</strong> at <strong>23:59:59 UTC</strong>.</p>
+
+        <div class="meta-grid">
+          <div class="metric">
+            <strong>3 files</strong>
+            <span>Main image, enchanted image, and emoji image</span>
+          </div>
+          <div class="metric">
+            <strong>1 submit</strong>
+            <span>Files and fields post straight to staff DM</span>
+          </div>
+          <div class="metric">
+            <strong>1 link</strong>
+            <span>Bot command points here: /catcomp</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel sidebar">
+        <div>
+          <h2>Requirements</h2>
+          <div class="pill-list">
+            <span class="pill">Cat image</span>
+            <span class="pill">Enchanted image</span>
+            <span class="pill">Emoji image</span>
+            <span class="pill">Cat name</span>
+            <span class="pill">Attack names</span>
+          </div>
+        </div>
+        <div class="notice">
+          This page sends directly to the bot API when the site is opened from the Discord command. If the API URL is missing, the submit button will tell you.
+        </div>
+        <div class="checklist">
+          <div class="check"><div>1</div><div><strong>Fill the form</strong><span>Add your details and the entry metadata.</span></div></div>
+          <div class="check"><div>2</div><div><strong>Attach images</strong><span>Use PNG, JPG, or GIF for the three required assets.</span></div></div>
+          <div class="check"><div>3</div><div><strong>Submit</strong><span>The bot DMs the owner with your entry and the files.</span></div></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="grid">
+      <div class="panel form-card">
+        <div class="section-title">
+          <h2>Build your submission</h2>
+          <p>The form uploads directly to the competition endpoint.</p>
+        </div>
+
+        <form id="catcompForm">
+          <div class="fields">
+            <label>
+              Discord name
+              <input id="submitterName" type="text" placeholder="your name or handle" required>
+            </label>
+            <label>
+              Discord user ID
+              <input id="submitterId" type="text" inputmode="numeric" placeholder="123456789012345678" required>
+            </label>
+          </div>
+
+          <div class="fields">
+            <label>
+              Cat name
+              <input id="catName" type="text" placeholder="whiskers of doom" required>
+            </label>
+          </div>
+
+          <label>
+            Short pitch
+            <textarea id="pitch" placeholder="Tell staff what makes this cat special."></textarea>
+          </label>
+
+          <label>
+            Attack names
+            <input id="attacks" type="text" placeholder="comma-separated names like Paw Slam, Laser Purr, etc.">
+          </label>
+
+          <div class="upload-grid">
+            <label class="upload">
+              Main cat image
+              <input id="mainImage" type="file" accept="image/*">
+              <small>Required visual for the base cat.</small>
+            </label>
+            <label class="upload">
+              Enchanted version
+              <input id="enchantedImage" type="file" accept="image/*">
+              <small>Required alternate or powered-up version.</small>
+            </label>
+            <label class="upload">
+              Emoji image
+              <input id="emojiImage" type="file" accept="image/*">
+              <small>Required tiny emoji-ready render.</small>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit" class="primary" id="submitBtn">Submit entry</button>
+          </div>
+
+          <div class="helper">The submission includes the attachments and the text fields. Nothing is stored in the page after submit.</div>
+          <div class="notice" id="statusBox" role="status">Waiting for a submission.</div>
+        </form>
+      </div>
+
+      <div class="panel preview-card">
+        <div class="section-title">
+          <h2>What gets sent</h2>
+          <p>Staff receives the files and the entry details.</p>
+        </div>
+        <div class="checklist">
+          <div class="check"><div>•</div><div><strong>Submitter info</strong><span>Your Discord name and user ID for contact.</span></div></div>
+          <div class="check"><div>•</div><div><strong>Entry info</strong><span>Cat name, pitch, and attack names.</span></div></div>
+          <div class="check"><div>•</div><div><strong>Images</strong><span>Main art, enchanted version, and emoji render.</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel faq-card">
+      <div class="section-title">
+        <h2>Questions</h2>
+        <p>Quick answers for the competition page.</p>
+      </div>
+
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h3>What does the bot command do?</h3>
+          <p><a href="https://fillermcdiller.github.io/cat-bot/catcomp/">/catcomp</a> opens this page so people can submit their entry in one place.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Is this a real upload form?</h3>
+          <p>Yes. It posts the entry directly to the bot endpoint, which DMs the owner with the files and details.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What files are required?</h3>
+          <p>The base cat image, an enchanted version, and a small emoji image. Everything else is optional metadata.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What happens after export?</h3>
+          <p>Staff gets the DM immediately and can review the entry without any extra copy/paste step.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('catcompForm');
+    const statusBox = document.getElementById('statusBox');
+    const submitBtn = document.getElementById('submitBtn');
+
+    const query = new URLSearchParams(window.location.search);
+    const apiBase = (query.get('api') || window.CATCOMP_API_BASE_URL || '').trim().replace(/\/$/, '');
+    const submitUrl = apiBase ? `${apiBase}/api/catcomp/submit` : '';
+
+    if (!submitUrl) {
+      submitBtn.disabled = true;
+      statusBox.textContent = 'Submission API not configured. Open this page from /catcomp so the bot can inject the API URL.';
+    }
+
+    function setStatus(message, kind) {
+      statusBox.textContent = message;
+      statusBox.style.background = kind === 'error' ? 'rgba(200, 93, 46, 0.1)' : 'rgba(95, 122, 74, 0.12)';
+      statusBox.style.borderColor = kind === 'error' ? 'rgba(200, 93, 46, 0.18)' : 'rgba(95, 122, 74, 0.18)';
+      statusBox.style.color = kind === 'error' ? '#6a3318' : '#35503a';
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!submitUrl) {
+        setStatus('No API URL is configured for this page.', 'error');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('submitter_name', document.getElementById('submitterName').value.trim());
+      formData.append('submitter_id', document.getElementById('submitterId').value.trim());
+      formData.append('cat_name', document.getElementById('catName').value.trim());
+      formData.append('pitch', document.getElementById('pitch').value.trim());
+      formData.append('attacks', document.getElementById('attacks').value.trim());
+
+      const imageIds = ['mainImage', 'enchantedImage', 'emojiImage'];
+      for (const id of imageIds) {
+        const input = document.getElementById(id);
+        if (!input.files || !input.files[0]) {
+          setStatus('All three images are required before submitting.', 'error');
+          return;
+        }
+        formData.append(id === 'mainImage' ? 'main_image' : id === 'enchantedImage' ? 'enchanted_image' : 'emoji_image', input.files[0]);
+      }
+
+      submitBtn.disabled = true;
+      setStatus('Submitting your entry...', 'ok');
+
+      try {
+        const response = await fetch(submitUrl, {
+          method: 'POST',
+          body: formData,
+        });
+
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = {};
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Submission failed (${response.status})`);
+        }
+
+        form.reset();
+        setStatus(payload.message || 'Submission delivered. Staff should see it in DMs shortly.', 'ok');
+      } catch (error) {
+        setStatus(error.message || 'Submission failed.', 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

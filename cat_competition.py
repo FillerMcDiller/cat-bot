@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlencode
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -12,16 +13,17 @@ class CatCompLink(commands.Cog):
 
     @app_commands.command(name='catcomp', description='Open the Cat Competition submission page (website)')
     async def catcomp(self, interaction: discord.Interaction):
-        # Use an environment variable or config override for the submission URL
-        url = None
+        api_base = None
         try:
-            from config import CATCOMP_URL
-            url = CATCOMP_URL
+            from config import CATCOMP_API_BASE_URL
+            api_base = CATCOMP_API_BASE_URL
         except Exception:
-            url = None
+            api_base = None
 
-        if not url:
-            url = os.getenv('CATCOMP_URL', 'https://example.com/catcomp-submit')
+        url = os.getenv('CATCOMP_URL', 'https://fillermcdiller.github.io/cat-bot/catcomp/')
+        if api_base:
+            separator = '&' if '?' in url else '?'
+            url = f"{url}{separator}{urlencode({'api': api_base})}"
 
         await interaction.response.send_message(f'Submit your entry on the website: {url}', ephemeral=True)
 
