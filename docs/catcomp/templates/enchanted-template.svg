@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="2048" viewBox="0 0 2048 2048" role="img" aria-label="Cat Competition enchanted image template">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#eef7f2"/>
+      <stop offset="100%" stop-color="#e2efe6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="rgba(95,122,74,0.24)"/>
+      <stop offset="100%" stop-color="rgba(95,122,74,0)"/>
+    </radialGradient>
+    <pattern id="grid" width="128" height="128" patternUnits="userSpaceOnUse">
+      <path d="M 128 0 L 0 0 0 128" fill="none" stroke="rgba(61,86,65,0.08)" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="2048" height="2048" fill="url(#bg)"/>
+  <rect width="2048" height="2048" fill="url(#grid)" opacity="0.55"/>
+  <rect width="2048" height="2048" fill="url(#glow)"/>
+  <rect x="96" y="96" width="1856" height="1856" rx="84" fill="none" stroke="#5f7a4a" stroke-width="16" stroke-dasharray="24 20" opacity="0.72"/>
+  <rect x="180" y="180" width="1688" height="1688" rx="68" fill="rgba(255,255,255,0.24)" stroke="rgba(36,31,26,0.16)" stroke-width="6"/>
+  <circle cx="1024" cy="930" r="320" fill="rgba(95,122,74,0.08)" stroke="rgba(95,122,74,0.24)" stroke-width="10"/>
+  <circle cx="1024" cy="930" r="150" fill="none" stroke="rgba(200,93,46,0.28)" stroke-width="8" stroke-dasharray="18 18"/>
+  <g fill="#241f1a" font-family="Inter, Arial, sans-serif" text-anchor="middle">
+    <text x="1024" y="790" font-size="98" font-weight="800" letter-spacing="4">ENCHANTED</text>
+    <text x="1024" y="900" font-size="52" font-weight="700" fill="#6a5f52">Powered-up image template</text>
+    <text x="1024" y="990" font-size="40" fill="#6a5f52">Use this for the enchanted or alternate version</text>
+    <text x="1024" y="1084" font-size="34" fill="#6a5f52">Canvas: 2048 × 2048</text>
+  </g>
+  <g fill="none" stroke="#c85d2e" stroke-width="8" opacity="0.8">
+    <path d="M 1024 450 L 1024 1410"/>
+    <path d="M 560 930 L 1488 930"/>
+  </g>
+</svg>
