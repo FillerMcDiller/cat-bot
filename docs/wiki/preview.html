@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cat Bot Wiki — Preview</title>
+  <style>
+  /* Inlined critical CSS from styles.css to make a GitHub-friendly preview */
+  /* trimmed and inlined for preview purposes */
+  :root{--bg:#f4f1ea;--bg-accent:#ebe4d7;--panel:#fffdf8;--text:#222018;--muted:#665f52;--accent:#c05c2f;--sidebar-width:290px;--radius:18px}
+  *{box-sizing:border-box}
+  body{margin:0;color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,var(--bg),var(--bg-accent));}
+  .wiki-shell{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);min-height:100vh}
+  .sidebar{padding:24px 18px;background:linear-gradient(180deg,#231c14,#2f251a);color:#f8f3e9}
+  .brand-mark{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;background:rgba(255,255,255,0.06)}
+  nav ul{list-style:none;padding:0;margin:0}
+  nav li{padding:10px;border-radius:10px;color:#efe7dd}
+  .content{padding:28px}
+  .article-frame{padding:22px;border-radius:calc(var(--radius)+6px);border:1px solid rgba(112,87,55,0.12);background:rgba(255,252,245,0.9)}
+  .article-header h1{margin:0;font-size:2rem}
+  .page .section{margin:0 0 18px;padding:18px;border-radius:12px;border:1px solid rgba(115,96,73,0.12);background:rgba(255,255,255,0.6)}
+  .codeblock{font-family:monospace;background:#111;padding:10px;border-radius:8px;color:#efe7dc}
+  @media(max-width:760px){.wiki-shell{grid-template-columns:1fr}.sidebar{border-bottom:1px solid rgba(0,0,0,0.08)}}
+  </style>
+</head>
+<body>
+  <div class="wiki-shell">
+    <aside class="sidebar">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+        <div class="brand-mark">🐱</div>
+        <div>
+          <div style="font-weight:800">Cat Wiki</div>
+          <div style="font-size:0.85rem;color:rgba(255,255,255,0.7)">Unofficial docs for KITTAYYYYYYY</div>
+        </div>
+      </div>
+      <nav>
+        <ul>
+          <li>Home</li>
+          <li>Wiki Info</li>
+          <li>KITTAYYYYYYY</li>
+          <li>Cat Spawning</li>
+          <li>Commands</li>
+          <li>Cat Types</li>
+          <li>Inventory / Cats</li>
+          <li>Items / Shop</li>
+          <li>Badges</li>
+          <li>Profile / Cosmetics</li>
+          <li>Cattlepass</li>
+          <li>Battle System</li>
+          <li>Achievements</li>
+          <li>Rains</li>
+          <li>Packs</li>
+          <li>Trading</li>
+          <li>Catnip</li>
+          <li>Prisms</li>
+          <li>Racing</li>
+        </ul>
+      </nav>
+      <div style="margin-top:14px;color:rgba(255,255,255,0.8)">Quick preview — full interactive wiki requires JavaScript or GitHub Pages.</div>
+    </aside>
+
+    <main class="content">
+      <section class="article-frame">
+        <div class="article-header">
+          <p class="article-kicker">KITTAYYYYYYY documentation</p>
+          <h1>Overview</h1>
+          <p class="article-summary" style="color:var(--muted)">A lightweight, wiki-style reference for the bot, with pages organized like a proper docs site.</p>
+        </div>
+
+        <article class="page">
+          <!-- Inlined overview content for preview -->
+          <div class="section">
+            <h2>Overview</h2>
+            <p>When a cat is caught, the bot randomly picks a new time according to the channel's timing settings. The bot saves this target time to the database and creates a task which waits until that time hits to spawn another cat.</p>
+            <p>It will choose the default if there is no custom spawn message.</p>
+          </div>
+
+          <div class="section">
+            <h2>Spawn and Caught Messages</h2>
+            <p>The default spawn message looks like this:</p>
+            <div class="codeblock">{emoji} {type} cat has appeared! Type "cat" to catch it!</div>
+            <p>The default catch message looks like this for most cats:</p>
+            <div class="codeblock">{username} cought {emoji} {type} cat!!!!1!<br>You now have {number} cats of dat type!!!<br>this fella was cought in {time}!!!!</div>
+            <p>For special catch messages (by default), please refer to Cat Types.</p>
+          </div>
+
+          <div class="section">
+            <h2>Rains</h2>
+            <p>Starting a rain pauses the normal spawn cycle and forcibly spawns cats randomly every ~2.5-3 seconds.</p>
+            <p>There is a set amount of cats spawned in each rain, calculated as <code>rain duration in seconds / 2.75</code>.</p>
+          </div>
+
+          <div class="section">
+            <h2>Restarts</h2>
+            <p>When Cat Bot finishes starting up, it goes through every channel in which the target time is in and spawns a cat in them. Additionally, every 5 minutes, a loop checks for overdue channels.</p>
+          </div>
+
+          <div class="section">
+            <h2>Notes</h2>
+            <p>This preview inlines the Overview content and the wiki CSS so the repository viewer shows a styled page without the JavaScript-driven loader. For the full interactive experience, enable GitHub Pages to serve the files or open the wiki locally.</p>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
