@@ -6455,7 +6455,7 @@ async def start_public_webhook(port: int = 3001, auth: str | None = None):
     Runs inside the bot event loop so no extra threads or uvicorn are required.
     """
     try:
-        app = web.Application()
+        app = web.Application(client_max_size=20 * 1024 * 1024)
 
         async def _handle(request):
             print(f"[TOP.GG] Incoming vote webhook: method={request.method} path={request.rel_url} remote={request.remote}", flush=True)
