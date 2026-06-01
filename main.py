@@ -10693,12 +10693,33 @@ def _build_giveaway_embed(cat_type: str, end_time: int, *, global_mode: bool = F
     return embed
 
 
-async def _refresh_global_giveaway_message(giveaway_id: int):
+async def _get_global_giveaway_channels() -> list[discord.TextChannel]:
+    channels: list[discord.TextChannel] = []
+    seen_channel_ids: set[int] = set()
+    try:
+        async for channel_data in Channel.limit(["channel_id", "guild_id"], "cat_spawns = true", refetch=False):
+            channel = bot.get_channel(int(channel_data.channel_id))
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            if channel.id in seen_channel_ids:
+                continue
+            perms = channel.permissions_for(bot.user)
+            if not (perms.view_channel and perms.send_messages and perms.embed_links and perms.attach_files):
+                continue
+            seen_channel_ids.add(channel.id)
+            channels.append(channel)
+    except Exception:
+        pass
+    return channels
+
+
+def _create_giveaway_view(cat_type: str, giveaway_id: str | None = None, global_mode: bool = False) -> GiveawayView:
+    return GiveawayView(cat_type, giveaway_id=giveaway_id, global_mode=global_mode)
+
+
+async def _refresh_global_giveaway_message(giveaway_id: str):
     state = active_global_giveaways.get(giveaway_id)
     if not state:
-        return
-    message = state.get("message")
-    if not message:
         return
     try:
         embed = _build_giveaway_embed(
@@ -10707,12 +10728,20 @@ async def _refresh_global_giveaway_message(giveaway_id: int):
             global_mode=True,
             entry_count=len(state["participants"]),
         )
-        await message.edit(embed=embed, view=state.get("view"))
+        for item in state.get("messages", []):
+            message = item.get("message")
+            view = item.get("view")
+            if message is None:
+                continue
+            try:
+                await message.edit(embed=embed, view=view)
+            except Exception:
+                continue
     except Exception:
         pass
 
 
-async def _register_global_giveaway_entry(giveaway_id: int, user_id: int, guild_id: int) -> bool:
+async def _register_global_giveaway_entry(giveaway_id: str, user_id: int, guild_id: int) -> bool:
     state = active_global_giveaways.get(giveaway_id)
     if not state:
         return False
@@ -10960,25 +10989,34 @@ class AdminPanelModal(discord.ui.Modal):
                 await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
                 return
 
+            cat_type = self.children[0].value
             global_mode = False
             if len(self.children) > 2:
                 global_mode = _is_truthy_text(self.children[2].value)
                 
             end_time = int(time.time() + duration)
-            embed = _build_giveaway_embed(self.children[0].value, end_time, global_mode=global_mode, entry_count=0)
-            view = GiveawayView(self.children[0].value, global_mode=global_mode)
-            msg = await interaction.channel.send(embed=embed, view=view)
+            giveaway_id = uuid.uuid4().hex if global_mode else None
+            embed = _build_giveaway_embed(cat_type, end_time, global_mode=global_mode, entry_count=0)
+            announcement_messages = []
             if global_mode:
-                active_global_giveaways[msg.id] = {
-                    "cat_type": self.children[0].value,
+                targets = await _get_global_giveaway_channels()
+                if not targets:
+                    targets = [interaction.channel]
+                for target_channel in targets:
+                    view = _create_giveaway_view(cat_type, giveaway_id=giveaway_id, global_mode=True)
+                    msg = await target_channel.send(embed=embed, view=view)
+                    announcement_messages.append({"message": msg, "view": view, "channel_id": target_channel.id})
+                active_global_giveaways[giveaway_id] = {
+                    "cat_type": cat_type,
                     "end_time": end_time,
-                    "participants": set(),
-                    "message": msg,
-                    "view": view,
+                    "participants": {},
+                    "messages": announcement_messages,
                 }
-                view.giveaway_id = msg.id
-                view.global_mode = True
-                await _refresh_global_giveaway_message(msg.id)
+                await _refresh_global_giveaway_message(giveaway_id)
+            else:
+                view = _create_giveaway_view(cat_type)
+                msg = await interaction.channel.send(embed=embed, view=view)
+                announcement_messages = [{"message": msg, "view": view, "channel_id": interaction.channel.id}]
             await interaction.response.send_message("Giveaway started!", ephemeral=True)
             
             # Wait for giveaway duration
@@ -10986,7 +11024,7 @@ class AdminPanelModal(discord.ui.Modal):
             
             # Include people who said "W cat!"
             if global_mode:
-                state = active_global_giveaways.pop(msg.id, None)
+                state = active_global_giveaways.pop(giveaway_id, None)
                 participants_map = dict((state or {}).get("participants", {}))
             else:
                 async for message in interaction.channel.history(after=msg):
@@ -10998,22 +11036,49 @@ class AdminPanelModal(discord.ui.Modal):
                 winner_id, winner_guild_id = random.choice(list(participants_map.items()))
                 winner = await Profile.get_or_create(guild_id=winner_guild_id, user_id=winner_id)
                 try:
-                    await add_cat_instances(winner, view.cat_type, 1)
+                    await add_cat_instances(winner, cat_type, 1)
                 except Exception:
                     try:
-                        winner[f"cat_{view.cat_type}"] += 1
+                        winner[f"cat_{cat_type}"] += 1
                         await winner.save()
                     except Exception:
                         pass
                 
-                embed = _build_giveaway_embed(view.cat_type, end_time, global_mode=global_mode, entry_count=len(participants_map))
-                embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(view.cat_type.lower() + 'cat')} {view.cat_type} cat!"
-                await msg.edit(embed=embed, view=None)
-                await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {view.cat_type} cat giveaway!")
+                embed = _build_giveaway_embed(cat_type, end_time, global_mode=global_mode, entry_count=len(participants_map))
+                embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!"
+                if global_mode:
+                    for item in announcement_messages:
+                        message_obj = item.get("message")
+                        if message_obj is None:
+                            continue
+                        try:
+                            await message_obj.edit(embed=embed, view=None)
+                        except Exception:
+                            pass
+                    for target_item in announcement_messages:
+                        target_channel = bot.get_channel(int(target_item.get("channel_id", 0)))
+                        if target_channel:
+                            try:
+                                await target_channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
+                            except Exception:
+                                pass
+                else:
+                    await msg.edit(embed=embed, view=None)
+                    await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
             else:
-                embed = _build_giveaway_embed(view.cat_type, end_time, global_mode=global_mode, entry_count=0)
+                embed = _build_giveaway_embed(cat_type, end_time, global_mode=global_mode, entry_count=0)
                 embed.description = "No one entered the giveaway 😢"
-                await msg.edit(embed=embed, view=None)
+                if global_mode:
+                    for item in announcement_messages:
+                        message_obj = item.get("message")
+                        if message_obj is None:
+                            continue
+                        try:
+                            await message_obj.edit(embed=embed, view=None)
+                        except Exception:
+                            pass
+                else:
+                    await msg.edit(embed=embed, view=None)
         
         elif self.action == "Start Rain":
             try:
