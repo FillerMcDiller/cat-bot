@@ -10697,17 +10697,54 @@ async def _get_global_giveaway_channels() -> list[discord.TextChannel]:
     channels: list[discord.TextChannel] = []
     seen_channel_ids: set[int] = set()
     try:
-        async for channel_data in Channel.limit(["channel_id", "guild_id"], "cat_spawns = true", refetch=False):
-            channel = bot.get_channel(int(channel_data.channel_id))
-            if not isinstance(channel, discord.TextChannel):
+        # Iterate all guilds the bot is in — global means every server with the bot.
+        for guild in bot.guilds:
+            try:
+                # First, prefer a configured spawn/announcement channel in our DB for that guild.
+                found = False
+                async for chdata in Channel.limit(["channel_id"], "guild_id = $1 AND cat_spawns = true", guild.id, refetch=False):
+                    try:
+                        ch_id = int(getattr(chdata, "channel_id", None))
+                    except Exception:
+                        ch_id = None
+                    if not ch_id:
+                        continue
+                    if ch_id in seen_channel_ids:
+                        found = True
+                        break
+                    ch = bot.get_channel(ch_id)
+                    if not ch:
+                        try:
+                            ch = await bot.fetch_channel(ch_id)
+                        except Exception:
+                            ch = None
+                    if not isinstance(ch, discord.TextChannel):
+                        continue
+                    perms = ch.permissions_for(guild.me)
+                    if not (perms and perms.view_channel and perms.send_messages and perms.embed_links):
+                        continue
+                    channels.append(ch)
+                    seen_channel_ids.add(ch.id)
+                    found = True
+                    break
+                if found:
+                    continue
+
+                # Fallback: pick the first text channel where the bot has permission to send messages
+                for ch in guild.text_channels:
+                    if ch.id in seen_channel_ids:
+                        break
+                    try:
+                        perms = ch.permissions_for(guild.me)
+                    except Exception:
+                        perms = None
+                    if perms and perms.send_messages and perms.view_channel:
+                        channels.append(ch)
+                        seen_channel_ids.add(ch.id)
+                        break
+            except Exception:
+                # Skip this guild if anything goes wrong (permissions, API errors, etc.)
                 continue
-            if channel.id in seen_channel_ids:
-                continue
-            perms = channel.permissions_for(bot.user)
-            if not (perms.view_channel and perms.send_messages and perms.embed_links and perms.attach_files):
-                continue
-            seen_channel_ids.add(channel.id)
-            channels.append(channel)
     except Exception:
         pass
     return channels
