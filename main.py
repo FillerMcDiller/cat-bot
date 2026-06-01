@@ -9027,6 +9027,14 @@ async def on_message(message: discord.Message):
     if message.author.bot or message.webhook_id is not None:
         return
 
+    if text in ["w cat!", "w cat"]:
+        try:
+            for giveaway_id, state in list(active_global_giveaways.items()):
+                if state.get("end_time", 0) > time.time() and state.get("message"):
+                    await _register_global_giveaway_entry(giveaway_id, message.author.id, message.guild.id)
+        except Exception:
+            pass
+
     for ach in achs:
         if (
             (ach[1] == "startswith" and text.startswith(ach[0]))
@@ -10643,15 +10651,77 @@ async def tiktok(message: discord.Interaction, text: str):
 
 
 class GiveawayView(discord.ui.View):
-    def __init__(self, cat_type: str):
+    def __init__(self, cat_type: str, giveaway_id: int | None = None, global_mode: bool = False):
         super().__init__(timeout=None)  # No timeout for giveaways
         self.cat_type = cat_type
+        self.giveaway_id = giveaway_id
+        self.global_mode = global_mode
         self.participants = set()
         
     @discord.ui.button(label="Enter Giveaway!", style=ButtonStyle.green)
     async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.participants.add(interaction.user.id)
+        if self.global_mode and self.giveaway_id is not None:
+            added = await _register_global_giveaway_entry(self.giveaway_id, interaction.user.id, interaction.guild.id)
+            if not added:
+                await interaction.response.send_message("You've already entered this global giveaway!", ephemeral=True)
+                return
+        else:
+            self.participants.add(interaction.user.id)
         await interaction.response.send_message("You've entered the giveaway! Good luck!", ephemeral=True)
+
+
+active_global_giveaways = {}
+
+
+def _is_truthy_text(value: str) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "global", "all"}
+
+
+def _build_giveaway_embed(cat_type: str, end_time: int, *, global_mode: bool = False, entry_count: int = 0) -> discord.Embed:
+    description = (
+        f"Win a {get_emoji(cat_type.lower() + 'cat')} {cat_type} cat!\n\n"
+        f"To enter, click the button below or say `W cat!` in chat.\n"
+        f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>"
+    )
+    embed = discord.Embed(
+        title=f"🎉 {'Global ' if global_mode else ''}Cat Giveaway! 🎉",
+        description=description,
+        color=Colors.green,
+    )
+    if global_mode:
+        embed.add_field(name="Global entries", value=f"{entry_count} entrant(s)", inline=False)
+    return embed
+
+
+async def _refresh_global_giveaway_message(giveaway_id: int):
+    state = active_global_giveaways.get(giveaway_id)
+    if not state:
+        return
+    message = state.get("message")
+    if not message:
+        return
+    try:
+        embed = _build_giveaway_embed(
+            state["cat_type"],
+            state["end_time"],
+            global_mode=True,
+            entry_count=len(state["participants"]),
+        )
+        await message.edit(embed=embed, view=state.get("view"))
+    except Exception:
+        pass
+
+
+async def _register_global_giveaway_entry(giveaway_id: int, user_id: int, guild_id: int) -> bool:
+    state = active_global_giveaways.get(giveaway_id)
+    if not state:
+        return False
+    participants = state.setdefault("participants", {})
+    if user_id in participants:
+        return False
+    participants[user_id] = guild_id
+    await _refresh_global_giveaway_message(giveaway_id)
+    return True
 
 def parse_time(time_str: str) -> int:
     """Convert a time string like '1h' or '30m' to seconds"""
@@ -10702,6 +10772,7 @@ class AdminPanelModal(discord.ui.Modal):
         elif action == "Start Giveaway":
             self.add_item(discord.ui.TextInput(label="Cat Type", placeholder="Type of cat to give away"))
             self.add_item(discord.ui.TextInput(label="Duration", placeholder="Duration (e.g. 5m, 1h)"))
+            self.add_item(discord.ui.TextInput(label="Global Giveaway?", placeholder="yes/no - allow entries from any server", default="no", required=False))
         elif action == "Start Rain":
             self.add_item(discord.ui.TextInput(label="Channel ID", placeholder="Channel ID to start rain in"))
             self.add_item(discord.ui.TextInput(label="Duration (minutes)", placeholder="Duration in minutes (default 10)"))
@@ -10888,30 +10959,44 @@ class AdminPanelModal(discord.ui.Modal):
             if not duration:
                 await interaction.response.send_message("Invalid duration format! Use format like '5m', '1h', etc.", ephemeral=True)
                 return
+
+            global_mode = False
+            if len(self.children) > 2:
+                global_mode = _is_truthy_text(self.children[2].value)
                 
             end_time = int(time.time() + duration)
-            embed = discord.Embed(
-                title=f"🎉 Cat Giveaway! 🎉",
-                description=f"Win a {get_emoji(self.children[0].value.lower() + 'cat')} {self.children[0].value} cat!\n\n"
-                          f"To enter, click the button below or say `W cat!` in chat.\n"
-                          f"Giveaway ends <t:{end_time}:R> at <t:{end_time}:t>",
-                color=Colors.green
-            )
-            view = GiveawayView(self.children[0].value)
+            embed = _build_giveaway_embed(self.children[0].value, end_time, global_mode=global_mode, entry_count=0)
+            view = GiveawayView(self.children[0].value, global_mode=global_mode)
             msg = await interaction.channel.send(embed=embed, view=view)
+            if global_mode:
+                active_global_giveaways[msg.id] = {
+                    "cat_type": self.children[0].value,
+                    "end_time": end_time,
+                    "participants": set(),
+                    "message": msg,
+                    "view": view,
+                }
+                view.giveaway_id = msg.id
+                view.global_mode = True
+                await _refresh_global_giveaway_message(msg.id)
             await interaction.response.send_message("Giveaway started!", ephemeral=True)
             
             # Wait for giveaway duration
             await asyncio.sleep(duration)
             
             # Include people who said "W cat!"
-            async for message in interaction.channel.history(after=msg):
-                if message.content.lower().strip() in ["w cat!", "w cat"]:
-                    view.participants.add(message.author.id)
-            
-            if view.participants:
-                winner_id = random.choice(list(view.participants))
-                winner = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=winner_id)
+            if global_mode:
+                state = active_global_giveaways.pop(msg.id, None)
+                participants_map = dict((state or {}).get("participants", {}))
+            else:
+                async for message in interaction.channel.history(after=msg):
+                    if message.content.lower().strip() in ["w cat!", "w cat"]:
+                        view.participants.add(message.author.id)
+                participants_map = {user_id: interaction.guild.id for user_id in view.participants}
+
+            if participants_map:
+                winner_id, winner_guild_id = random.choice(list(participants_map.items()))
+                winner = await Profile.get_or_create(guild_id=winner_guild_id, user_id=winner_id)
                 try:
                     await add_cat_instances(winner, view.cat_type, 1)
                 except Exception:
@@ -10921,10 +11006,12 @@ class AdminPanelModal(discord.ui.Modal):
                     except Exception:
                         pass
                 
+                embed = _build_giveaway_embed(view.cat_type, end_time, global_mode=global_mode, entry_count=len(participants_map))
                 embed.description = f"🎉 Winner: <@{winner_id}>! 🎉\nYou won a {get_emoji(view.cat_type.lower() + 'cat')} {view.cat_type} cat!"
                 await msg.edit(embed=embed, view=None)
                 await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {view.cat_type} cat giveaway!")
             else:
+                embed = _build_giveaway_embed(view.cat_type, end_time, global_mode=global_mode, entry_count=0)
                 embed.description = "No one entered the giveaway 😢"
                 await msg.edit(embed=embed, view=None)
         
