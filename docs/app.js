@@ -81,11 +81,13 @@ function readSessionFromUrl() {
   const rawUrl = window.location.href;
   const sid = params.get("sid") || params.get("session") || (rawUrl.match(/[?&]sid=([^&#]+)/)?.[1] ? decodeURIComponent(rawUrl.match(/[?&]sid=([^&#]+)/)[1]) : "") || "";
   const apiValue = params.get("api") || params.get("base") || (rawUrl.match(/[?&]api=([^&#]+)/)?.[1] ? decodeURIComponent(rawUrl.match(/[?&]api=([^&#]+)/)[1]) : "") || "";
+  const apiBackupsValue = params.get("api_backups") || params.get("backups") || (rawUrl.match(/[?&]api_backups=([^&#]+)/)?.[1] ? decodeURIComponent(rawUrl.match(/[?&]api_backups=([^&#]+)/)[1]) : "") || "";
   const apiBase = apiValue.replace(/\/$/, "");
   const tab = params.get("tab") || window.location.hash.replace(/^#/, "");
 
   webSession = {
     apiBase,
+    apiBackups: apiBackupsValue ? apiBackupsValue.split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.replace(/\/$/, '')) : [],
     sid,
     tab: tab || "wiki"
   };
@@ -187,6 +189,32 @@ function getApiBase() {
     throw new Error("Missing API base URL in the signed link");
   }
   return webSession.apiBase.replace(/\/$/, "");
+}
+
+async function tryFetchWithBackups(path, options) {
+  const candidates = [];
+  try {
+    candidates.push(getApiBase());
+  } catch (e) {}
+  if (webSession.apiBackups && webSession.apiBackups.length) {
+    for (const b of webSession.apiBackups) {
+      if (b && !candidates.includes(b)) candidates.push(b);
+    }
+  }
+  if (!candidates.length) throw new Error('No API base available');
+
+  let lastErr = null;
+  for (const base of candidates) {
+    const url = base + path;
+    try {
+      const resp = await fetch(url, options);
+      if (resp.ok) return resp;
+      lastErr = new Error(`HTTP ${resp.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 function getAuthHeaders() {
@@ -330,8 +358,8 @@ async function loadInventory() {
     if (!webSession.sid) {
       throw new Error("Open this page from /inventory so it can sign your session automatically.");
     }
-    const url = `${getApiBase()}/api/inventory?sid=${encodeURIComponent(webSession.sid)}`;
-    const res = await fetch(url, {
+    const path = `/api/inventory?sid=${encodeURIComponent(webSession.sid)}`;
+    const res = await tryFetchWithBackups(path, {
       method: "GET",
       headers: getAuthHeaders()
     });
@@ -357,7 +385,8 @@ async function performInventoryAction(action, extra = {}) {
     throw new Error("Select a cat first");
   }
 
-  const res = await fetch(`${getApiBase()}/api/inventory/action`, {
+  const path = `/api/inventory/action`;
+  const res = await tryFetchWithBackups(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

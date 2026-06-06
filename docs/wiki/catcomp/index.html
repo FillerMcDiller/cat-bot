@@ -561,6 +561,8 @@
 
     const query = new URLSearchParams(window.location.search);
     const apiBase = (query.get('api') || window.CATCOMP_API_BASE_URL || '').trim().replace(/\/$/, '');
+    const apiBackupsValue = query.get('api_backups') || query.get('backups') || '';
+    const apiBackups = apiBackupsValue ? apiBackupsValue.split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.replace(/\/$/, '')) : [];
     const submitUrl = apiBase ? `${apiBase}/api/catcomp/submit` : '';
 
     if (!submitUrl) {
@@ -603,24 +605,34 @@
       setStatus('Submitting your entry...', 'ok');
 
       try {
-        const response = await fetch(submitUrl, {
-          method: 'POST',
-          body: formData,
-        });
-
-        let payload = {};
-        try {
-          payload = await response.json();
-        } catch (error) {
-          payload = {};
+        const candidates = [];
+        if (submitUrl) candidates.push(submitUrl);
+        for (const b of apiBackups) {
+          candidates.push((b.replace(/\/$/, '')) + '/api/catcomp/submit');
         }
 
-        if (!response.ok) {
-          throw new Error(payload.error || `Submission failed (${response.status})`);
+        let lastErr = null;
+        let okPayload = null;
+        for (const url of candidates) {
+          try {
+            const response = await fetch(url, { method: 'POST', body: formData });
+            let payload = {};
+            try { payload = await response.json(); } catch (error) { payload = {}; }
+            if (!response.ok) {
+              lastErr = new Error(payload.error || `Submission failed (${response.status})`);
+              continue;
+            }
+            okPayload = payload;
+            break;
+          } catch (e) {
+            lastErr = e;
+            continue;
+          }
         }
 
+        if (!okPayload) throw lastErr || new Error('Submission failed');
         form.reset();
-        setStatus(payload.message || 'Submission delivered. Staff should see it in DMs shortly.', 'ok');
+        setStatus(okPayload.message || 'Submission delivered. Staff should see it in DMs shortly.', 'ok');
       } catch (error) {
         setStatus(error.message || 'Submission failed.', 'error');
       } finally {

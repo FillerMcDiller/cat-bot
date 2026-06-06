@@ -23991,10 +23991,19 @@ def build_inventory_web_url(guild_id: int, user_id: int) -> str | None:
         return site_url
 
     sid = _create_inventory_session(guild_id, user_id)
+    # include backups (if any) so the frontend can attempt fallbacks
+    backups = []
+    try:
+        backups = getattr(config, "INVENTORY_API_BACKUPS", []) or []
+    except Exception:
+        backups = []
+    # exclude the primary from backups
+    backups = [b for b in backups if b and not b.rstrip("/") == api_base.rstrip("/")]
     query = urlencode(
         {
             "sid": sid,
             "api": api_base,
+            "api_backups": ",".join(backups) if backups else "",
             "tab": "inventory",
         }
     )

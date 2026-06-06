@@ -16,6 +16,21 @@ def _normalize_public_base_url(value: str | None) -> str | None:
         url = f"http://{url}"
     return url
 
+
+def _normalize_public_base_url_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    pieces = [p.strip() for p in re.split(r'[,
+\s]+', str(value)) if p and p.strip()]
+    seen = set()
+    out = []
+    for p in pieces:
+        norm = _normalize_public_base_url(p)
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
 TOKEN = os.getenv("TOKEN")
 if TOKEN:
     TOKEN = TOKEN.strip().replace('\ufeff', '')  # remove BOM and whitespace
@@ -52,6 +67,8 @@ INVENTORY_WEB_UI_URL = os.getenv("INVENTORY_WEB_UI_URL")
 
 # Public API base URL that the GitHub Pages UI should call
 INVENTORY_API_BASE_URL = _normalize_public_base_url(os.getenv("INVENTORY_API_BASE_URL"))
+# Optional comma/space-separated backup API endpoints (will be tried if primary fails)
+INVENTORY_API_BACKUPS = _normalize_public_base_url_list(os.getenv("INVENTORY_API_BACKUPS"))
 
 # Public API base URL for the Cat Competition submission form.
 # Falls back to the inventory API base when both features share the same backend.
