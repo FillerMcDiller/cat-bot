@@ -23735,6 +23735,11 @@ def _get_inventory_api_base_url() -> str | None:
     url = getattr(config, "INVENTORY_API_BASE_URL", None) or os.getenv("INVENTORY_API_BASE_URL")
     if not url:
         return None
+    normalizer = getattr(config, "_normalize_public_base_url", None)
+    if callable(normalizer):
+        normalized = normalizer(url)
+        if normalized:
+            return normalized
     return str(url).strip().rstrip("/")
 
 
@@ -23744,6 +23749,11 @@ def _get_catcomp_api_base_url() -> str | None:
         url = _get_inventory_api_base_url()
     if not url:
         return None
+    normalizer = getattr(config, "_normalize_public_base_url", None)
+    if callable(normalizer):
+        normalized = normalizer(url)
+        if normalized:
+            return normalized
     return str(url).strip().rstrip("/")
 
 
