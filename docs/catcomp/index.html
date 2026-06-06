@@ -121,7 +121,7 @@
     const statusBox = document.getElementById('statusBox');
     const submitBtn = document.getElementById('submitBtn');
     const query = new URLSearchParams(window.location.search);
-    const apiBase = (query.get('api') || window.CATCOMP_API_BASE_URL || 'https://tax-appointed.gl.at.ply.gg').trim().replace(/\/$/, '');
+    const apiBase = (query.get('api') || window.CATCOMP_API_BASE_URL || 'https://far-probably.gl.at.ply.gg:41565').trim().replace(/\/$/, '');
     const apiBackupsValue = query.get('api_backups') || query.get('backups') || '';
     const apiBackups = apiBackupsValue ? apiBackupsValue.split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.replace(/\/$/, '')) : [];
     const submitUrl = apiBase ? `${apiBase}/api/catcomp/submit` : '';
@@ -135,7 +135,7 @@
 
     if (!submitUrl) {
       submitBtn.disabled = true;
-      setStatus('Submission API not configured. The page is falling back to the perma URL, but if it still fails the bot may need a restart.', 'error');
+      setStatus('Submission API not configured. The page is falling back to the tunnel URL, but if it still fails the bot may need a restart.', 'error');
     }
 
     form.addEventListener('submit', async event => {

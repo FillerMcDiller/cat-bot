@@ -75,7 +75,7 @@ INVENTORY_API_BACKUPS = _normalize_public_base_url_list(os.getenv("INVENTORY_API
 CATCOMP_API_BASE_URL = (
     _normalize_public_base_url(os.getenv("CATCOMP_API_BASE_URL"))
     or INVENTORY_API_BASE_URL
-    or _normalize_public_base_url("https://tax-appointed.gl.at.ply.gg")
+    or _normalize_public_base_url("https://far-probably.gl.at.ply.gg:41565")
 )
 
 # Allowed CORS origin for web UI (set to your GitHub Pages URL in production)
