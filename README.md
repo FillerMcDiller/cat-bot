@@ -2,7 +2,7 @@
 #  ![Discord Bots](https://top.gg/api/widget/servers/1387305159264309399.svg)
 =======
 # cat-botmcdiller
-KITTAYYYYYYY
+KITTAYYYYYYY!
 
 Discord bot centered around catching cats.
 fun!
