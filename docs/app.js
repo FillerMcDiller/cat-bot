@@ -204,14 +204,39 @@ async function tryFetchWithBackups(path, options) {
   if (!candidates.length) throw new Error('No API base available');
 
   let lastErr = null;
+  // If the page is served over HTTPS, prefer HTTPS variants to avoid mixed-content
+  const preferHttps = window.location.protocol === "https:";
+  const tried = new Set();
   for (const base of candidates) {
-    const url = base + path;
-    try {
-      const resp = await fetch(url, options);
-      if (resp.ok) return resp;
-      lastErr = new Error(`HTTP ${resp.status}`);
-    } catch (e) {
-      lastErr = e;
+    const variants = [];
+    if (/^https?:\/\//i.test(base)) {
+      if (preferHttps) {
+        variants.push(base.replace(/^http:\/\//i, "https://"));
+        variants.push(base);
+      } else {
+        variants.push(base);
+      }
+    } else {
+      // scheme-less candidate (shouldn't happen often) - try https then http when page is https
+      if (preferHttps) {
+        variants.push("https://" + base);
+        variants.push("http://" + base);
+      } else {
+        variants.push("http://" + base);
+        variants.push("https://" + base);
+      }
+    }
+
+    for (const url of variants) {
+      if (tried.has(url)) continue;
+      tried.add(url);
+      try {
+        const resp = await fetch(url + path, options);
+        if (resp.ok) return resp;
+        lastErr = new Error(`HTTP ${resp.status}`);
+      } catch (e) {
+        lastErr = e;
+      }
     }
   }
   throw lastErr;

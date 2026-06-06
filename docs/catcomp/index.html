@@ -168,28 +168,55 @@
       try {
         // Try primary then backups
         const candidates = [];
-        if (submitUrl) candidates.push(submitUrl);
+        if (submitUrl) candidates.push(submitUrl.replace(/\/$/, ''));
         for (const b of apiBackups) {
-          candidates.push((b.replace(/\/$/, '')) + '/api/catcomp/submit');
+          candidates.push(b.replace(/\/$/, '') + '/api/catcomp/submit');
         }
 
+        // prefer https variants when the page is https to avoid mixed-content
+        const preferHttps = window.location.protocol === 'https:';
+        const tried = new Set();
         let lastErr = null;
         let okPayload = null;
-        for (const url of candidates) {
-          try {
-            const response = await fetch(url, { method: 'POST', body: formData });
-            let payload = {};
-            try { payload = await response.json(); } catch (error) { payload = {}; }
-            if (!response.ok) {
-              lastErr = new Error(payload.error || `Submission failed (${response.status})`);
+        for (const base of candidates) {
+          const variants = [];
+          if (/^https?:\/\//i.test(base)) {
+            if (preferHttps) {
+              variants.push(base.replace(/^http:\/\//i, 'https://'));
+              variants.push(base);
+            } else {
+              variants.push(base);
+            }
+          } else {
+            if (preferHttps) {
+              variants.push('https://' + base.replace(/^[\/:]+/, ''));
+              variants.push('http://' + base.replace(/^[\/:]+/, ''));
+            } else {
+              variants.push('http://' + base.replace(/^[\/:]+/, ''));
+              variants.push('https://' + base.replace(/^[\/:]+/, ''));
+            }
+          }
+
+          for (const url of variants) {
+            if (tried.has(url)) continue;
+            tried.add(url);
+            try {
+              const response = await fetch(url, { method: 'POST', body: formData });
+              let payload = {};
+              try { payload = await response.json(); } catch (error) { payload = {}; }
+              if (!response.ok) {
+                lastErr = new Error(payload.error || `Submission failed (${response.status})`);
+                continue;
+              }
+              okPayload = payload;
+              break;
+            } catch (e) {
+              lastErr = e;
               continue;
             }
-            okPayload = payload;
-            break;
-          } catch (e) {
-            lastErr = e;
-            continue;
           }
+
+          if (okPayload) break;
         }
 
         if (!okPayload) throw lastErr || new Error('Submission failed');
