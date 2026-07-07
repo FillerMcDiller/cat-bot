@@ -23919,7 +23919,7 @@ def _get_wiki_web_ui_url() -> str:
 
 def _get_wiki_api_base_url() -> str | None:
     # Hardcoded Cloudflare tunnel URL (temporary override while .env is unavailable)
-    url = "https://pork-munich-recognised-electronic.trycloudflare.com"
+    url = "https://pork-munich-recognised-electronic.trycloudflare.com/api/wiki"
     if not url:
         url = _get_inventory_api_base_url()
     if not url:
