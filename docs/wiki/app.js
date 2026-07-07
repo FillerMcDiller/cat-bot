@@ -163,6 +163,17 @@ function promptAndInsertHeader() {
   execEditorCommand('formatBlock', 'h2');
 }
 
+function promptAndInsertSection() {
+  const title = window.prompt('Section title', 'New section');
+  if (!title) {
+    return;
+  }
+  const intro = window.prompt('Section text', 'Add details here.');
+  const sectionTitle = escapeHtml(title.trim() || 'New section');
+  const sectionBody = escapeHtml((intro || 'Add details here.').trim() || 'Add details here.');
+  insertHtml(`<div class="section"><h2>${sectionTitle}</h2><p>${sectionBody}</p></div>`);
+}
+
 function ensureEditingContent() {
   if (!pageEl.innerHTML.trim()) {
     pageEl.innerHTML = originalHtml;
@@ -220,7 +231,9 @@ editToolbar.addEventListener('click', event => {
   }
 
   const action = button.dataset.action;
-  if (action === 'bold') {
+  if (action === 'section') {
+    promptAndInsertSection();
+  } else if (action === 'bold') {
     execEditorCommand('bold');
   } else if (action === 'italic') {
     execEditorCommand('italic');
