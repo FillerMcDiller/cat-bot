@@ -9899,14 +9899,14 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            # Runs the command synchronously and captures both stdout and stderr
+            # Runs synchronously like os.system, but captures full stdout and stderr output
             output = subprocess.getoutput(command_content)
                 
             if not output.strip():
                 await message.reply("✅ Command finished with no output.")
                 return
 
-            # Chunk outputs sequentially to avoid Discord's 2000 character limit
+            # Chunk outputs sequentially into codeblocks to avoid Discord's 2000 character limit
             max_chunk_size = 1900
             for i in range(0, len(output), max_chunk_size):
                 chunk = output[i:i + max_chunk_size]
@@ -9914,7 +9914,6 @@ async def on_message(message: discord.Message):
                     
         except Exception as e:
             await message.reply(f"❌ Error running shell command: `{e}`")
-
 # the message when cat gets added to a new server
 async def on_guild_join(guild):
     def verify(ch):
