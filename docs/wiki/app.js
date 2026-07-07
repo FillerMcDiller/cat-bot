@@ -12,7 +12,11 @@ const navItems = document.querySelectorAll('.sidebar nav li');
 const crumbPage = document.getElementById('crumbPage');
 const articleHeading = document.getElementById('articleHeading');
 const editToolbar = document.getElementById('editToolbar');
-const wikiEditToken = new URLSearchParams(window.location.search).get('edit') || '';
+const query = new URLSearchParams(window.location.search);
+const wikiEditToken = query.get('edit') || '';
+const wikiApiBase = (query.get('api') || '').trim().replace(/\/$/, '');
+const wikiSaveUrl = wikiApiBase ? `${wikiApiBase}/api/wiki/save` : '/api/wiki/save';
+const wikiHistoryBaseUrl = wikiApiBase ? `${wikiApiBase}/api/wiki/history` : '/api/wiki/history';
 let currentPage = 'overview';
 let originalHtml = '';
 let isEditing = false;
@@ -57,7 +61,8 @@ function renderHistoryItems(items) {
 async function loadHistory(page) {
   historyList.innerHTML = '<div class="history-item"><strong>Loading...</strong><span>Fetching page history.</span></div>';
   try {
-    const res = await fetch(`/api/wiki/history?page=${encodeURIComponent(page)}&limit=40`);
+    const historyUrl = `${wikiHistoryBaseUrl}?page=${encodeURIComponent(page)}&limit=40`;
+    const res = await fetch(historyUrl);
     if (!res.ok) {
       throw new Error('Failed to load history');
     }
@@ -318,7 +323,7 @@ cancelBtn.addEventListener('click',()=>{
 saveBtn.addEventListener('click',async()=>{
   const body = pageEl.innerHTML;
   try{
-    const res = await fetch('/api/wiki/save',{
+    const res = await fetch(wikiSaveUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({page: currentPage, html: body, edit_token: wikiEditToken})
@@ -334,10 +339,19 @@ saveBtn.addEventListener('click',async()=>{
       }
       alert('Saved');
     } else {
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch (error) {
+        payload = null;
+      }
       if (res.status === 401) {
         alert('Edit session expired or already used. Run /wiki again to get a fresh edit link.');
+      } else if (res.status === 404) {
+        alert('Wiki API endpoint was not found. Use the /wiki edit link that includes API parameters.');
       } else {
-        alert('Save failed');
+        const reason = payload && payload.error ? ` (${payload.error})` : '';
+        alert(`Save failed${reason}`);
       }
     }
   }catch(e){

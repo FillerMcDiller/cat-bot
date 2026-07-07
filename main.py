@@ -6315,31 +6315,32 @@ async def start_internal_server(port: int = 3002):
 
         # Wiki save endpoint - stores both rendered HTML and wikitext source for docs/wiki/pages/<page>.*
         async def _wiki_save(request):
+            origin = request.headers.get("Origin")
             try:
                 payload = await request.json()
                 page = str(payload.get('page', ''))
                 source = str(payload.get('source', ''))
                 html = payload.get('html', '')
             except Exception:
-                return web.json_response({'error': 'invalid payload'}, status=400)
+                return _web_json({'error': 'invalid payload'}, status=400, origin=origin)
 
             token = _extract_wiki_edit_token(request, payload)
-            token_data = _resolve_wiki_edit_token(token, consume=True)
+            token_data = _resolve_wiki_edit_token(token, consume=False)
             if not token_data:
-                return web.json_response({'error': 'unauthorized'}, status=401)
+                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
 
             try:
                 guild_id = int(token_data.get('g', 0))
                 user_id = int(token_data.get('u', 0))
             except Exception:
-                return web.json_response({'error': 'unauthorized'}, status=401)
+                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
 
             if guild_id <= 0 or user_id <= 0 or not await _user_has_wiki_edit_role(guild_id, user_id):
-                return web.json_response({'error': 'unauthorized'}, status=401)
+                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
 
             # sanitize page name
             if not re.fullmatch(r"[a-z0-9\-]+", page):
-                return web.json_response({'error': 'invalid page name'}, status=400)
+                return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
 
             editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
 
@@ -6367,15 +6368,21 @@ async def start_internal_server(port: int = 3002):
                         "summary": "Published changes",
                     },
                 )
-                return web.json_response({'status': 'ok', 'page': page})
+
+                token_exp = int(token_data.get("exp", 0))
+                if token_exp > 0:
+                    WIKI_CONSUMED_EDIT_TOKENS[_wiki_edit_token_fingerprint(token)] = token_exp
+
+                return _web_json({'status': 'ok', 'page': page}, origin=origin)
             except Exception as e:
                 logging.exception('Failed to save wiki page')
-                return web.json_response({'error': 'save_failed', 'details': str(e)}, status=500)
+                return _web_json({'error': 'save_failed', 'details': str(e)}, status=500, origin=origin)
 
         async def _wiki_history(request):
+            origin = request.headers.get("Origin")
             page = str(request.query.get('page', '')).strip().lower()
             if not re.fullmatch(r"[a-z0-9\-]+", page):
-                return web.json_response({'error': 'invalid page name'}, status=400)
+                return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
 
             try:
                 limit = int(str(request.query.get('limit', '40')).strip())
@@ -6384,13 +6391,14 @@ async def start_internal_server(port: int = 3002):
             limit = max(1, min(limit, 100))
 
             entries = _read_wiki_history(page, limit=limit)
-            return web.json_response({'status': 'ok', 'page': page, 'entries': entries})
+            return _web_json({'status': 'ok', 'page': page, 'entries': entries}, origin=origin)
 
         async def _wiki_preflight(request):
+            origin = request.headers.get("Origin")
             return web.Response(status=204, headers={
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type',
+                **_web_ui_headers(origin),
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wiki-Edit-Token',
             })
 
         app.router.add_options('/api/wiki/save', _wiki_preflight)
@@ -10240,12 +10248,16 @@ async def wiki(message: discord.Interaction):
         return
 
     edit_token = await _create_wiki_edit_token(message.guild.id, message.user.id)
+    wiki_api_base = _get_wiki_api_base_url()
 
     def _wiki_page_url(page: str, edit_mode: bool = False) -> str:
         base_url = _get_wiki_web_ui_url()
         page_url = f"{base_url}/{page}.html"
         if edit_mode and edit_token:
-            return f"{base_url}/?{urlencode({'edit': edit_token})}#{page}"
+            params = {'edit': edit_token}
+            if wiki_api_base:
+                params['api'] = wiki_api_base
+            return f"{base_url}/?{urlencode(params)}#{page}"
         return page_url
     
     embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
@@ -10269,7 +10281,10 @@ async def wiki(message: discord.Interaction):
     view = None
     if edit_token:
         view = View()
-        edit_url = f"{_get_wiki_web_ui_url()}/?{urlencode({'edit': edit_token})}#overview"
+        edit_params = {'edit': edit_token}
+        if wiki_api_base:
+            edit_params['api'] = wiki_api_base
+        edit_url = f"{_get_wiki_web_ui_url()}/?{urlencode(edit_params)}#overview"
         view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
         view.add_item(Button(label="Edit Wiki", url=edit_url, style=ButtonStyle.link))
         embed.set_footer(text=f"Edit access enabled for role {WIKI_EDIT_ROLE_ID}")
@@ -23847,6 +23862,20 @@ def _get_wiki_web_ui_url() -> str:
     url = getattr(config, "WIKI_WEB_UI_URL", None) or os.getenv("WIKI_WEB_UI_URL") or getattr(config, "WIKI_URL", None) or os.getenv("WIKI_URL")
     if not url:
         url = "https://fillermcdiller.github.io/cat-bot/wiki"
+    return str(url).strip().rstrip("/")
+
+
+def _get_wiki_api_base_url() -> str | None:
+    url = getattr(config, "WIKI_API_BASE_URL", None) or os.getenv("WIKI_API_BASE_URL")
+    if not url:
+        url = _get_inventory_api_base_url()
+    if not url:
+        return None
+    normalizer = getattr(config, "_normalize_public_base_url", None)
+    if callable(normalizer):
+        normalized = normalizer(url)
+        if normalized:
+            return normalized
     return str(url).strip().rstrip("/")
 
 
