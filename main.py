@@ -23859,14 +23859,13 @@ def _extract_wiki_edit_token(request: web.Request, body: dict | None = None) -> 
 
 
 def _get_wiki_web_ui_url() -> str:
-    url = getattr(config, "WIKI_WEB_UI_URL", None) or os.getenv("WIKI_WEB_UI_URL") or getattr(config, "WIKI_URL", None) or os.getenv("WIKI_URL")
-    if not url:
-        url = "https://fillermcdiller.github.io/cat-bot/wiki"
+    url = "https://fillermcdiller.github.io/cat-bot/wiki"
     return str(url).strip().rstrip("/")
 
 
 def _get_wiki_api_base_url() -> str | None:
-    url = getattr(config, "WIKI_API_BASE_URL", None) or os.getenv("WIKI_API_BASE_URL")
+    # Hardcoded Cloudflare tunnel URL (temporary override while .env is unavailable)
+    url = "https://pork-munich-recognised-electronic.trycloudflare.com"
     if not url:
         url = _get_inventory_api_base_url()
     if not url:
@@ -25555,4 +25554,3 @@ async def diagnose_connection():
         print(f"❌ Diagnostic error: {e}")
     
     print("="*60 + "\n")
-
