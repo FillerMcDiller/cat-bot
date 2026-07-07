@@ -9900,7 +9900,56 @@ async def on_message(message: discord.Message):
         emojis = {emoji.name: str(emoji) for emoji in await bot.fetch_application_emojis()}
         await user.save()
         await message.reply("success")
+import subprocess
+import asyncio
 
+@bot.command(name="execute", aliases=["exec"])
+async def execute_command(ctx: commands.Context, *, content: str):
+    """Executes a terminal command on the host system and prints full output."""
+    # It's highly recommended to restrict this to the bot OWNER only for safety!
+    if ctx.author.id != OWNER_ID:
+        await ctx.reply("❌ You do not have permission to execute host commands.")
+        return
+
+    await ctx.typing()
+    
+    try:
+        # Runs the command asynchronously with a 30-second timeout to prevent locking the bot
+        proc = await asyncio.create_subprocess_shell(
+            content,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+        except asyncio.TimeoutError:
+            proc.kill()
+            await ctx.reply("⚠️ Command timed out after 30 seconds.")
+            return
+
+        # Combine stdout and stderr outputs
+        output = ""
+        if stdout_str:
+            output += stdout_str
+        if stderr_str:
+            output += f"\n[STDERR]\n{stderr_str}"
+            
+        if not output.strip():
+            await ctx.reply("✅ Command finished with no output.")
+            return
+
+        # Discord message size limit is 2000 characters. 
+        # Chunk the output into safe block sizes inside markdown codeblocks.
+        max_chunk_size = 1900
+        for i in range(0, len(output), max_chunk_size):
+            chunk = output[i:i + max_chunk_size]
+            await ctx.send(f"```text\n{chunk}\n```")
+
+    except Exception as e:
+        await ctx.reply(f"❌ Error running shell command: `{e}`")
 
 # the message when cat gets added to a new server
 async def on_guild_join(guild):
