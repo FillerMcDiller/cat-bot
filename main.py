@@ -10206,33 +10206,41 @@ async def wiki(message: discord.Interaction):
     if message.guild is None:
         await message.response.send_message("This wiki command only works in a server.", ephemeral=True)
         return
+
+    edit_token = await _create_wiki_edit_token(message.guild.id, message.user.id)
+
+    def _wiki_page_url(page: str, edit_mode: bool = False) -> str:
+        base_url = _get_wiki_web_ui_url()
+        page_url = f"{base_url}/{page}.html"
+        if edit_mode and edit_token:
+            return f"{base_url}/?{urlencode({'edit': edit_token})}#{page}"
+        return page_url
     
     embed = discord.Embed(title="KITTAYYYYYYY Wiki", color=Colors.brown)
     embed.description = "\n".join(
         [
-            "Main Page: https://fillermcdiller.github.io/cat-bot/wiki/",
+            f"Main Page: [Open the wiki]({_wiki_page_url('overview', bool(edit_token))})" if edit_token else "Main Page: https://fillermcdiller.github.io/cat-bot/wiki/",
             "",
-            "[KITTAYYYYYYY](https://fillermcdiller.github.io/cat-bot/wiki/kittay.html)",
-            "[Cat Spawning](https://fillermcdiller.github.io/cat-bot/wiki/spawning.html)",
-            "[Commands](https://fillermcdiller.github.io/cat-bot/wiki/commands.html)",
-            "[Cat Types](https://fillermcdiller.github.io/cat-bot/wiki/cat-types.html)",
-            "[Cattlepass](https://fillermcdiller.github.io/cat-bot/wiki/battlepass.html)",
-            "[Achievements](https://fillermcdiller.github.io/cat-bot/wiki/achievements.html)",
-            "[Packs](https://fillermcdiller.github.io/cat-bot/wiki/packs.html)",
-            "[Trading](https://fillermcdiller.github.io/cat-bot/wiki/trading.html)",
-            "[Gambling](https://fillermcdiller.github.io/cat-bot/wiki/info.html)",
-            "[The Dark Market](https://fillermcdiller.github.io/cat-bot/wiki/info.html)",
-            "[Prisms](https://fillermcdiller.github.io/cat-bot/wiki/prisms.html)",
+            f"[KITTAYYYYYYY]({_wiki_page_url('kittay', bool(edit_token))})",
+            f"[Cat Spawning]({_wiki_page_url('spawning', bool(edit_token))})",
+            f"[Commands]({_wiki_page_url('commands', bool(edit_token))})",
+            f"[Cat Types]({_wiki_page_url('cat-types', bool(edit_token))})",
+            f"[Cattlepass]({_wiki_page_url('battlepass', bool(edit_token))})",
+            f"[Achievements]({_wiki_page_url('achievements', bool(edit_token))})",
+            f"[Packs]({_wiki_page_url('packs', bool(edit_token))})",
+            f"[Trading]({_wiki_page_url('trading', bool(edit_token))})",
+            f"[Gambling]({_wiki_page_url('info', bool(edit_token))})",
+            f"[The Dark Market]({_wiki_page_url('info', bool(edit_token))})",
+            f"[Prisms]({_wiki_page_url('prisms', bool(edit_token))})",
         ]
     )
     view = None
-    edit_token = await _create_wiki_edit_token(message.guild.id, message.user.id)
     if edit_token:
         view = View()
         edit_url = f"{_get_wiki_web_ui_url()}/?{urlencode({'edit': edit_token})}#overview"
         view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
         view.add_item(Button(label="Edit Wiki", url=edit_url, style=ButtonStyle.link))
-        embed.set_footer(text=f"Edit access limited to role {WIKI_EDIT_ROLE_ID}")
+        embed.set_footer(text=f"Edit access enabled for role {WIKI_EDIT_ROLE_ID}")
     else:
         view = View()
         view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
