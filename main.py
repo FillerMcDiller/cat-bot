@@ -9831,16 +9831,6 @@ async def on_message(message: discord.Message):
                 pass
     if text.startswith("cat!eval"):
         # complex eval, multi-line + async support
-        # requires the full `await message.channel.send(2+3)` to get the result
-
-        # async def go():
-        #  <stuff goes here>
-        #
-        # try:
-        #  bot.loop.create_task(go())
-        # except Exception:
-        #  await message.reply(traceback.format_exc())
-
         silly_billy = text[9:]
 
         spaced = ""
@@ -9900,24 +9890,12 @@ async def on_message(message: discord.Message):
         emojis = {emoji.name: str(emoji) for emoji in await bot.fetch_application_emojis()}
         await user.save()
         await message.reply("success")
+        
     if text.startswith("cat!execute"):
-        # Ensure only the bot owner can execute terminal commands
-        if message.author.id != OWNER_ID:
-            try:
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.reply("❌ Only the bot owner can use this command.")
-            except Exception:
-                pass
-            return
-
         # Extract the command content after "cat!execute "
         command_content = text[12:].strip()
         if not command_content:
-            try:
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.reply("❌ Please provide a terminal command to execute.")
-            except Exception:
-                pass
+            await message.reply("❌ Please provide a terminal command to execute.")
             return
 
         try:
@@ -9928,7 +9906,7 @@ async def on_message(message: discord.Message):
                 stderr=asyncio.subprocess.PIPE
             )
             
-            # Read output with a safety timeout (e.g., 30 seconds) so the bot doesn't hang
+            # Read output with a safety timeout (30 seconds) so the bot doesn't hang
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
                 stdout_str = stdout.decode('utf-8', errors='replace')
@@ -9938,8 +9916,7 @@ async def on_message(message: discord.Message):
                     proc.kill()
                 except Exception:
                     pass
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.reply("⚠️ Command timed out after 30 seconds.")
+                await message.reply("⚠️ Command timed out after 30 seconds.")
                 return
 
             # Combine outputs
@@ -9950,23 +9927,17 @@ async def on_message(message: discord.Message):
                 output += f"\n[STDERR]\n{stderr_str}"
                 
             if not output.strip():
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.reply("✅ Command finished with no output.")
+                await message.reply("✅ Command finished with no output.")
                 return
 
             # Chunk outputs sequentially to avoid Discord's 2000 character limit
             max_chunk_size = 1900
             for i in range(0, len(output), max_chunk_size):
                 chunk = output[i:i + max_chunk_size]
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.channel.send(f"```text\n{chunk}\n```")
+                await message.channel.send(f"```text\n{chunk}\n```")
                     
         except Exception as e:
-            try:
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await message.reply(f"❌ Error running shell command: `{e}`")
-            except Exception:
-                pass
+            await message.reply(f"❌ Error running shell command: `{e}`")
 
 # the message when cat gets added to a new server
 async def on_guild_join(guild):
