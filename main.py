@@ -23933,7 +23933,7 @@ def _get_wiki_api_base_url() -> str | None:
 
 
 def _get_inventory_web_ui_url() -> str | None:
-    url = "https://pork-munich-recognised-electronic.trycloudflare.com/api/inventory"
+    url = getattr(config, "INVENTORY_WEB_UI_URL", None) or os.getenv("INVENTORY_WEB_UI_URL")
     if not url:
         origin = getattr(config, "WEB_UI_ORIGIN", None) or os.getenv("WEB_UI_ORIGIN")
         if origin:
@@ -23948,7 +23948,7 @@ def _get_inventory_web_ui_url() -> str | None:
 
 
 def _get_inventory_api_base_url() -> str | None:
-    url = getattr(config, "INVENTORY_API_BASE_URL", None) or os.getenv("INVENTORY_API_BASE_URL")
+    url = "https://pork-munich-recognised-electronic.trycloudflare.com/api/inventory"
     if not url:
         return None
     normalizer = getattr(config, "_normalize_public_base_url", None)
