@@ -9900,56 +9900,73 @@ async def on_message(message: discord.Message):
         emojis = {emoji.name: str(emoji) for emoji in await bot.fetch_application_emojis()}
         await user.save()
         await message.reply("success")
-import subprocess
-import asyncio
+    if text.startswith("cat!execute"):
+        # Ensure only the bot owner can execute terminal commands
+        if message.author.id != OWNER_ID:
+            try:
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.reply("❌ Only the bot owner can use this command.")
+            except Exception:
+                pass
+            return
 
-@bot.command(name="execute", aliases=["exec"])
-async def execute_command(ctx: commands.Context, *, content: str):
-    """Executes a terminal command on the host system and prints full output."""
-    # It's highly recommended to restrict this to the bot OWNER only for safety!
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply("❌ You do not have permission to execute host commands.")
-        return
+        # Extract the command content after "cat!execute "
+        command_content = text[12:].strip()
+        if not command_content:
+            try:
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.reply("❌ Please provide a terminal command to execute.")
+            except Exception:
+                pass
+            return
 
-    await ctx.typing()
-    
-    try:
-        # Runs the command asynchronously with a 30-second timeout to prevent locking the bot
-        proc = await asyncio.create_subprocess_shell(
-            content,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
-        except asyncio.TimeoutError:
-            proc.kill()
-            await ctx.reply("⚠️ Command timed out after 30 seconds.")
-            return
-
-        # Combine stdout and stderr outputs
-        output = ""
-        if stdout_str:
-            output += stdout_str
-        if stderr_str:
-            output += f"\n[STDERR]\n{stderr_str}"
+            # Execute the shell command and grab both stdout and stderr
+            proc = await asyncio.create_subprocess_shell(
+                command_content,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
             
-        if not output.strip():
-            await ctx.reply("✅ Command finished with no output.")
-            return
+            # Read output with a safety timeout (e.g., 30 seconds) so the bot doesn't hang
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+                stdout_str = stdout.decode('utf-8', errors='replace')
+                stderr_str = stderr.decode('utf-8', errors='replace')
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.reply("⚠️ Command timed out after 30 seconds.")
+                return
 
-        # Discord message size limit is 2000 characters. 
-        # Chunk the output into safe block sizes inside markdown codeblocks.
-        max_chunk_size = 1900
-        for i in range(0, len(output), max_chunk_size):
-            chunk = output[i:i + max_chunk_size]
-            await ctx.send(f"```text\n{chunk}\n```")
+            # Combine outputs
+            output = ""
+            if stdout_str:
+                output += stdout_str
+            if stderr_str:
+                output += f"\n[STDERR]\n{stderr_str}"
+                
+            if not output.strip():
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.reply("✅ Command finished with no output.")
+                return
 
-    except Exception as e:
-        await ctx.reply(f"❌ Error running shell command: `{e}`")
+            # Chunk outputs sequentially to avoid Discord's 2000 character limit
+            max_chunk_size = 1900
+            for i in range(0, len(output), max_chunk_size):
+                chunk = output[i:i + max_chunk_size]
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.channel.send(f"```text\n{chunk}\n```")
+                    
+        except Exception as e:
+            try:
+                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
+                    await message.reply(f"❌ Error running shell command: `{e}`")
+            except Exception:
+                pass
 
 # the message when cat gets added to a new server
 async def on_guild_join(guild):
