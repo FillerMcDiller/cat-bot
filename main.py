@@ -10363,7 +10363,60 @@ async def wiki(message: discord.Interaction):
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     await progress(message, profile, "wiki")
 
+@bot.tree.command(name="execute", description="(OWNER) Execute a terminal command on the host machine")
+@discord.app_commands.describe(command="The terminal command to run")
+async def execute_command(interaction: discord.Interaction, command: str):
+    # Ensure only the bot owner can execute terminal commands
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("❌ Only the bot owner can use this command.", ephemeral=True)
+        return
 
+    # Defer the response as an ephemeral message so the bot doesn't freeze or time out
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # Execute the shell command asynchronously and capture outputs
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # Read output with a safety timeout (30 seconds)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            await interaction.followup.send("⚠️ Command timed out after 30 seconds.")
+            return
+
+        # Combine stdout and stderr outputs
+        output = ""
+        if stdout_str:
+            output += stdout_str
+        if stderr_str:
+            output += f"\n[STDERR]\n{stderr_str}"
+            
+        if not output.strip():
+            await interaction.followup.send("✅ Command finished with no output.")
+            return
+
+        # Chunk outputs sequentially to avoid Discord's 2000 character limit
+        max_chunk_size = 1900
+        chunks = [output[i:i + max_chunk_size] for i in range(0, len(output), max_chunk_size)]
+        
+        # Send chunks as follow-up messages
+        for chunk in chunks:
+            await interaction.followup.send(f"```text\n{chunk}\n```")
+                
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error running shell command: `{e}`")
+        
 @bot.tree.command(description="Read The KITTAYYYYYYY Times™️")
 async def news(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
