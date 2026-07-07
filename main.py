@@ -9899,32 +9899,8 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            # Execute the shell command and grab both stdout and stderr
-            proc = await asyncio.create_subprocess_shell(
-                command_content,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            # Read output with a safety timeout (30 seconds) so the bot doesn't hang
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-                stdout_str = stdout.decode('utf-8', errors='replace')
-                stderr_str = stderr.decode('utf-8', errors='replace')
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-                await message.reply("⚠️ Command timed out after 30 seconds.")
-                return
-
-            # Combine outputs
-            output = ""
-            if stdout_str:
-                output += stdout_str
-            if stderr_str:
-                output += f"\n[STDERR]\n{stderr_str}"
+            # Runs the command synchronously and captures both stdout and stderr
+            output = subprocess.getoutput(command_content)
                 
             if not output.strip():
                 await message.reply("✅ Command finished with no output.")
