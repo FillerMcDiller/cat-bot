@@ -2,6 +2,8 @@ const pageEl = document.getElementById('page');
 const editBtn = document.getElementById('editBtn');
 const saveBtn = document.getElementById('saveBtn');
 const cancelBtn = document.getElementById('cancelBtn');
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
 const navItems = document.querySelectorAll('.sidebar nav li');
 const crumbPage = document.getElementById('crumbPage');
 const articleHeading = document.getElementById('articleHeading');
@@ -15,7 +17,12 @@ function setEditingMode(isEditing) {
   editToolbar.hidden = !isEditing;
   saveBtn.style.display = isEditing ? '' : 'none';
   cancelBtn.style.display = isEditing ? '' : 'none';
+  undoBtn.style.display = isEditing ? '' : 'none';
+  redoBtn.style.display = isEditing ? '' : 'none';
   pageEl.contentEditable = isEditing ? 'true' : 'false';
+  pageEl.spellcheck = isEditing;
+  pageEl.classList.toggle('editable', isEditing);
+  saveBtn.textContent = 'Publish';
   editBtn.textContent = isEditing ? 'Done' : 'Edit';
   editBtn.setAttribute('aria-pressed', isEditing ? 'true' : 'false');
 }
@@ -177,6 +184,25 @@ editToolbar.addEventListener('click', event => {
     execEditorCommand('subscript');
   } else if (action === 'hr') {
     execEditorCommand('insertHorizontalRule');
+  }
+});
+
+editToolbar.addEventListener('mousedown', event => {
+  const button = event.target.closest('button[data-action]');
+  if (button) {
+    event.preventDefault();
+  }
+});
+
+undoBtn.addEventListener('click', () => {
+  if (isEditing) {
+    execEditorCommand('undo');
+  }
+});
+
+redoBtn.addEventListener('click', () => {
+  if (isEditing) {
+    execEditorCommand('redo');
   }
 });
 

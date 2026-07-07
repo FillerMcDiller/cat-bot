@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -486,6 +490,7 @@ textarea {
   outline: 2px dashed rgba(192, 92, 47, 0.35);
   outline-offset: 12px;
   border-radius: 14px;
+  cursor: text;
 }
 
 @media (max-width: 1024px) {
