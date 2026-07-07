@@ -29,6 +29,7 @@ import os
 import platform
 import random
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -78,8 +79,10 @@ import os
 BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
 WIKI_PAGES_PATH = os.path.join(BASE_PATH, "docs", "wiki", "pages")
+WIKI_HISTORY_PATH = os.path.join(BASE_PATH, "docs", "wiki", "history")
 WIKI_EDIT_ROLE_ID = int(os.getenv("WIKI_EDIT_ROLE_ID", "1510495579623395409"))
 WIKI_EDIT_TOKEN_TTL_SECONDS = 3600 * 6
+WIKI_CONSUMED_EDIT_TOKENS: dict[str, int] = {}
 
 async def web_ui_preflight(request):
     return web.Response(status=204, headers={
@@ -6321,7 +6324,7 @@ async def start_internal_server(port: int = 3002):
                 return web.json_response({'error': 'invalid payload'}, status=400)
 
             token = _extract_wiki_edit_token(request, payload)
-            token_data = _resolve_wiki_edit_token(token)
+            token_data = _resolve_wiki_edit_token(token, consume=True)
             if not token_data:
                 return web.json_response({'error': 'unauthorized'}, status=401)
 
@@ -6338,6 +6341,8 @@ async def start_internal_server(port: int = 3002):
             if not re.fullmatch(r"[a-z0-9\-]+", page):
                 return web.json_response({'error': 'invalid page name'}, status=400)
 
+            editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
+
             try:
                 os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
                 source_target = os.path.join(WIKI_PAGES_PATH, f"{page}.wiki")
@@ -6350,10 +6355,36 @@ async def start_internal_server(port: int = 3002):
                     f.write(str(source))
                 with open(target, 'w', encoding='utf-8') as f:
                     f.write(str(html))
+
+                _append_wiki_history_entry(
+                    page,
+                    {
+                        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                        "page": page,
+                        "guild_id": guild_id,
+                        "user_id": user_id,
+                        "editor_display": editor_display,
+                        "summary": "Published changes",
+                    },
+                )
                 return web.json_response({'status': 'ok', 'page': page})
             except Exception as e:
                 logging.exception('Failed to save wiki page')
                 return web.json_response({'error': 'save_failed', 'details': str(e)}, status=500)
+
+        async def _wiki_history(request):
+            page = str(request.query.get('page', '')).strip().lower()
+            if not re.fullmatch(r"[a-z0-9\-]+", page):
+                return web.json_response({'error': 'invalid page name'}, status=400)
+
+            try:
+                limit = int(str(request.query.get('limit', '40')).strip())
+            except Exception:
+                limit = 40
+            limit = max(1, min(limit, 100))
+
+            entries = _read_wiki_history(page, limit=limit)
+            return web.json_response({'status': 'ok', 'page': page, 'entries': entries})
 
         async def _wiki_preflight(request):
             return web.Response(status=204, headers={
@@ -6364,6 +6395,7 @@ async def start_internal_server(port: int = 3002):
 
         app.router.add_options('/api/wiki/save', _wiki_preflight)
         app.router.add_post('/api/wiki/save', _wiki_save)
+        app.router.add_get('/api/wiki/history', _wiki_history)
 
         async def _catcomp_submit(request):
             origin = request.headers.get("Origin")
@@ -10246,7 +10278,7 @@ async def wiki(message: discord.Interaction):
         view.add_item(Button(label="Open Wiki", url="https://fillermcdiller.github.io/cat-bot/wiki/"))
         embed.set_footer(text="Edit access is limited to a Discord role.")
 
-    await message.response.send_message(embed=embed, view=view)
+    await message.response.send_message(embed=embed, view=view, ephemeral=True)
     profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
     await progress(message, profile, "wiki")
 
@@ -23632,8 +23664,12 @@ def _get_wiki_edit_token_secret() -> str | None:
     return str(secret).strip()
 
 
-def _wiki_edit_token_payload(guild_id: int, user_id: int, exp: int) -> str:
-    return json.dumps({"g": int(guild_id), "u": int(user_id), "exp": int(exp)}, separators=(",", ":"), sort_keys=True)
+def _wiki_edit_token_payload(guild_id: int, user_id: int, exp: int, nonce: str) -> str:
+    return json.dumps({"g": int(guild_id), "u": int(user_id), "exp": int(exp), "n": str(nonce)}, separators=(",", ":"), sort_keys=True)
+
+
+def _wiki_edit_token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _encode_wiki_edit_token(payload: str, secret: str) -> str:
@@ -23684,6 +23720,70 @@ async def _user_has_wiki_edit_role(guild_id: int, user_id: int) -> bool:
     return any(getattr(role, "id", None) == WIKI_EDIT_ROLE_ID for role in getattr(member, "roles", []))
 
 
+async def _resolve_wiki_editor_display(guild_id: int, user_id: int) -> str:
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        try:
+            guild = await bot.fetch_guild(int(guild_id))
+        except Exception:
+            guild = None
+    if guild is None:
+        return str(user_id)
+
+    member = guild.get_member(int(user_id))
+    if member is None:
+        try:
+            member = await guild.fetch_member(int(user_id))
+        except Exception:
+            member = None
+    if member is None:
+        return str(user_id)
+
+    display_name = getattr(member, "display_name", None) or getattr(member, "name", None) or str(user_id)
+    return f"{display_name} ({user_id})"
+
+
+def _wiki_history_file(page: str) -> str:
+    return os.path.join(WIKI_HISTORY_PATH, f"{page}.json")
+
+
+def _append_wiki_history_entry(page: str, entry: dict) -> None:
+    os.makedirs(WIKI_HISTORY_PATH, exist_ok=True)
+    target = _wiki_history_file(page)
+    data: list[dict] = []
+    if os.path.exists(target):
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, list):
+                    data = loaded
+        except Exception:
+            data = []
+    data.append(entry)
+    # Keep newest 300 edits per page to avoid unbounded growth.
+    if len(data) > 300:
+        data = data[-300:]
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _read_wiki_history(page: str, limit: int = 40) -> list[dict]:
+    target = _wiki_history_file(page)
+    if not os.path.exists(target):
+        return []
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if not isinstance(loaded, list):
+            return []
+        clean = [item for item in loaded if isinstance(item, dict)]
+        if limit <= 0:
+            return list(reversed(clean))
+        return list(reversed(clean[-limit:]))
+    except Exception:
+        return []
+
+
 async def _create_wiki_edit_token(guild_id: int, user_id: int) -> str | None:
     if not await _user_has_wiki_edit_role(guild_id, user_id):
         return None
@@ -23691,24 +23791,42 @@ async def _create_wiki_edit_token(guild_id: int, user_id: int) -> str | None:
     if not secret:
         return None
     exp = int(time.time()) + WIKI_EDIT_TOKEN_TTL_SECONDS
-    payload = _wiki_edit_token_payload(guild_id, user_id, exp)
+    payload = _wiki_edit_token_payload(guild_id, user_id, exp, secrets.token_urlsafe(12))
     return _encode_wiki_edit_token(payload, secret)
 
 
-def _resolve_wiki_edit_token(token: str) -> dict | None:
+def _resolve_wiki_edit_token(token: str, consume: bool = False) -> dict | None:
     secret = _get_wiki_edit_token_secret()
     if not secret or not token:
         return None
+
+    now = int(time.time())
+    # prune expired consumed-token entries
+    for fp, exp_ts in list(WIKI_CONSUMED_EDIT_TOKENS.items()):
+        if exp_ts <= now:
+            WIKI_CONSUMED_EDIT_TOKENS.pop(fp, None)
+
+    token_fp = _wiki_edit_token_fingerprint(token)
+    if token_fp in WIKI_CONSUMED_EDIT_TOKENS:
+        return None
+
     payload = _decode_wiki_edit_token(token, secret)
     if not payload:
         return None
     try:
-        if int(payload.get("exp", 0)) <= int(time.time()):
+        exp = int(payload.get("exp", 0))
+        if exp <= now:
             return None
         if int(payload.get("g", 0)) <= 0 or int(payload.get("u", 0)) <= 0:
             return None
+        if not str(payload.get("n", "")).strip():
+            return None
     except Exception:
         return None
+
+    if consume:
+        WIKI_CONSUMED_EDIT_TOKENS[token_fp] = exp
+
     return payload
 
 

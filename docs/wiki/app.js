@@ -4,6 +4,10 @@ const saveBtn = document.getElementById('saveBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const undoBtn = document.getElementById('undoBtn');
 const redoBtn = document.getElementById('redoBtn');
+const historyBtn = document.getElementById('historyBtn');
+const historyPanel = document.getElementById('historyPanel');
+const historyList = document.getElementById('historyList');
+const historyCloseBtn = document.getElementById('historyCloseBtn');
 const navItems = document.querySelectorAll('.sidebar nav li');
 const crumbPage = document.getElementById('crumbPage');
 const articleHeading = document.getElementById('articleHeading');
@@ -12,6 +16,57 @@ const wikiEditToken = new URLSearchParams(window.location.search).get('edit') ||
 let currentPage = 'overview';
 let originalHtml = '';
 let isEditing = false;
+let isHistoryOpen = false;
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function setHistoryVisibility(visible) {
+  isHistoryOpen = visible;
+  historyPanel.hidden = !visible;
+}
+
+function formatTimestamp(ts) {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown time';
+  }
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+}
+
+function renderHistoryItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    historyList.innerHTML = '<div class="history-item"><strong>No edits yet</strong><span>This page has no recorded changes.</span></div>';
+    return;
+  }
+
+  historyList.innerHTML = items.map(item => {
+    const editor = escapeHtml(item.editor_display || `User ${item.user_id || 'unknown'}`);
+    const stamp = escapeHtml(formatTimestamp(item.timestamp));
+    const summary = escapeHtml(item.summary || 'Published changes');
+    return `<div class="history-item"><strong>${editor}</strong><span>${stamp}</span><div>${summary}</div></div>`;
+  }).join('');
+}
+
+async function loadHistory(page) {
+  historyList.innerHTML = '<div class="history-item"><strong>Loading...</strong><span>Fetching page history.</span></div>';
+  try {
+    const res = await fetch(`/api/wiki/history?page=${encodeURIComponent(page)}&limit=40`);
+    if (!res.ok) {
+      throw new Error('Failed to load history');
+    }
+    const payload = await res.json();
+    renderHistoryItems(payload.entries || []);
+  } catch (error) {
+    historyList.innerHTML = '<div class="history-item"><strong>History unavailable</strong><span>Could not fetch wiki history from the server.</span></div>';
+  }
+}
 
 function setEditingMode(isEditing) {
   editToolbar.hidden = !isEditing;
@@ -144,6 +199,9 @@ async function loadPage(page){
   pageEl.classList.remove('editable');
   isEditing = false;
   setEditingMode(false);
+  if (isHistoryOpen) {
+    await loadHistory(currentPage);
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -206,6 +264,18 @@ redoBtn.addEventListener('click', () => {
   }
 });
 
+historyBtn.addEventListener('click', async () => {
+  const nextVisible = !isHistoryOpen;
+  setHistoryVisibility(nextVisible);
+  if (nextVisible) {
+    await loadHistory(currentPage);
+  }
+});
+
+historyCloseBtn.addEventListener('click', () => {
+  setHistoryVisibility(false);
+});
+
 pageEl.addEventListener('input', () => {
   if (isEditing) {
     pageEl.classList.add('editable');
@@ -246,9 +316,16 @@ saveBtn.addEventListener('click',async()=>{
       pageEl.classList.remove('editable');
       isEditing = false;
       setEditingMode(false);
+      if (isHistoryOpen) {
+        await loadHistory(currentPage);
+      }
       alert('Saved');
     } else {
-      alert('Save failed');
+      if (res.status === 401) {
+        alert('Edit session expired or already used. Run /wiki again to get a fresh edit link.');
+      } else {
+        alert('Save failed');
+      }
     }
   }catch(e){
     alert('Save failed: '+e.message);

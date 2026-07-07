@@ -59,6 +59,7 @@
         </div>
         <div class="actions">
           <span class="status-pill">Live docs</span>
+          <button id="historyBtn">History</button>
           <button id="editBtn">Edit</button>
           <button id="undoBtn" style="display:none">Undo</button>
           <button id="redoBtn" style="display:none">Redo</button>
@@ -73,6 +74,15 @@
           <h1 id="articleHeading">Overview</h1>
           <p class="article-summary">A simple wiki.</p>
         </div>
+
+        <section id="historyPanel" class="history-panel" hidden>
+          <div class="history-header">
+            <h2>Edit History</h2>
+            <button id="historyCloseBtn" type="button">Close</button>
+          </div>
+          <p class="history-note">Recent changes for this page.</p>
+          <div id="historyList" class="history-list"></div>
+        </section>
 
         <div id="editToolbar" class="edit-toolbar" hidden>
           <button type="button" data-action="bold">Bold</button>
