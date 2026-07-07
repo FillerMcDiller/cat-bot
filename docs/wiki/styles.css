@@ -440,6 +440,106 @@ textarea {
   border: 1px solid rgba(115, 96, 73, 0.14);
 }
 
+.page details {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(115, 96, 73, 0.14);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.page summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #2b2319;
+}
+
+.page details > :not(summary) {
+  margin-top: 12px;
+}
+
+.editor-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.editor-column,
+.preview-column {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(115, 96, 73, 0.12);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.editor-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.editor-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.editor-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.editor-toolbar button {
+  border: 1px solid rgba(115, 96, 73, 0.14);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  padding: 8px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 8px 18px rgba(71, 53, 31, 0.06);
+}
+
+.editor-toolbar button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(192, 92, 47, 0.35);
+}
+
+.wiki-source {
+  width: 100%;
+  min-height: 560px;
+  resize: vertical;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(115, 96, 73, 0.16);
+  background: linear-gradient(180deg, #1f1913, #18130f);
+  color: #f4ede2;
+  line-height: 1.7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.wiki-source::placeholder {
+  color: rgba(244, 237, 226, 0.45);
+}
+
+.preview-page {
+  min-height: 560px;
+  padding-top: 2px;
+}
+
 .editable {
   outline: 2px dashed rgba(192, 92, 47, 0.35);
   outline-offset: 12px;
@@ -509,5 +609,14 @@ textarea {
 
   .article-frame {
     padding: 16px;
+  }
+
+  .editor-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-source,
+  .preview-page {
+    min-height: 420px;
   }
 }

@@ -6310,11 +6310,12 @@ async def start_internal_server(port: int = 3002):
         app.router.add_post("/vote", _handle)  # New endpoint for draft webhook
         app.router.add_get("/health", _health)  # Health check
 
-        # Simple wiki save endpoint (unauthenticated) - saves HTML to docs/wiki/pages/<page>.html
+        # Wiki save endpoint - stores both rendered HTML and wikitext source for docs/wiki/pages/<page>.*
         async def _wiki_save(request):
             try:
                 payload = await request.json()
                 page = str(payload.get('page', ''))
+                source = str(payload.get('source', ''))
                 html = payload.get('html', '')
             except Exception:
                 return web.json_response({'error': 'invalid payload'}, status=400)
@@ -6339,7 +6340,14 @@ async def start_internal_server(port: int = 3002):
 
             try:
                 os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
+                source_target = os.path.join(WIKI_PAGES_PATH, f"{page}.wiki")
                 target = os.path.join(WIKI_PAGES_PATH, f"{page}.html")
+                if not source:
+                    source = str(html)
+                if not html:
+                    html = str(source)
+                with open(source_target, 'w', encoding='utf-8') as f:
+                    f.write(str(source))
                 with open(target, 'w', encoding='utf-8') as f:
                     f.write(str(html))
                 return web.json_response({'status': 'ok', 'page': page})

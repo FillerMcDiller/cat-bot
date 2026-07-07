@@ -47,7 +47,7 @@
 
       <div class="sidebar-card">
         <div class="sidebar-label">Quick Notes</div>
-        <p>Click a page to read, or press <strong>Edit</strong> to update the Markdown/HTML content directly.</p>
+        <p>Click a page to read, or press <strong>Edit</strong> to change the wikitext source with live preview.</p>
       </div>
     </aside>
 
@@ -70,6 +70,36 @@
           <p class="article-kicker">KITTAYYYYYYY documentation</p>
           <h1 id="articleHeading">Overview</h1>
           <p class="article-summary">A simple wiki.</p>
+        </div>
+
+        <div id="editorPanel" class="editor-panel" hidden>
+          <section class="editor-column">
+            <div class="editor-header">
+              <div>
+                <div class="editor-label">Wikitext source</div>
+                <p class="editor-note">Use the toolbar to wrap selections or insert common blocks.</p>
+              </div>
+              <div class="editor-toolbar" id="editorToolbar">
+                <button type="button" data-action="bold">Bold</button>
+                <button type="button" data-action="italic">Italic</button>
+                <button type="button" data-action="header">Header</button>
+                <button type="button" data-action="link">Link</button>
+                <button type="button" data-action="bullet">Bullet</button>
+                <button type="button" data-action="code">Code</button>
+                <button type="button" data-action="dropdown">Dropdown</button>
+                <button type="button" data-action="color">Color</button>
+                <button type="button" data-action="strike">Strike</button>
+                <button type="button" data-action="sub">Sub</button>
+                <button type="button" data-action="hr">Rule</button>
+              </div>
+            </div>
+            <textarea id="wikiSource" class="wiki-source" spellcheck="false" placeholder="== Heading ==&#10;&#10;'''Bold''' ''Italic'' ~~Strike~~ ,,Sub,,&#10;&#10;[Link text](https://example.com)&#10;&#10;{{color:#c05c2f|Colored text}}&#10;&#10;{{dropdown More info}}&#10;Dropdown contents go here.&#10;{{/dropdown}}&#10;&#10;```&#10;Code block&#10;```"></textarea>
+          </section>
+
+          <section class="preview-column">
+            <div class="editor-label">Live preview</div>
+            <article id="previewPage" class="page preview-page"></article>
+          </section>
         </div>
 
         <article id="page" class="page">
