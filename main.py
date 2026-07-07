@@ -10416,7 +10416,7 @@ async def execute_command(interaction: discord.Interaction, command: str):
                 
     except Exception as e:
         await interaction.followup.send(f"❌ Error running shell command: `{e}`")
-        
+
 @bot.tree.command(description="Read The KITTAYYYYYYY Times™️")
 async def news(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
@@ -11029,6 +11029,13 @@ class AdminPanelModal(discord.ui.Modal):
             self.add_item(discord.ui.TextInput(label="Amount", placeholder="Amount of kibbles to give"))
         elif action == "Test Adventure":
             self.add_item(discord.ui.TextInput(label="Test Type", placeholder="Type 'instant' to complete an adventure", default="instant"))
+        elif action == "Execute Command":
+            self.add_item(discord.ui.TextInput(
+                label="Command", 
+                style=discord.TextStyle.paragraph, 
+                placeholder="The terminal command to run on Debian (e.g., git pull)", 
+                required=True
+            ))
             
     async def find_member(self, name: str) -> discord.Member:
         """Find a member by name, nickname, ID, or mention"""
@@ -11193,7 +11200,57 @@ class AdminPanelModal(discord.ui.Modal):
             user[f"pack_{self.children[1].value.lower()}"] += int(self.children[2].value)
             await user.save()
             await interaction.response.send_message(f"Gave {self.children[2].value} {self.children[1].value} packs to {member.mention}", ephemeral=True)
-        
+        elif self.action == "Execute Command":
+            # Extra owner security verify check
+            if interaction.user.id != OWNER_ID:
+                await interaction.response.send_message("❌ Only the bot owner can execute terminal commands.", ephemeral=True)
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            command_text = self.children[0].value.strip()
+
+            try:
+                # Execute asynchronously on Debian Linux host without locking heartbeat
+                proc = await asyncio.create_subprocess_shell(
+                    command_text,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                # Retrieve standard & error outputs with 30-second safe window
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+                    stdout_str = stdout.decode('utf-8', errors='replace')
+                    stderr_str = stderr.decode('utf-8', errors='replace')
+                except asyncio.TimeoutError:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    await interaction.followup.send("⚠️ Command timed out after 30 seconds.")
+                    return
+
+                # Compile output log
+                output_log = ""
+                if stdout_str:
+                    output_log += stdout_str
+                if stderr_str:
+                    output_log += f"\n[STDERR]\n{stderr_str}"
+                    
+                if not output_log.strip():
+                    await interaction.followup.send("✅ Command finished with no output.")
+                    return
+
+                # Send split logs sequentially into 1900-character codeblock chunks
+                max_chunk_size = 1900
+                chunks = [output_log[i:i + max_chunk_size] for i in range(0, len(output_log), max_chunk_size)]
+                
+                for chunk in chunks:
+                    await interaction.followup.send(f"```text\n{chunk}\n```")
+                        
+            except Exception as e:
+                await interaction.followup.send(f"❌ Error running shell command: `{e}`")
+
         elif self.action == "Speak":
             embed = None
             if self.children[1].value:
@@ -11393,6 +11450,7 @@ class AdminPanel(discord.ui.View):
     async def test_random_rain(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Find all eligible channels (has cat_spawns enabled and has at least 100 message count)
         all_channels = await ChannelData.filter(guild_id=interaction.guild.id, cat_spawns=True, message_count__gte=100)
+    
         
         if not all_channels:
             await interaction.response.send_message("No eligible channels found for random rain!", ephemeral=True)
@@ -11428,6 +11486,14 @@ class AdminPanel(discord.ui.View):
     @discord.ui.button(label="Start Giveaway", style=ButtonStyle.green, row=3)
     async def start_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdminPanelModal("Start Giveaway", interaction.guild))
+    # ADDED BUTTON TO INITIATE TERMINAL EXECUTION (Danger button styling on row 3):
+    @discord.ui.button(label="Execute Command", style=ButtonStyle.danger, row=3)
+    async def execute_command(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # The /admin command is already gated by OWNER_ID, but we double-check here
+        if interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("❌ Only the bot owner can use this action.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AdminPanelModal("Execute Command", interaction.guild))
 
 @bot.tree.command(description="Open the admin control panel")
 async def admin(interaction: discord.Interaction):
