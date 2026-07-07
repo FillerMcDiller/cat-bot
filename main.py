@@ -9951,6 +9951,57 @@ async def on_guild_join(guild):
         print(f"New guild: {guild.id} - {source}")
 
 
+_GITHUB_REPO = "FillerMcDiller/cat-bot"
+_GITHUB_COMMITS_URL = f"https://github.com/{_GITHUB_REPO}/commits/main/"
+_version_cache: dict = {"value": None, "fetched_at": 0.0}
+_VERSION_CACHE_TTL = 900  # 15 minutes
+
+
+async def _get_bot_version() -> str:
+    """Fetch live commit count from GitHub and format it as a version string.
+
+    Example: 276 commits -> "1.2.76" (last two digits of the commit count).
+    Falls back to a cached value (or "1.2.?" if never fetched) on failure.
+    """
+    now = time.time()
+    if _version_cache["value"] and (now - _version_cache["fetched_at"]) < _VERSION_CACHE_TTL:
+        return _version_cache["value"]
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.github.com/repos/{_GITHUB_REPO}/commits",
+                params={"per_page": 1},
+                headers={"Accept": "application/vnd.github+json"},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as res:
+                if res.status != 200:
+                    raise RuntimeError(f"GitHub API returned {res.status}")
+
+                # GitHub paginates with a Link header; the "last" page number
+                # equals the total commit count when per_page=1.
+                link_header = res.headers.get("Link", "")
+                commit_count = None
+                for part in link_header.split(","):
+                    if 'rel="last"' in part:
+                        match = re.search(r"[?&]page=(\d+)", part)
+                        if match:
+                            commit_count = int(match.group(1))
+                        break
+
+                if commit_count is None:
+                    # No Link header means there's only a single page of commits.
+                    data = await res.json()
+                    commit_count = len(data)
+
+        version = f"1.2.{commit_count % 100}"
+        _version_cache["value"] = version
+        _version_cache["fetched_at"] = now
+        return version
+    except Exception:
+        return _version_cache["value"] or "1.2.?"
+
+
 @bot.tree.command(description="Learn to use the bot")
 async def help(message):
     # Global command cooldown check (5 seconds)
@@ -9986,10 +10037,12 @@ async def help(message):
             value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://fillermcdiller.github.io/cat-bot/wiki/) or drop us a line at our [Discord server](https://discord.gg/hAydAUTzT).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
-        .set_footer(
-            text=f"KITTAYYYYYYY by FillerMcDiller, {datetime.datetime.utcnow().year}",
-            icon_url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png",
-        )
+    )
+
+    bot_version = await _get_bot_version()
+    embed2.set_footer(
+        text=f"KITTAYYYYYYY by FillerMcDiller, {datetime.datetime.utcnow().year} • ver {bot_version}",
+        icon_url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png",
     )
 
     # Add a "List of Commands" button which opens a paginated command list
@@ -9997,6 +10050,7 @@ async def help(message):
         def __init__(self, author_id: int):
             super().__init__(timeout=VIEW_TIMEOUT)
             self.author_id = author_id
+            self.add_item(Button(label=f"Changelog (ver {bot_version})", style=ButtonStyle.link, url=_GITHUB_COMMITS_URL))
 
         @discord.ui.button(label="List of Commands", style=ButtonStyle.green)
         async def list_commands(self, interaction2: discord.Interaction, button: Button):
