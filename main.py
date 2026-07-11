@@ -9824,7 +9824,7 @@ async def on_message(message: discord.Message):
         user.premium = True
         await user.save()
     if text.startswith("cat!restart"):
-        await message.reply("restarting!")
+        await message.reply("restarting...")
         os.system("git pull")
         if vote_server is not None:
             await vote_server.cleanup()
