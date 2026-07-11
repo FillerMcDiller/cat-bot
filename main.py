@@ -1,4 +1,4 @@
-# KITTAYYYYYYY - A Discord bot about catching cats.
+# KITTAYYYYYYY - A Discord bot about catching cats!
 # Copyright (C) 2025 Lia Milenakos & KITTAYYYYYYY Contributors
 # -*- coding: utf-8 -*-
 #
