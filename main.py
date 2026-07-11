@@ -2918,6 +2918,8 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     print("[SETUP_HOOK] Creating latency monitor task...", flush=True)
     bot.loop.create_task(monitor_latency())
+    print("[SETUP_HOOK] Resolving bot version from GitHub (once, at startup)...", flush=True)
+    bot.loop.create_task(_refresh_bot_version())
     global chat_reader_task
     if chat_reader_task is None or chat_reader_task.done():
         print("[SETUP_HOOK] Creating chat reader task...", flush=True)
@@ -9960,20 +9962,16 @@ async def on_guild_join(guild):
 
 _GITHUB_REPO = "FillerMcDiller/cat-bot"
 _GITHUB_COMMITS_URL = f"https://github.com/{_GITHUB_REPO}/commits/main/"
-_version_cache: dict = {"value": None, "fetched_at": 0.0}
-_VERSION_CACHE_TTL = 900  # 15 minutes
+_version_cache: dict = {"value": None}
 
 
-async def _get_bot_version() -> str:
+async def _refresh_bot_version() -> str:
     """Fetch live commit count from GitHub and format it as a version string.
 
     Example: 276 commits -> "1.2.76" (last two digits of the commit count).
-    Falls back to a cached value (or "1.2.?" if never fetched) on failure.
+    Intended to be called ONCE, at bot startup. Falls back to "1.2.?" on failure
+    (and will be retried next startup, not mid-session).
     """
-    now = time.time()
-    if _version_cache["value"] and (now - _version_cache["fetched_at"]) < _VERSION_CACHE_TTL:
-        return _version_cache["value"]
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -10003,10 +10001,17 @@ async def _get_bot_version() -> str:
 
         version = f"1.2.{commit_count % 100}"
         _version_cache["value"] = version
-        _version_cache["fetched_at"] = now
+        print(f"[STARTUP] Bot version resolved: {version}", flush=True)
         return version
-    except Exception:
-        return _version_cache["value"] or "1.2.?"
+    except Exception as e:
+        print(f"[STARTUP] Failed to resolve bot version: {e}", flush=True)
+        _version_cache["value"] = _version_cache["value"] or "1.2.?"
+        return _version_cache["value"]
+
+
+def _get_bot_version() -> str:
+    """Return the version resolved at startup. Does NOT hit the network."""
+    return _version_cache["value"] or "1.2.?"
 
 
 @bot.tree.command(description="Learn to use the bot")
@@ -10046,7 +10051,7 @@ async def help(message):
         )
     )
 
-    bot_version = await _get_bot_version()
+    bot_version = _get_bot_version()
     embed2.set_footer(
         text=f"KITTAYYYYYYY by FillerMcDiller, {datetime.datetime.utcnow().year} • ver {bot_version}",
         icon_url="https://wsrv.nl/?url=raw.githubusercontent.com/milenakos/cat-bot/main/images/cat.png",
