@@ -1,4 +1,4 @@
-# KITTAYYYYYYY - A Discord bot about catching cats!
+# KITTAYYYYYYY - A Discord bot about catching cats.
 # Copyright (C) 2025 Lia Milenakos & KITTAYYYYYYY Contributors
 # -*- coding: utf-8 -*-
 #
@@ -9824,8 +9824,37 @@ async def on_message(message: discord.Message):
         user.premium = True
         await user.save()
     if text.startswith("cat!restart"):
-        await message.reply("restarting...")
-        os.system("git pull")
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        try:
+            result = subprocess.run(
+                ["git", "pull"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = (result.stdout or "") + (result.stderr or "")
+            output = output.strip() or "(no output)"
+            print(f"[RESTART] git pull in {repo_dir} (exit {result.returncode}):\n{output}", flush=True)
+
+            if result.returncode != 0:
+                await message.reply(
+                    f"⚠️ `git pull` failed (exit {result.returncode}), NOT restarting with new code:\n```\n{output[:1800]}\n```"
+                )
+                return
+
+            if "Already up to date" in output or "Already up-to-date" in output:
+                await message.reply(f"Already up to date, restarting anyway!\n```\n{output[:1800]}\n```")
+            else:
+                await message.reply(f"Pulled new changes, restarting!\n```\n{output[:1800]}\n```")
+        except FileNotFoundError:
+            await message.reply(f"⚠️ `git` command not found on this host, can't pull. Restarting with existing code anyway.")
+        except subprocess.TimeoutExpired:
+            await message.reply("⚠️ `git pull` timed out after 30s, NOT restarting with new code.")
+            return
+        except Exception as e:
+            await message.reply(f"⚠️ `git pull` errored: {e}. Restarting with existing code anyway.")
+
         if vote_server is not None:
             await vote_server.cleanup()
         await bot.cat_bot_reload_hook("db" in text)  # pyright: ignore
