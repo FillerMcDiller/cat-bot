@@ -2945,21 +2945,6 @@ async def setup_hook():
         print(f"[STARTUP] Starting internal vote receiver on port {internal_port}...", flush=True)
         bot.loop.create_task(start_internal_server(internal_port))
         print(f"[STARTUP] Internal vote receiver task created", flush=True)
-
-        # Also serve the exact same routes (/vote, /health, /api/wiki/save,
-        # /api/wiki/history, /api/catcomp/submit) on the public webhook port.
-        # start_public_webhook() historically handled this port but is never
-        # invoked, so nothing has ever actually listened on WEBHOOK_PORT.
-        # Starting a second copy here means the tunnel works whether it's
-        # pointed at the internal port or the public port, without needing
-        # host access to change the tunnel command.
-        if public_port != internal_port:
-            try:
-                print(f"[STARTUP] Also starting receiver on public port {public_port} for tunnel compatibility...", flush=True)
-                bot.loop.create_task(start_internal_server(public_port))
-                print(f"[STARTUP] Public port receiver task created", flush=True)
-            except Exception as e:
-                print(f"[STARTUP] Failed to start secondary receiver on public port {public_port}: {e}", flush=True)
     except Exception as e:
         print(f"[STARTUP ERROR] Failed to start internal vote receiver: {e}", flush=True)
         logging.exception("Failed to start internal vote receiver")
@@ -6276,6 +6261,100 @@ async def debug_battles(interaction: discord.Interaction):
         await interaction.followup.send("```\n" + full + "\n```", ephemeral=True)
 
 
+# Wiki save endpoint - stores both rendered HTML and wikitext source for docs/wiki/pages/<page>.*
+# Lifted to module level (out of start_internal_server) so it can be registered
+# on both the internal server (127.0.0.1) and the public webhook server (0.0.0.0),
+# since the Cloudflare tunnel may point at either depending on host config.
+async def _wiki_save(request):
+    origin = request.headers.get("Origin")
+    try:
+        payload = await request.json()
+        page = str(payload.get('page', ''))
+        source = str(payload.get('source', ''))
+        html = payload.get('html', '')
+    except Exception:
+        return _web_json({'error': 'invalid payload'}, status=400, origin=origin)
+
+    token = _extract_wiki_edit_token(request, payload)
+    token_data = _resolve_wiki_edit_token(token, consume=False)
+    if not token_data:
+        return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
+
+    try:
+        guild_id = int(token_data.get('g', 0))
+        user_id = int(token_data.get('u', 0))
+    except Exception:
+        return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
+
+    if guild_id <= 0 or user_id <= 0 or not await _user_has_wiki_edit_role(guild_id, user_id):
+        return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
+
+    # sanitize page name
+    if not re.fullmatch(r"[a-z0-9\-]+", page):
+        return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
+
+    editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
+
+    try:
+        os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
+        source_target = os.path.join(WIKI_PAGES_PATH, f"{page}.wiki")
+        target = os.path.join(WIKI_PAGES_PATH, f"{page}.html")
+        if not source:
+            source = str(html)
+        if not html:
+            html = str(source)
+        with open(source_target, 'w', encoding='utf-8') as f:
+            f.write(str(source))
+        with open(target, 'w', encoding='utf-8') as f:
+            f.write(str(html))
+
+        _append_wiki_history_entry(
+            page,
+            {
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "page": page,
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "editor_display": editor_display,
+                "summary": "Published changes",
+            },
+        )
+
+        token_exp = int(token_data.get("exp", 0))
+        if token_exp > 0:
+            WIKI_CONSUMED_EDIT_TOKENS[_wiki_edit_token_fingerprint(token)] = token_exp
+
+        return _web_json({'status': 'ok', 'page': page}, origin=origin)
+    except Exception as e:
+        logging.exception('Failed to save wiki page')
+        return _web_json({'error': 'save_failed', 'details': str(e)}, status=500, origin=origin)
+
+
+async def _wiki_history(request):
+    origin = request.headers.get("Origin")
+    page = str(request.query.get('page', '')).strip().lower()
+    if not re.fullmatch(r"[a-z0-9\-]+", page):
+        return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
+
+    try:
+        limit = int(str(request.query.get('limit', '40')).strip())
+    except Exception:
+        limit = 40
+    limit = max(1, min(limit, 100))
+
+    entries = _read_wiki_history(page, limit=limit)
+    return _web_json({'status': 'ok', 'page': page, 'entries': entries}, origin=origin)
+
+
+async def _wiki_preflight(request):
+    origin = request.headers.get("Origin")
+    return web.Response(status=204, headers={
+        **_web_ui_headers(origin),
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wiki-Edit-Token',
+    })
+
+
 async def start_internal_server(port: int = 3002):
     """Start a small internal aiohttp server on localhost that accepts POST /vote
 
@@ -6329,93 +6408,6 @@ async def start_internal_server(port: int = 3002):
         app.router.add_get("/health", _health)  # Health check
 
         # Wiki save endpoint - stores both rendered HTML and wikitext source for docs/wiki/pages/<page>.*
-        async def _wiki_save(request):
-            origin = request.headers.get("Origin")
-            try:
-                payload = await request.json()
-                page = str(payload.get('page', ''))
-                source = str(payload.get('source', ''))
-                html = payload.get('html', '')
-            except Exception:
-                return _web_json({'error': 'invalid payload'}, status=400, origin=origin)
-
-            token = _extract_wiki_edit_token(request, payload)
-            token_data = _resolve_wiki_edit_token(token, consume=False)
-            if not token_data:
-                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
-
-            try:
-                guild_id = int(token_data.get('g', 0))
-                user_id = int(token_data.get('u', 0))
-            except Exception:
-                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
-
-            if guild_id <= 0 or user_id <= 0 or not await _user_has_wiki_edit_role(guild_id, user_id):
-                return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
-
-            # sanitize page name
-            if not re.fullmatch(r"[a-z0-9\-]+", page):
-                return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
-
-            editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
-
-            try:
-                os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
-                source_target = os.path.join(WIKI_PAGES_PATH, f"{page}.wiki")
-                target = os.path.join(WIKI_PAGES_PATH, f"{page}.html")
-                if not source:
-                    source = str(html)
-                if not html:
-                    html = str(source)
-                with open(source_target, 'w', encoding='utf-8') as f:
-                    f.write(str(source))
-                with open(target, 'w', encoding='utf-8') as f:
-                    f.write(str(html))
-
-                _append_wiki_history_entry(
-                    page,
-                    {
-                        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                        "page": page,
-                        "guild_id": guild_id,
-                        "user_id": user_id,
-                        "editor_display": editor_display,
-                        "summary": "Published changes",
-                    },
-                )
-
-                token_exp = int(token_data.get("exp", 0))
-                if token_exp > 0:
-                    WIKI_CONSUMED_EDIT_TOKENS[_wiki_edit_token_fingerprint(token)] = token_exp
-
-                return _web_json({'status': 'ok', 'page': page}, origin=origin)
-            except Exception as e:
-                logging.exception('Failed to save wiki page')
-                return _web_json({'error': 'save_failed', 'details': str(e)}, status=500, origin=origin)
-
-        async def _wiki_history(request):
-            origin = request.headers.get("Origin")
-            page = str(request.query.get('page', '')).strip().lower()
-            if not re.fullmatch(r"[a-z0-9\-]+", page):
-                return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
-
-            try:
-                limit = int(str(request.query.get('limit', '40')).strip())
-            except Exception:
-                limit = 40
-            limit = max(1, min(limit, 100))
-
-            entries = _read_wiki_history(page, limit=limit)
-            return _web_json({'status': 'ok', 'page': page, 'entries': entries}, origin=origin)
-
-        async def _wiki_preflight(request):
-            origin = request.headers.get("Origin")
-            return web.Response(status=204, headers={
-                **_web_ui_headers(origin),
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wiki-Edit-Token',
-            })
-
         app.router.add_options('/api/wiki/save', _wiki_preflight)
         app.router.add_post('/api/wiki/save', _wiki_save)
         app.router.add_get('/api/wiki/history', _wiki_history)
@@ -24439,6 +24431,11 @@ async def setup(bot2):
             web.post("/api/inventory/action", web_ui_inventory_action),
             web.options("/api/catcomp/submit", web_ui_preflight),
             web.post("/api/catcomp/submit", _catcomp_submit_public),
+            # Wiki routes - previously only registered on the internal
+            # (127.0.0.1-only) server, unreachable via the public tunnel.
+            web.options("/api/wiki/save", _wiki_preflight),
+            web.post("/api/wiki/save", _wiki_save),
+            web.get("/api/wiki/history", _wiki_history),
         ]
     )
     vote_server = web.AppRunner(app)
