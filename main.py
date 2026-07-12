@@ -9827,7 +9827,7 @@ async def on_message(message: discord.Message):
         repo_dir = os.path.dirname(os.path.abspath(__file__))
         try:
             result = subprocess.run(
-                ["git", "pull"],
+                ["git", "pull", "origin", "main"],
                 cwd=repo_dir,
                 capture_output=True,
                 text=True,
