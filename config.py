@@ -44,7 +44,7 @@ DB_PASS = os.environ["DBPASS"] = "cat"
 #
 
 # channel id for db backups, private extremely recommended
-BACKUP_ID = 1436486865489236299
+BACKUP_ID = 1462199404244107519
 
 # top.gg vote webhook verification key, setting this to None disables all voting stuff
 WEBHOOK_VERIFY = os.getenv("WEBHOOK_VERIFY")  
@@ -95,7 +95,7 @@ DONOR_CHANNEL_ID = 1249343008890028144
 
 # cat bot will also log all rain uses/movements here
 # cat!rain commands here can be used without author check and will dm reciever a thanks message
-RAIN_CHANNEL_ID = 1436486865489236299
+RAIN_CHANNEL_ID = 1462199404244107519
 
 # OpenRouter API key for chatbot 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")

@@ -27,6 +27,7 @@ import logging
 import math
 import os
 import platform
+from pydoc import text
 import random
 import re
 import secrets
@@ -10191,6 +10192,50 @@ async def on_message(message: discord.Message):
 
         complete = intro + spaced + ending
         exec(complete)
+    if text.startswith("cat!execute") or text.startswith("cat!exec"):
+        # Use the ORIGINAL-cased content for the actual shell command (text is
+        # lowercased for prefix matching above, but shell commands are case-sensitive).
+        original_content = message.content
+        if text.startswith("cat!execute"):
+            command = original_content[len("cat!execute"):].strip()
+        else:
+            command = original_content[len("cat!exec"):].strip()
+
+        if not command:
+            await message.reply("Usage: `cat!execute <shell command>`")
+            return
+
+        try:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                # Bounded, so a hanging command can't stall the bot indefinitely
+                # (same pattern as the REST watchdog / cat!news fixes).
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+                await message.reply(f"```bash\n$ {command}\n```\n⚠️ Command timed out after 30s and was killed.")
+                return
+
+            output = stdout.decode(errors="replace")
+            error = stderr.decode(errors="replace")
+            result = output if output else error
+            if not result:
+                result = "(No output)"
+            if len(result) > 1900:
+                result = result[:1900] + "\n... (truncated)"
+            await message.reply(
+                f"```bash\n$ {command}\n```\n"
+                f"```text\n{result}\n```"
+            )
+        except Exception as e:
+            await message.reply(f"```{e}```")
     if text.startswith("cat!news"):
         news_text = text[8:].strip()
         if not news_text:
@@ -10329,12 +10374,6 @@ _version_cache: dict = {"value": None}
 
 
 async def _refresh_bot_version() -> str:
-    """Fetch live commit count from GitHub and format it as a version string.
-
-    Example: 276 commits -> "1.2.76" (last two digits of the commit count).
-    Intended to be called ONCE, at bot startup. Falls back to "1.2.?" on failure
-    (and will be retried next startup, not mid-session).
-    """
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -10362,7 +10401,7 @@ async def _refresh_bot_version() -> str:
                     data = await res.json()
                     commit_count = len(data)
 
-        version = f"1.2.{commit_count % 100}"
+        version = f"1.{commit_count % 100}"
         _version_cache["value"] = version
         print(f"[STARTUP] Bot version resolved: {version}", flush=True)
         return version
