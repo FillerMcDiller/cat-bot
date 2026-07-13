@@ -38,6 +38,7 @@ import uuid
 from typing import Deque, Dict, Literal, Optional, Union
 from urllib.parse import urlencode
 
+from PIL.ImagePalette import raw
 import aiohttp
 import discord
 import discord_emoji
@@ -8722,8 +8723,16 @@ async def maintaince_loop():
 
 
 # fetch app emojis early
+
 async def on_connect():
     global emojis
+
+    app = await bot.application_info()
+    route = discord.http.Route("GET", "/applications/{application_id}/emojis", application_id=app.id)
+    raw = await bot.http.request(route)
+
+    print("Raw count:", len(raw["items"]) if "items" in raw else len(raw))
+    print([e["name"] for e in (raw["items"] if "items" in raw else raw)])
 
     try:
         fetched = await bot.fetch_application_emojis()
@@ -8733,6 +8742,19 @@ async def on_connect():
     except Exception as e:
         print(f"[EMOJIS] Failed to fetch application emojis: {e}")
         emojis = {}
+
+    fetched = await bot.fetch_application_emojis()
+    emojis = {e.name: str(e) for e in fetched}
+    print(sorted(emojis.keys()))
+
+    def get_emoji(name):
+        if name in emojis:
+            return emojis[name]
+
+    print(f"Missing emoji: {name}")
+    return "🔳"
+
+print(sorted(emojis.keys()))
 
 
 # some code which is run when bot is started
