@@ -921,4 +921,15 @@ ADD COLUMN IF NOT EXISTS ranked_season integer DEFAULT 1,
 ADD COLUMN IF NOT EXISTS ranked_peak_rating integer DEFAULT 1000,
 ADD COLUMN IF NOT EXISTS ranked_rewards_claimed boolean DEFAULT false;
 
+-- Achievement columns referenced in main.py via achemb(...) calls but missing
+-- from this schema (found by cross-referencing every achemb("<key>", ...)
+-- literal against the profile/user table columns above). All five follow the
+-- same boolean-flag convention as the existing achievement columns.
+ALTER TABLE public.profile
+ADD COLUMN IF NOT EXISTS race_winner boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS bounty_novice boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS bounty_hunter boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS bounty_lord boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS "define" boolean DEFAULT false;
+
 REVOKE USAGE ON SCHEMA public FROM PUBLIC;
