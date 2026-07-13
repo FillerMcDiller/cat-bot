@@ -80,6 +80,7 @@ BASE_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_PATH, "config")
 WIKI_PAGES_PATH = os.path.join(BASE_PATH, "docs", "wiki", "pages")
 WIKI_HISTORY_PATH = os.path.join(BASE_PATH, "docs", "wiki", "history")
+WIKI_PAGES_INDEX_PATH = os.path.join(BASE_PATH, "docs", "wiki", "pages_index.json")
 WIKI_EDIT_ROLE_ID = int(os.getenv("WIKI_EDIT_ROLE_ID", "1510495579623395409"))
 WIKI_EDIT_TOKEN_TTL_SECONDS = 3600 * 6
 WIKI_CONSUMED_EDIT_TOKENS: dict[str, int] = {}
@@ -2561,6 +2562,57 @@ async def cleanup_cooldowns():
         await asyncio.sleep(300)  # wait 5 minutes before next cleanup
 
 
+_REST_WATCHDOG_TIMEOUT = 15          # seconds before a single REST check is considered "stuck"
+_REST_WATCHDOG_INTERVAL = 60         # seconds between checks
+_REST_WATCHDOG_FAILURE_THRESHOLD = 3  # consecutive stuck checks before forcing a restart
+
+
+async def rest_watchdog():
+    """Background task that verifies the bot's REST/HTTP layer is actually
+    responsive - not just the gateway heartbeat, which bot.latency/monitor_latency
+    track. The gateway can stay perfectly healthy (bot shows "online") while the
+    REST layer is fully wedged - e.g. an unbounded mass-send loop (cat!news over
+    every registered channel with no rate-limit handling) can exhaust the shared
+    HTTP connection pool with requests that never resolve, silently jamming every
+    future REST call (slash commands, replies, everything) indefinitely.
+
+    If several consecutive lightweight REST checks time out in a row, this
+    forces a full restart via the same bot.cat_bot_reload_hook used by
+    cat!restart, so the bot can recover on its own instead of sitting online
+    but unresponsive until someone manually restarts it.
+    """
+    await bot.wait_until_ready()
+    consecutive_failures = 0
+
+    while not bot.is_closed():
+        await asyncio.sleep(_REST_WATCHDOG_INTERVAL)
+        try:
+            await asyncio.wait_for(bot.http.get_gateway(), timeout=_REST_WATCHDOG_TIMEOUT)
+            if consecutive_failures > 0:
+                print(f"[REST WATCHDOG] Recovered after {consecutive_failures} failed check(s).", flush=True)
+            consecutive_failures = 0
+        except Exception as e:
+            consecutive_failures += 1
+            print(
+                f"[REST WATCHDOG] REST check failed ({consecutive_failures}/{_REST_WATCHDOG_FAILURE_THRESHOLD}): {e}",
+                flush=True,
+            )
+
+            if consecutive_failures >= _REST_WATCHDOG_FAILURE_THRESHOLD:
+                print("[REST WATCHDOG] REST layer appears stuck, forcing a restart...", flush=True)
+                try:
+                    reload_hook = getattr(bot, "cat_bot_reload_hook", None)
+                    if reload_hook is not None:
+                        await asyncio.wait_for(reload_hook(False), timeout=30)
+                    else:
+                        print("[REST WATCHDOG] No cat_bot_reload_hook available, hard-exiting instead.", flush=True)
+                        os._exit(1)
+                except Exception as restart_err:
+                    print(f"[REST WATCHDOG] Restart attempt itself failed ({restart_err}), hard-exiting.", flush=True)
+                    os._exit(1)
+                return
+
+
 async def monitor_latency():
     """Background task to monitor bot latency and warn on spikes."""
     await bot.wait_until_ready()
@@ -2918,6 +2970,8 @@ async def setup_hook():
     bot.loop.create_task(cleanup_cooldowns())
     print("[SETUP_HOOK] Creating latency monitor task...", flush=True)
     bot.loop.create_task(monitor_latency())
+    print("[SETUP_HOOK] Creating REST watchdog task...", flush=True)
+    bot.loop.create_task(rest_watchdog())
     print("[SETUP_HOOK] Resolving bot version from GitHub (once, at startup)...", flush=True)
     bot.loop.create_task(_refresh_bot_version())
     global chat_reader_task
@@ -6263,6 +6317,208 @@ async def debug_battles(interaction: discord.Interaction):
         await interaction.followup.send("```\n" + full + "\n```", ephemeral=True)
 
 
+def _default_wiki_pages_index() -> list[dict]:
+    # Seeded from the original hardcoded sidebar, so existing installs keep
+    # the same pages/order the first time this runs.
+    return [
+        {"page": "overview", "label": "Home", "icon": "🏠"},
+        {"page": "info", "label": "Wiki Info", "icon": "❓"},
+        {"page": "kittay", "label": "KITTAYYYYYYY", "icon": "🐱"},
+        {"page": "spawning", "label": "Cat Spawning", "icon": "➕"},
+        {"page": "commands", "label": "Commands", "icon": "✏️"},
+        {"page": "cat-types", "label": "Cat Types", "icon": "📋"},
+        {"page": "inventory", "label": "Inventory / Cats", "icon": "🎒"},
+        {"page": "items-shop", "label": "Items / Shop", "icon": "🛒"},
+        {"page": "badges", "label": "Badges", "icon": "🏅"},
+        {"page": "profile-cosmetics", "label": "Profile / Cosmetics", "icon": "🪞"},
+        {"page": "battlepass", "label": "Cattlepass", "icon": "🎮"},
+        {"page": "battle", "label": "Battle System", "icon": "⚔️"},
+        {"page": "achievements", "label": "Achievements", "icon": "🏆"},
+        {"page": "rains", "label": "Rains", "icon": "🌧️"},
+        {"page": "packs", "label": "Packs", "icon": "📦"},
+        {"page": "trading", "label": "Trading", "icon": "↔️"},
+        {"page": "catnip", "label": "Catnip", "icon": "🍃"},
+        {"page": "prisms", "label": "Prisms", "icon": "🔮"},
+        {"page": "racing", "label": "Racing", "icon": "🏁"},
+        {"page": "catcomp", "label": "Cat Competition", "icon": "🏆"},
+    ]
+
+
+def _write_wiki_pages_index(pages: list[dict]) -> None:
+    os.makedirs(os.path.dirname(WIKI_PAGES_INDEX_PATH), exist_ok=True)
+    with open(WIKI_PAGES_INDEX_PATH, "w", encoding="utf-8") as f:
+        json.dump({"pages": pages}, f, ensure_ascii=False, indent=2)
+
+
+def _read_wiki_pages_index() -> list[dict]:
+    if not os.path.exists(WIKI_PAGES_INDEX_PATH):
+        default = _default_wiki_pages_index()
+        try:
+            _write_wiki_pages_index(default)
+        except Exception:
+            pass
+        return default
+    try:
+        with open(WIKI_PAGES_INDEX_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict) and isinstance(loaded.get("pages"), list):
+            pages = [p for p in loaded["pages"] if isinstance(p, dict) and p.get("page")]
+            if pages:
+                return pages
+    except Exception:
+        pass
+    return _default_wiki_pages_index()
+
+
+def _slugify_wiki_page_name(name: str) -> str:
+    slug = str(name or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug
+
+
+def _escape_wiki_html(text: str) -> str:
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+async def _wiki_authorize_request(request, payload: dict) -> tuple[int, int] | None:
+    """Shared auth check for wiki write endpoints. Returns (guild_id, user_id) or None."""
+    token = _extract_wiki_edit_token(request, payload)
+    token_data = _resolve_wiki_edit_token(token, consume=False)
+    if not token_data:
+        return None
+    try:
+        guild_id = int(token_data.get('g', 0))
+        user_id = int(token_data.get('u', 0))
+    except Exception:
+        return None
+    if guild_id <= 0 or user_id <= 0 or not await _user_has_wiki_edit_role(guild_id, user_id):
+        return None
+    return guild_id, user_id
+
+
+async def _wiki_list_pages(request):
+    origin = request.headers.get("Origin")
+    pages = _read_wiki_pages_index()
+    return _web_json({'status': 'ok', 'pages': pages}, origin=origin)
+
+
+async def _wiki_create_page(request):
+    origin = request.headers.get("Origin")
+    try:
+        payload = await request.json()
+    except Exception:
+        return _web_json({'error': 'invalid payload'}, status=400, origin=origin)
+
+    auth = await _wiki_authorize_request(request, payload)
+    if not auth:
+        return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
+    guild_id, user_id = auth
+
+    name = str(payload.get('name', '')).strip()
+    icon = str(payload.get('icon', '')).strip() or '📄'
+    if len(icon) > 8:
+        icon = icon[:8]
+    if not name:
+        return _web_json({'error': 'a page name is required'}, status=400, origin=origin)
+    if len(name) > 60:
+        name = name[:60]
+
+    slug = _slugify_wiki_page_name(payload.get('page') or name)
+    if not slug or not re.fullmatch(r"[a-z0-9\-]+", slug):
+        return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
+
+    pages = _read_wiki_pages_index()
+    if any(p.get('page') == slug for p in pages):
+        return _web_json({'error': 'a page with that name already exists'}, status=409, origin=origin)
+
+    pages.append({'page': slug, 'label': name, 'icon': icon})
+
+    try:
+        os.makedirs(WIKI_PAGES_PATH, exist_ok=True)
+        placeholder = (
+            f'<div class="section"><h2>{_escape_wiki_html(name)}</h2>'
+            f'<div class="codeblock">This page is empty. Press Edit to create content.</div></div>'
+        )
+        with open(os.path.join(WIKI_PAGES_PATH, f"{slug}.html"), 'w', encoding='utf-8') as f:
+            f.write(placeholder)
+        with open(os.path.join(WIKI_PAGES_PATH, f"{slug}.wiki"), 'w', encoding='utf-8') as f:
+            f.write(placeholder)
+        _write_wiki_pages_index(pages)
+    except Exception as e:
+        logging.exception('Failed to create wiki page')
+        return _web_json({'error': 'create_failed', 'details': str(e)}, status=500, origin=origin)
+
+    editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
+    _append_wiki_history_entry(slug, {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "page": slug,
+        "guild_id": guild_id,
+        "user_id": user_id,
+        "editor_display": editor_display,
+        "summary": "Created page",
+    })
+
+    return _web_json({'status': 'ok', 'page': slug, 'label': name, 'icon': icon}, origin=origin)
+
+
+async def _wiki_delete_page(request):
+    origin = request.headers.get("Origin")
+    try:
+        payload = await request.json()
+    except Exception:
+        return _web_json({'error': 'invalid payload'}, status=400, origin=origin)
+
+    auth = await _wiki_authorize_request(request, payload)
+    if not auth:
+        return _web_json({'error': 'unauthorized'}, status=401, origin=origin)
+    guild_id, user_id = auth
+
+    page = str(payload.get('page', '')).strip().lower()
+    if not re.fullmatch(r"[a-z0-9\-]+", page):
+        return _web_json({'error': 'invalid page name'}, status=400, origin=origin)
+    if page == 'overview':
+        return _web_json({'error': 'the Home page cannot be deleted'}, status=400, origin=origin)
+
+    pages = _read_wiki_pages_index()
+    remaining = [p for p in pages if p.get('page') != page]
+    if len(remaining) == len(pages):
+        return _web_json({'error': 'page not found'}, status=404, origin=origin)
+
+    try:
+        _write_wiki_pages_index(remaining)
+        # Soft-delete: rename the underlying files instead of destroying them,
+        # so an accidental delete can be recovered manually if needed.
+        stamp = int(time.time())
+        for ext in ('html', 'wiki'):
+            src = os.path.join(WIKI_PAGES_PATH, f"{page}.{ext}")
+            if os.path.exists(src):
+                dst = os.path.join(WIKI_PAGES_PATH, f"_deleted-{page}-{stamp}.{ext}")
+                os.rename(src, dst)
+    except Exception as e:
+        logging.exception('Failed to delete wiki page')
+        return _web_json({'error': 'delete_failed', 'details': str(e)}, status=500, origin=origin)
+
+    editor_display = await _resolve_wiki_editor_display(guild_id, user_id)
+    _append_wiki_history_entry(page, {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "page": page,
+        "guild_id": guild_id,
+        "user_id": user_id,
+        "editor_display": editor_display,
+        "summary": "Deleted page",
+    })
+
+    return _web_json({'status': 'ok', 'page': page}, origin=origin)
+
+
 # Wiki save endpoint - stores both rendered HTML and wikitext source for docs/wiki/pages/<page>.*
 # Lifted to module level (out of start_internal_server) so it can be registered
 # on both the internal server (127.0.0.1) and the public webhook server (0.0.0.0),
@@ -6413,6 +6669,11 @@ async def start_internal_server(port: int = 3002):
         app.router.add_options('/api/wiki/save', _wiki_preflight)
         app.router.add_post('/api/wiki/save', _wiki_save)
         app.router.add_get('/api/wiki/history', _wiki_history)
+        app.router.add_get('/api/wiki/pages', _wiki_list_pages)
+        app.router.add_options('/api/wiki/pages/create', _wiki_preflight)
+        app.router.add_post('/api/wiki/pages/create', _wiki_create_page)
+        app.router.add_options('/api/wiki/pages/delete', _wiki_preflight)
+        app.router.add_post('/api/wiki/pages/delete', _wiki_delete_page)
 
         async def _catcomp_submit(request):
             origin = request.headers.get("Origin")
@@ -9824,6 +10085,16 @@ async def on_message(message: discord.Message):
         user.premium = True
         await user.save()
     if text.startswith("cat!restart"):
+        async def _safe_reply(content: str) -> None:
+            # If the REST layer is the thing that's stuck (see rest_watchdog),
+            # a plain message.reply() here could hang forever and prevent the
+            # restart below from ever actually happening. Bound it so restart
+            # always proceeds even if Discord itself won't cooperate.
+            try:
+                await asyncio.wait_for(message.reply(content), timeout=10)
+            except Exception as e:
+                print(f"[RESTART] Could not send reply (continuing anyway): {e}", flush=True)
+
         repo_dir = os.path.dirname(os.path.abspath(__file__))
         try:
             result = subprocess.run(
@@ -9838,22 +10109,22 @@ async def on_message(message: discord.Message):
             print(f"[RESTART] git pull in {repo_dir} (exit {result.returncode}):\n{output}", flush=True)
 
             if result.returncode != 0:
-                await message.reply(
+                await _safe_reply(
                     f"⚠️ `git pull` failed (exit {result.returncode}), NOT restarting with new code:\n```\n{output[:1800]}\n```"
                 )
                 return
 
             if "Already up to date" in output or "Already up-to-date" in output:
-                await message.reply(f"Already up to date, restarting anyway!\n```\n{output[:1800]}\n```")
+                await _safe_reply(f"Already up to date, restarting anyway!\n```\n{output[:1800]}\n```")
             else:
-                await message.reply(f"Pulled new changes, restarting!\n```\n{output[:1800]}\n```")
+                await _safe_reply(f"Pulled new changes, restarting!\n```\n{output[:1800]}\n```")
         except FileNotFoundError:
-            await message.reply(f"⚠️ `git` command not found on this host, can't pull. Restarting with existing code anyway.")
+            await _safe_reply(f"⚠️ `git` command not found on this host, can't pull. Restarting with existing code anyway.")
         except subprocess.TimeoutExpired:
-            await message.reply("⚠️ `git pull` timed out after 30s, NOT restarting with new code.")
+            await _safe_reply("⚠️ `git pull` timed out after 30s, NOT restarting with new code.")
             return
         except Exception as e:
-            await message.reply(f"⚠️ `git pull` errored: {e}. Restarting with existing code anyway.")
+            await _safe_reply(f"⚠️ `git pull` errored: {e}. Restarting with existing code anyway.")
 
         if vote_server is not None:
             await vote_server.cleanup()
@@ -9891,23 +10162,56 @@ async def on_message(message: discord.Message):
         complete = intro + spaced + ending
         exec(complete)
     if text.startswith("cat!news"):
-        async for i in Channel.all():
+        news_text = text[8:].strip()
+        if not news_text:
+            await message.reply("Usage: `cat!news <message>`")
+            return
+
+        async def _send_news():
+            sent = 0
+            failed = 0
+            async for i in Channel.all():
+                try:
+                    channeley = bot.get_channel(int(i.channel_id))
+                    if not isinstance(
+                        channeley,
+                        Union[
+                            discord.TextChannel,
+                            discord.StageChannel,
+                            discord.VoiceChannel,
+                            discord.Thread,
+                        ],
+                    ):
+                        continue
+                    target_guild = getattr(channeley, "guild", None)
+                    if target_guild is not None and target_guild.me is not None:
+                        target_perms = channeley.permissions_for(target_guild.me)
+                        if not target_perms.send_messages:
+                            continue
+                    # Bound each individual send - previously an unbounded
+                    # await here meant one hung request could stall this loop
+                    # (and, by exhausting the shared HTTP connection pool,
+                    # eventually the bot's *entire* REST layer) indefinitely.
+                    await asyncio.wait_for(channeley.send(news_text), timeout=10)
+                    sent += 1
+                except Exception:
+                    failed += 1
+                # Pace sends well under Discord's rate limits so a large
+                # broadcast can never trip a sustained global rate-limit
+                # backoff or hammer the connection pool.
+                await asyncio.sleep(0.4)
+
+            print(f"[NEWS] Broadcast finished: {sent} sent, {failed} failed.", flush=True)
             try:
-                channeley = bot.get_channel(int(i.channel_id))
-                if not isinstance(
-                    channeley,
-                    Union[
-                        discord.TextChannel,
-                        discord.StageChannel,
-                        discord.VoiceChannel,
-                        discord.Thread,
-                    ],
-                ):
-                    continue
-                if perms.send_messages and (not message.thread or perms.send_messages_in_threads):
-                    await channeley.send(text[8:])
-            except Exception:
-                pass
+                await asyncio.wait_for(
+                    message.channel.send(f"📰 News broadcast finished: sent to {sent} channel(s), {failed} failed."),
+                    timeout=10,
+                )
+            except Exception as e:
+                print(f"[NEWS] Could not send completion summary: {e}", flush=True)
+
+        await message.reply("📰 Sending news to all registered channels in the background (this may take a while)...")
+        bot.loop.create_task(_send_news())
     if text.startswith("cat!custom"):
         stuff = text.split(" ")
         if stuff[1][0] not in "1234567890":
@@ -24463,6 +24767,11 @@ async def setup(bot2):
             web.options("/api/wiki/save", _wiki_preflight),
             web.post("/api/wiki/save", _wiki_save),
             web.get("/api/wiki/history", _wiki_history),
+            web.get("/api/wiki/pages", _wiki_list_pages),
+            web.options("/api/wiki/pages/create", _wiki_preflight),
+            web.post("/api/wiki/pages/create", _wiki_create_page),
+            web.options("/api/wiki/pages/delete", _wiki_preflight),
+            web.post("/api/wiki/pages/delete", _wiki_delete_page),
         ]
     )
     vote_server = web.AppRunner(app)
