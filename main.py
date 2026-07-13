@@ -8724,7 +8724,15 @@ async def maintaince_loop():
 # fetch app emojis early
 async def on_connect():
     global emojis
-    emojis = {emoji.name: str(emoji) for emoji in await bot.fetch_application_emojis()}
+
+    try:
+        fetched = await bot.fetch_application_emojis()
+        emojis = {e.name: str(e) for e in fetched}
+        print(f"[EMOJIS] Loaded {len(emojis)} application emojis")
+        print(list(emojis.keys())[:20])
+    except Exception as e:
+        print(f"[EMOJIS] Failed to fetch application emojis: {e}")
+        emojis = {}
 
 
 # some code which is run when bot is started
