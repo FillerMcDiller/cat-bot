@@ -8554,11 +8554,11 @@ async def maintaince_loop():
     # manual reminders
     async for reminder in Reminder.filter("time < $1", time.time()):
         try:
-            user = await bot.fetch_user(reminder.user_id)
-            await user.send(reminder.text)
-            await asyncio.sleep(0.5)
+            user = await asyncio.wait_for(bot.fetch_user(reminder.user_id), timeout=10)
+            await asyncio.wait_for(user.send(reminder.text), timeout=10)
         except Exception:
             pass
+        await asyncio.sleep(0.5)
         await reminder.delete()
 
     # db backups
@@ -11177,7 +11177,7 @@ async def _get_global_giveaway_channels() -> list[discord.TextChannel]:
                     ch = bot.get_channel(ch_id)
                     if not ch:
                         try:
-                            ch = await bot.fetch_channel(ch_id)
+                            ch = await asyncio.wait_for(bot.fetch_channel(ch_id), timeout=10)
                         except Exception:
                             ch = None
                     if not isinstance(ch, discord.TextChannel):
@@ -11233,9 +11233,10 @@ async def _refresh_global_giveaway_message(giveaway_id: str):
             if message is None:
                 continue
             try:
-                await message.edit(embed=embed, view=view)
+                await asyncio.wait_for(message.edit(embed=embed, view=view), timeout=10)
             except Exception:
                 continue
+            await asyncio.sleep(0.15)
     except Exception:
         pass
 
@@ -11503,8 +11504,16 @@ class AdminPanelModal(discord.ui.Modal):
                     targets = [interaction.channel]
                 for target_channel in targets:
                     view = _create_giveaway_view(cat_type, giveaway_id=giveaway_id, global_mode=True)
-                    msg = await target_channel.send(embed=embed, view=view)
-                    announcement_messages.append({"message": msg, "view": view, "channel_id": target_channel.id})
+                    try:
+                        msg = await asyncio.wait_for(target_channel.send(embed=embed, view=view), timeout=10)
+                        announcement_messages.append({"message": msg, "view": view, "channel_id": target_channel.id})
+                    except Exception as e:
+                        print(f"[GLOBAL GIVEAWAY] Failed to announce in channel {target_channel.id}: {e}", flush=True)
+                    # Pace sends across (potentially many) guild channels so this
+                    # can never trip a sustained global rate-limit backoff or
+                    # exhaust the shared HTTP connection pool the way an
+                    # unthrottled mass-send loop can.
+                    await asyncio.sleep(0.4)
                 active_global_giveaways[giveaway_id] = {
                     "cat_type": cat_type,
                     "end_time": end_time,
@@ -11551,16 +11560,21 @@ class AdminPanelModal(discord.ui.Modal):
                         if message_obj is None:
                             continue
                         try:
-                            await message_obj.edit(embed=embed, view=None)
+                            await asyncio.wait_for(message_obj.edit(embed=embed, view=None), timeout=10)
                         except Exception:
                             pass
+                        await asyncio.sleep(0.15)
                     for target_item in announcement_messages:
                         target_channel = bot.get_channel(int(target_item.get("channel_id", 0)))
                         if target_channel:
                             try:
-                                await target_channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
+                                await asyncio.wait_for(
+                                    target_channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!"),
+                                    timeout=10,
+                                )
                             except Exception:
                                 pass
+                            await asyncio.sleep(0.4)
                 else:
                     await msg.edit(embed=embed, view=None)
                     await interaction.channel.send(f"🎉 Congratulations <@{winner_id}>! You won the {cat_type} cat giveaway!")
@@ -11573,9 +11587,10 @@ class AdminPanelModal(discord.ui.Modal):
                         if message_obj is None:
                             continue
                         try:
-                            await message_obj.edit(embed=embed, view=None)
+                            await asyncio.wait_for(message_obj.edit(embed=embed, view=None), timeout=10)
                         except Exception:
                             pass
+                        await asyncio.sleep(0.15)
                 else:
                     await msg.edit(embed=embed, view=None)
         
