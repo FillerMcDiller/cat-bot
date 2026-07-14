@@ -2147,7 +2147,7 @@ print("Aches.json absolute path:", os.path.abspath("config/aches.json"))
 ach_names = ach_list.keys()
 ach_titles = {value["title"].lower(): key for (key, value) in ach_list.items()}
 
-RESTART_INTERVAL = 20        # 6 hours in seconds
+RESTART_INTERVAL = 21600          # 6 hours
 WARNING_BEFORE = 60               # 1 minute warning
 RESTART_WARNING_CHANNEL_ID = 1462199404244107519  # replace with your channel ID
 
@@ -2461,6 +2461,106 @@ formatter = logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s
 _discord_handler.setFormatter(formatter)
 logging.getLogger().addHandler(_discord_handler)
 logging.getLogger().setLevel(logging.INFO)
+
+import sys as _sys
+
+
+async def _post_console_batch_to_backup(lines: list[str]):
+    try:
+        chan_id = int(getattr(config, "BACKUP_ID", 0) or 0)
+        if not chan_id or not lines:
+            return
+        ch = bot.get_channel(chan_id)
+        if ch is None:
+            try:
+                ch = await bot.fetch_channel(chan_id)
+            except Exception:
+                ch = None
+        if ch is None:
+            return
+        send_lines = lines[:_DISCORD_MAX_LINES]
+        dropped = len(lines) - len(send_lines)
+        payload = "\n".join(send_lines)
+        if dropped > 0:
+            payload += f"\n...+{dropped} more lines suppressed..."
+        maxlen = 1900
+        if len(payload) <= maxlen:
+            await ch.send(f"```\n{payload}\n```")
+        else:
+            for i in range(0, len(payload), maxlen):
+                await ch.send(f"```\n{payload[i:i+maxlen]}\n```")
+    except Exception:
+        pass
+
+
+_backup_console_buffer: list[str] = []
+_backup_console_flush_scheduled = False
+
+
+async def _schedule_backup_console_flush(delay: float = _DISCORD_FLUSH_INTERVAL):
+    global _backup_console_flush_scheduled
+    try:
+        await asyncio.sleep(delay)
+        if not _backup_console_buffer:
+            _backup_console_flush_scheduled = False
+            return
+        lines = _backup_console_buffer.copy()
+        _backup_console_buffer.clear()
+        _backup_console_flush_scheduled = False
+        await _post_console_batch_to_backup(lines)
+    except Exception:
+        _backup_console_flush_scheduled = False
+
+
+class _ConsoleToBackupChannel:
+    """Tee stdout/stderr: still writes to the real console (if any), AND
+    queues a copy to be flushed to the BACKUP_ID channel. Never blocks,
+    never raises, never touches the logging module."""
+
+    def __init__(self, real_stream):
+        self._real_stream = real_stream
+
+    def write(self, message: str):
+        # Always preserve real console output first.
+        try:
+            self._real_stream.write(message)
+        except Exception:
+            pass
+
+        text = message.rstrip("\n")
+        if not text:
+            return
+        if len(text) > 1000:
+            text = text[:1000] + "..."
+
+        try:
+            if not bot or not getattr(bot, "is_ready", lambda: False)():
+                # Bot not ready yet (e.g. very early startup) - buffer will
+                # simply grow slightly and flush once a loop exists; skip
+                # scheduling a task before there's a running loop.
+                return
+            _backup_console_buffer.append(text)
+            global _backup_console_flush_scheduled
+            if not _backup_console_flush_scheduled:
+                _backup_console_flush_scheduled = True
+                try:
+                    asyncio.create_task(_schedule_backup_console_flush())
+                except Exception:
+                    _backup_console_flush_scheduled = False
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            self._real_stream.flush()
+        except Exception:
+            pass
+
+
+# Enable the tee. Safe to leave permanently on - it never blocks the
+# original print() call, and failures inside it are always swallowed.
+_sys.stdout = _ConsoleToBackupChannel(_sys.stdout)
+_sys.stderr = _ConsoleToBackupChannel(_sys.stderr)
 
 # Redirect stdout/stderr into logging (will be INFO/ERROR level; handler filters by WARNING)
 # NOTE: Disabled due to hanging issues - will investigate separately
