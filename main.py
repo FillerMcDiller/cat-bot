@@ -24,6 +24,7 @@ import datetime
 import io
 import json
 import logging
+import logging.handlers
 import math
 import os
 import platform
@@ -2454,13 +2455,36 @@ class _StreamToLogger:
         pass
 
 
-# attach handler to root logger
+# attach handlers to root logger
+# NOTE: previously only _discord_handler (WARNING+) was attached here, and it
+# only forwards to Discord (and only once the bot is ready + BACKUP_ID/log
+# channel configured). That meant logger.info(...)/logger.debug(...) calls
+# went absolutely nowhere - not console, not a file, not Discord. Any code
+# using `logging.exception(...)` for errors (e.g. on_error, log_vote_to_channel)
+# also silently vanished if the bot wasn't ready yet or Discord delivery failed.
+formatter = logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s")
+
 _discord_handler = DiscordLogHandler()
 _discord_handler.setLevel(logging.WARNING)  # only forward warnings and above by default
-formatter = logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s")
 _discord_handler.setFormatter(formatter)
-logging.getLogger().addHandler(_discord_handler)
-logging.getLogger().setLevel(logging.INFO)
+
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setLevel(logging.INFO)
+_console_handler.setFormatter(formatter)
+
+LOG_DIR = os.path.join(BASE_PATH, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+_file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(LOG_DIR, "bot.log"), maxBytes=10_000_000, backupCount=5, encoding="utf-8"
+)
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(formatter)
+
+root_logger = logging.getLogger()
+root_logger.addHandler(_discord_handler)
+root_logger.addHandler(_console_handler)
+root_logger.addHandler(_file_handler)
+root_logger.setLevel(logging.INFO)
 
 import sys as _sys
 
@@ -8828,34 +8852,13 @@ async def maintaince_loop():
 async def on_connect():
     global emojis
 
-    app = await bot.application_info()
-    route = discord.http.Route("GET", "/applications/{application_id}/emojis", application_id=app.id)
-    raw = await bot.http.request(route)
-
-    print("Raw count:", len(raw["items"]) if "items" in raw else len(raw))
-    print([e["name"] for e in (raw["items"] if "items" in raw else raw)])
-
     try:
         fetched = await bot.fetch_application_emojis()
         emojis = {e.name: str(e) for e in fetched}
-        print(f"[EMOJIS] Loaded {len(emojis)} application emojis")
-        print(list(emojis.keys())[:20])
+        print(f"[EMOJIS] Loaded {len(emojis)} application emojis", flush=True)
     except Exception as e:
-        print(f"[EMOJIS] Failed to fetch application emojis: {e}")
+        print(f"[EMOJIS] Failed to fetch application emojis: {e}", flush=True)
         emojis = {}
-
-    fetched = await bot.fetch_application_emojis()
-    emojis = {e.name: str(e) for e in fetched}
-    print(sorted(emojis.keys()))
-
-    def get_emoji(name):
-        if name in emojis:
-            return emojis[name]
-
-    print(f"Missing emoji: {name}")
-    return "🔳"
-
-print(sorted(emojis.keys()))
 
 
 # some code which is run when bot is started
