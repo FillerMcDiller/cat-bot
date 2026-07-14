@@ -6,7 +6,6 @@ from discord import app_commands
 
 
 class CatCompLink(commands.Cog):
-    """Provides a single command linking to the website submission form."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot

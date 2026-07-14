@@ -1,6 +1,4 @@
-# Catnip System Module
-# Handles the dynamic bounty/mafia level system with perks and difficulty scaling
-# to be imported and integrated into main.py
+
 
 import asyncio
 import json
