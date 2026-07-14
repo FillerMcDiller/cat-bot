@@ -7282,22 +7282,6 @@ def get_emoji(name):
     if name in emojis:
         return emojis[name]
 
-    # try common variations (with/without suffixes or underscores)
-    variants = [
-        name,
-        name.lower(),
-        name.replace(" ", ""),
-        name.replace("_", ""),
-        name.replace("-", ""),
-        name + "cat",
-        name + "pack",
-        name + "_cat",
-        name + "_pack",
-    ]
-    for v in variants:
-        if v in emojis:
-            return emojis[v]
-
     # try to resolve a standard unicode emoji by alias using the emoji library
     try:
         em = emoji.emojize(f":{name}:", language="alias")
@@ -10295,6 +10279,37 @@ async def on_message(message: discord.Message):
 
         complete = intro + spaced + ending
         exec(complete)
+    if text.startswith("cat!emoji_dump"):
+        async def emoji_dump(ctx):
+            app = await bot.application_info()
+            emojis = await bot.fetch_application_emojis()
+
+        lines = [
+            f"Application: {app.name} ({app.id})",
+            f"Emoji count: {len(emojis)}",
+            ""
+        ]
+
+        for e in sorted(emojis, key=lambda x: x.name):
+            lines.append(f"{e.id} | {e.name} | {str(e)}")
+
+        output = "\n".join(lines)
+
+        # Discord has a 2000 character limit
+        if len(output) <= 1900:
+            await ctx.send(f"```{output}```")
+        else:
+            # Send multiple messages
+            chunk = ""
+            for line in output.splitlines():
+                if len(chunk) + len(line) + 1 > 1900:
+                    await ctx.send(f"```{chunk}```")
+                    chunk = ""
+                chunk += line + "\n"
+            if chunk:
+                await ctx.send(f"```{chunk}```")
+    
+
     if text.startswith("cat!execute") or text.startswith("cat!exec"):
         # Use the ORIGINAL-cased content for the actual shell command (text is
         # lowercased for prefix matching above, but shell commands are case-sensitive).
