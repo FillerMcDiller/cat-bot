@@ -10334,6 +10334,54 @@ async def on_message(message: discord.Message):
                     await message.channel.send(f"```{chunk}```")
         except Exception:
             await message.reply(f"```{traceback.format_exc()[-1900:]}```")
+
+    if text.startswith("cat!emoji_check"):
+        # Checks every application emoji's actual CDN image, not just whether
+        # the name/id resolves - an emoji can have a perfectly valid mention
+        # string (<:name:id>) and still render as a gray box in Discord if
+        # the underlying image asset is missing/broken.
+        try:
+            await message.channel.send("Checking emoji assets, this may take a bit...")
+            fetched_emojis = await bot.fetch_application_emojis()
+            broken = []
+
+            async with aiohttp.ClientSession() as session:
+                async def _check(e):
+                    ext = "gif" if e.animated else "png"
+                    url = f"https://cdn.discordapp.com/emojis/{e.id}.{ext}"
+                    try:
+                        async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            if resp.status != 200:
+                                broken.append((e.name, e.id, resp.status))
+                    except Exception as ex:
+                        broken.append((e.name, e.id, f"error: {ex}"))
+
+                # check in small batches to avoid hammering the CDN at once
+                batch_size = 10
+                emoji_list = sorted(fetched_emojis, key=lambda x: x.name)
+                for i in range(0, len(emoji_list), batch_size):
+                    await asyncio.gather(*[_check(e) for e in emoji_list[i:i + batch_size]])
+
+            if not broken:
+                await message.channel.send(f"All {len(emoji_list)} application emojis have valid CDN assets. ✅")
+            else:
+                lines = [f"Checked {len(emoji_list)} emojis, found {len(broken)} broken:", ""]
+                for name, eid, status in broken:
+                    lines.append(f"{eid} | {name} | {status}")
+                output = "\n".join(lines)
+                if len(output) <= 1900:
+                    await message.channel.send(f"```{output}```")
+                else:
+                    chunk = ""
+                    for line in output.splitlines():
+                        if len(chunk) + len(line) + 1 > 1900:
+                            await message.channel.send(f"```{chunk}```")
+                            chunk = ""
+                        chunk += line + "\n"
+                    if chunk:
+                        await message.channel.send(f"```{chunk}```")
+        except Exception:
+            await message.reply(f"```{traceback.format_exc()[-1900:]}```")
     
 
     if text.startswith("cat!execute") or text.startswith("cat!exec"):
