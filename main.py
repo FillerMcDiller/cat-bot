@@ -10350,9 +10350,20 @@ async def on_message(message: discord.Message):
                     ext = "gif" if e.animated else "png"
                     url = f"https://cdn.discordapp.com/emojis/{e.id}.{ext}"
                     try:
-                        async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        # Use GET, not HEAD - Discord's CDN returns a
+                        # false-positive 200 OK on HEAD requests even for
+                        # broken/missing emoji assets. Only a real GET with
+                        # a sane body size reliably reflects whether the
+                        # image actually exists.
+                        async with session.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            body = await resp.read()
+                            content_type = resp.headers.get("Content-Type", "")
                             if resp.status != 200:
-                                broken.append((e.name, e.id, resp.status))
+                                broken.append((e.name, e.id, f"status {resp.status}"))
+                            elif len(body) < 100:
+                                broken.append((e.name, e.id, f"status 200 but only {len(body)} bytes"))
+                            elif not content_type.startswith("image/"):
+                                broken.append((e.name, e.id, f"status 200 but content-type={content_type!r}"))
                     except Exception as ex:
                         broken.append((e.name, e.id, f"error: {ex}"))
 
