@@ -10291,34 +10291,36 @@ async def on_message(message: discord.Message):
         complete = intro + spaced + ending
         exec(complete)
     if text.startswith("cat!emoji_dump"):
-        async def emoji_dump(ctx):
+        try:
             app = await bot.application_info()
-            emojis = await bot.fetch_application_emojis()
+            fetched_emojis = await bot.fetch_application_emojis()
 
-        lines = [
-            f"Application: {app.name} ({app.id})",
-            f"Emoji count: {len(emojis)}",
-            ""
-        ]
+            lines = [
+                f"Application: {app.name} ({app.id})",
+                f"Emoji count: {len(fetched_emojis)}",
+                ""
+            ]
 
-        for e in sorted(emojis, key=lambda x: x.name):
-            lines.append(f"{e.id} | {e.name} | {str(e)}")
+            for e in sorted(fetched_emojis, key=lambda x: x.name):
+                lines.append(f"{e.id} | {e.name} | {str(e)}")
 
-        output = "\n".join(lines)
+            output = "\n".join(lines)
 
-        # Discord has a 2000 character limit
-        if len(output) <= 1900:
-            await ctx.send(f"```{output}```")
-        else:
-            # Send multiple messages
-            chunk = ""
-            for line in output.splitlines():
-                if len(chunk) + len(line) + 1 > 1900:
-                    await ctx.send(f"```{chunk}```")
-                    chunk = ""
-                chunk += line + "\n"
-            if chunk:
-                await ctx.send(f"```{chunk}```")
+            # Discord has a 2000 character limit
+            if len(output) <= 1900:
+                await message.channel.send(f"```{output}```")
+            else:
+                # Send multiple messages
+                chunk = ""
+                for line in output.splitlines():
+                    if len(chunk) + len(line) + 1 > 1900:
+                        await message.channel.send(f"```{chunk}```")
+                        chunk = ""
+                    chunk += line + "\n"
+                if chunk:
+                    await message.channel.send(f"```{chunk}```")
+        except Exception:
+            await message.reply(f"```{traceback.format_exc()[-1900:]}```")
     
 
     if text.startswith("cat!execute") or text.startswith("cat!exec"):
