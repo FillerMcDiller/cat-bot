@@ -7278,6 +7278,17 @@ def get_emoji(name):
     if not name:
         return "🔳"
 
+    # If `name` is already a literal built-in Discord emoji (e.g. "⬆️", "☔"),
+    # just return it as-is. Previously every literal emoji passed in here got
+    # run through the name/alias lookup pipeline below - which only knows how
+    # to resolve text names like "chart_increasing" into emoji, not the other
+    # way around - so any raw glyph always fell through to the "🔳" fallback.
+    try:
+        if emoji.demojize(name) != name:
+            return name
+    except Exception:
+        pass
+
     # direct app emoji (custom guild/app emojis)
     if name in emojis:
         return emojis[name]
