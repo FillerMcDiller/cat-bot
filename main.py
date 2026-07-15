@@ -7275,8 +7275,6 @@ last_random_giveaway_time = 0
 
 def get_emoji(name):
     global emojis
-    if not name:
-        return "🔳"
 
     # If `name` is already a literal built-in Discord emoji (e.g. "⬆️", "☔"),
     # just return it as-is. Previously every literal emoji passed in here got
@@ -7301,8 +7299,6 @@ def get_emoji(name):
     except Exception:
         pass
 
-    # fallback: unknown
-    return "🔳"
 
 
 def get_cat_emoji(cat_type):
