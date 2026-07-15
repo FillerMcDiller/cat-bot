@@ -24956,16 +24956,6 @@ async def setup(bot2):
     bot2.on_connect = on_connect
     bot2.on_error = on_error
 
-    # Reload the application emoji cache on every extension (re)load.
-    # on_connect only fires on a fresh/re-established gateway connection,
-    # but cat!restart / the auto-reload watcher hot-reload this module
-    # in-process without touching the gateway - so on_connect alone would
-    # never re-fire after a restart, leaving `emojis` stuck at {} forever.
-    try:
-        await _load_application_emojis()
-    except Exception:
-        logging.exception("Failed to load application emojis during setup()")
-
     webhook_secret = _get_vote_webhook_secret()
     if not webhook_secret:
         print("[VOTE WEBHOOK] No secret configured; starting without request verification.", flush=True)
@@ -25104,6 +25094,19 @@ async def setup(bot2):
 
     # finally replace the fake bot with the real one
     bot = bot2
+
+    # Reload the application emoji cache on every extension (re)load.
+    # on_connect only fires on a fresh/re-established gateway connection,
+    # but cat!restart / the auto-reload watcher hot-reload this module
+    # in-process without touching the gateway - so on_connect alone would
+    # never re-fire after a restart, leaving `emojis` stuck at {} forever.
+    # NOTE: must run AFTER `bot = bot2` above - `bot` was still the
+    # disconnected placeholder instance before this point, so an earlier
+    # attempt to call this here silently failed every fetch.
+    try:
+        await _load_application_emojis()
+    except Exception:
+        logging.exception("Failed to load application emojis during setup()")
 
     global chat_reader_task
     if chat_reader_task is None or chat_reader_task.done():
