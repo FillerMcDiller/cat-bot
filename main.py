@@ -7277,7 +7277,12 @@ def get_emoji(name):
     global emojis
     if not name:
         return "🔳"
-    
+
+    # If `name` is already a literal built-in Discord emoji (e.g. "⬆️", "☔"),
+    # just return it as-is. Previously every literal emoji passed in here got
+    # run through the name/alias lookup pipeline below - which only knows how
+    # to resolve text names like "chart_increasing" into emoji, not the other
+    # way around - so any raw glyph always fell through to the "🔳" fallback.
     try:
         if emoji.demojize(name) != name:
             return name
@@ -8839,9 +8844,18 @@ async def maintaince_loop():
 
 # fetch app emojis early
 
-async def on_connect():
-    global emojis
+async def _load_application_emojis():
+    """Fetch application emojis into the global `emojis` cache.
 
+    Called from on_connect() (fires on a fresh/re-established gateway
+    connection) AND directly from setup() (fires on every extension
+    reload, e.g. via cat!restart). cat!restart hot-reloads the `main`
+    module in-process without ever disconnecting the gateway, so
+    on_connect alone would never re-fire after a restart - leaving the
+    freshly re-initialized `emojis = {}` empty forever. Calling this
+    from setup() too ensures the cache gets refilled every time.
+    """
+    global emojis
     try:
         fetched = await bot.fetch_application_emojis()
         emojis = {e.name: str(e) for e in fetched}
@@ -8849,6 +8863,10 @@ async def on_connect():
     except Exception as e:
         print(f"[EMOJIS] Failed to fetch application emojis: {e}", flush=True)
         emojis = {}
+
+
+async def on_connect():
+    await _load_application_emojis()
 
 
 # some code which is run when bot is started
@@ -24878,6 +24896,16 @@ async def setup(bot2):
     bot2.on_message = on_message
     bot2.on_connect = on_connect
     bot2.on_error = on_error
+
+    # Reload the application emoji cache on every extension (re)load.
+    # on_connect only fires on a fresh/re-established gateway connection,
+    # but cat!restart / the auto-reload watcher hot-reload this module
+    # in-process without touching the gateway - so on_connect alone would
+    # never re-fire after a restart, leaving `emojis` stuck at {} forever.
+    try:
+        await _load_application_emojis()
+    except Exception:
+        logging.exception("Failed to load application emojis during setup()")
 
     webhook_secret = _get_vote_webhook_secret()
     if not webhook_secret:
