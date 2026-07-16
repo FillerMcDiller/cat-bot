@@ -10558,7 +10558,7 @@ async def on_guild_join(guild):
         if ch.permissions_for(guild.me).send_messages:
             await ch.send(
                 unofficial_note
-                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/hAydAUTzT \nHave a nice day/night :)"
+                + "Thanks for adding me!\nTo start, use `/setup` and `/help` to learn more!\nJoin the support server here: https://discord.gg/w2dbPY5Uc \nHave a nice day/night :)"
             )
     except Exception:
         pass
@@ -10651,7 +10651,7 @@ async def help(message):
         )
         .add_field(
             name="Other features",
-            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://fillermcdiller.github.io/cat-bot/wiki/) or drop us a line at our [Discord server](https://discord.gg/hAydAUTzT).\n\n**Need help?** Use `/support` for assistance!",
+            value="KITTAYYYYYYY has extra fun commands which you will discover along the way.\nAnything unclear? Check out [our wiki](https://fillermcdiller.github.io/cat-bot/wiki/) or drop us a line at our [Discord server](https://discord.gg/w2dbPY5Uc).\n\n**Need help?** Use `/support` for assistance!",
             inline=False,
         )
     )
@@ -10809,7 +10809,7 @@ async def support(message: discord.Interaction):
         # User is in the official support server
         embed.description = (
             "Welcome to the KITTAYYYYYYY support server!\n\n"
-            f"📋 **Get Help:** Visit <#1182425780488151090> to create a support thread\n"
+            f"📋 **Get Help:** Visit <#1526182502388207707> to create a support thread\n"
             "💬 Ask your questions and our team will assist you!\n\n"
             "📚 **Also check out:**\n"
             "• [KITTAYYYYYYY Wiki](https://fillermcdiller.github.io/cat-bot/wiki/) for guides and info\n"
@@ -10820,8 +10820,8 @@ async def support(message: discord.Interaction):
         embed.description = (
             "Need help with KITTAYYYYYYY?\n\n"
             "🔗 **Join our Discord server for support:**\n"
-            "https://discord.gg/hAydAUTzT\n\n"
-            "Once there, visit **#‼️kittay-support‼️** to create a support thread!\n\n"
+            "https://discord.gg/w2dbPY5Uc\n\n"
+            "Once there, visit **#😹help-me🆘** to create a support thread!\n\n"
             "📚 **Also check out:**\n"
             "• [KITTAYYYYYYY Wiki](https://fillermcdiller.github.io/cat-bot/wiki/) for guides and info\n"
             "• `/help` command for basic instructions"
