@@ -18008,7 +18008,7 @@ async def cosmetics(message: discord.Interaction):
                 
                 options.append(discord.SelectOption(
                     label=f"{is_equipped}{display}"[:100],
-                    description=item_data['description'][:100],
+                    description=item_data.get('description', 'No description available.')[:100],
                     value=item_id
                 ))
             
@@ -23313,6 +23313,105 @@ async def leaderboards(
 
 
 # Interactive Setup Components
+
+# --- Local Lock detection ---------------------------------------------------
+# If a server's /setup settings become "too generous" across the board, the
+# server effectively becomes local-locked: everything (cats, kibble, packs,
+# items etc.) stays confined to that one server instead of being global.
+# We warn admins before letting that combination of settings take effect.
+LOCAL_LOCK_SPAWN_FREQ_THRESHOLD = 120   # seconds (2 minutes)
+LOCAL_LOCK_RACE_FREQ_THRESHOLD = 600    # seconds (10 minutes)
+
+LOCAL_LOCK_WARNING_TEXT = (
+    "⚠️ **Warning:** If you apply these settings, this bot will be **local locked**, "
+    "meaning everything (cats, kibble, packs, items etc.) will only be available "
+    "**IN THIS SERVER**, and this server will not be able to access anything from "
+    "other servers, as well as not appearing on the global leaderboards."
+)
+
+
+def _would_trigger_local_lock(channel) -> bool:
+    """Return True if ANY of the local-lock conditions are met:
+    - spawn frequency (minimum) below 2 minutes
+    - spawn luck above 1.0x
+    - pack luck above 1.0x
+    - not all cats are selected (at least one cat disabled)
+    - race frequency below 10 minutes
+    """
+    spawn_min = getattr(channel, 'spawn_times_min', 120) or 120
+    spawn_luck = getattr(channel, 'spawn_luck_multiplier', 1.0) or 1.0
+    pack_luck = getattr(channel, 'pack_luck_multiplier', 1.0) or 1.0
+    disabled_cats_raw = getattr(channel, 'disabled_cats', '') or ''
+    disabled_cats = {c for c in disabled_cats_raw.split(',') if c}
+    race_freq = getattr(channel, 'race_frequency', 600) or 600
+
+    all_cats_not_selected = len(disabled_cats) > 0
+
+    return (
+        spawn_min < LOCAL_LOCK_SPAWN_FREQ_THRESHOLD
+        or spawn_luck > 1.0
+        or pack_luck > 1.0
+        or all_cats_not_selected
+        or race_freq < LOCAL_LOCK_RACE_FREQ_THRESHOLD
+    )
+
+
+class LocalLockConfirmView(discord.ui.View):
+    """Shown when a /setup change would push the server's settings into
+    "local lock" territory. Confirm keeps the change (already saved),
+    Cancel reverts the specific field(s) that were just changed."""
+
+    def __init__(self, channel_id: int, revert_fields: dict, success_message: str):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.revert_fields = revert_fields
+        self.success_message = success_message
+
+    @discord.ui.button(label="✅ Confirm (Local Lock)", style=ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=f"{self.success_message}\n\n🔒 This server is now **local locked**.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="↩️ Cancel & Revert", style=ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = await Channel.get_or_none(channel_id=self.channel_id)
+        if channel:
+            for field, value in self.revert_fields.items():
+                setattr(channel, field, value)
+            await channel.save()
+
+            if 'race_frequency' in self.revert_fields:
+                global race_frequencies
+                race_frequencies[self.channel_id] = self.revert_fields['race_frequency']
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content="❌ Change reverted. This server will remain global.",
+            view=self,
+        )
+        self.stop()
+
+
+async def check_local_lock_warning(interaction: discord.Interaction, channel, revert_fields: dict, success_message: str) -> bool:
+    """After a /setup field has already been saved, check whether the combined
+    settings trip the local-lock thresholds. If so, send a warning with
+    Confirm/Cancel buttons and return True (caller should NOT send its own
+    success message). Otherwise return False (caller proceeds as normal)."""
+    if not _would_trigger_local_lock(channel):
+        return False
+
+    view = LocalLockConfirmView(channel.channel_id, revert_fields, success_message)
+    await interaction.response.send_message(LOCAL_LOCK_WARNING_TEXT, view=view, ephemeral=True)
+    return True
+# -----------------------------------------------------------------------------
+
+
 class SpawnFrequencyModal(discord.ui.Modal, title="Set Spawn Frequency"):
     min_time = discord.ui.TextInput(
         label="Minimum spawn time (seconds)",
@@ -23349,13 +23448,17 @@ class SpawnFrequencyModal(discord.ui.Modal, title="Set Spawn Frequency"):
             
             channel = await Channel.get_or_none(channel_id=self.channel_id)
             if channel:
+                old_min = getattr(channel, 'spawn_times_min', 120)
+                old_max = getattr(channel, 'spawn_times_max', 1200)
                 channel.spawn_times_min = min_val
                 channel.spawn_times_max = max_val
                 await channel.save()
-                await interaction.response.send_message(
-                    f"✅ Spawn frequency set to {min_val}-{max_val} seconds!",
-                    ephemeral=True
-                )
+
+                success_message = f"✅ Spawn frequency set to {min_val}-{max_val} seconds!"
+                revert_fields = {"spawn_times_min": old_min, "spawn_times_max": old_max}
+                if await check_local_lock_warning(interaction, channel, revert_fields, success_message):
+                    return
+                await interaction.response.send_message(success_message, ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
         except ValueError:
@@ -23386,13 +23489,18 @@ class SpawnLuckModal(discord.ui.Modal, title="Set Spawn Luck Multiplier"):
             
             channel = await Channel.get_or_none(channel_id=self.channel_id)
             if channel:
+                old_luck = getattr(channel, 'spawn_luck_multiplier', 1.0)
                 channel.spawn_luck_multiplier = luck_val
                 await channel.save()
-                await interaction.response.send_message(
+
+                success_message = (
                     f"✅ Spawn luck multiplier set to {luck_val}x!\n"
-                    f"💎 Enchanted cats will now spawn {luck_val}x more frequently!",
-                    ephemeral=True
+                    f"💎 Enchanted cats will now spawn {luck_val}x more frequently!"
                 )
+                revert_fields = {"spawn_luck_multiplier": old_luck}
+                if await check_local_lock_warning(interaction, channel, revert_fields, success_message):
+                    return
+                await interaction.response.send_message(success_message, ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
         except ValueError:
@@ -23423,13 +23531,18 @@ class PackLuckModal(discord.ui.Modal, title="Set Pack Luck Multiplier"):
             
             channel = await Channel.get_or_none(channel_id=self.channel_id)
             if channel:
+                old_luck = getattr(channel, 'pack_luck_multiplier', 1.0)
                 channel.pack_luck_multiplier = luck_val
                 await channel.save()
-                await interaction.response.send_message(
+
+                success_message = (
                     f"✅ Pack luck multiplier set to {luck_val}x!\n"
-                    f"📦 Better cats will appear {luck_val}x more often in packs!",
-                    ephemeral=True
+                    f"📦 Better cats will appear {luck_val}x more often in packs!"
                 )
+                revert_fields = {"pack_luck_multiplier": old_luck}
+                if await check_local_lock_warning(interaction, channel, revert_fields, success_message):
+                    return
+                await interaction.response.send_message(success_message, ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
         except ValueError:
@@ -23540,16 +23653,21 @@ class CatSelectionView(discord.ui.View):
     async def save_selection(self, interaction: discord.Interaction):
         channel = await Channel.get_or_none(channel_id=self.channel_id)
         if channel:
+            old_disabled = getattr(channel, 'disabled_cats', '') or ''
             # Save as comma-separated string
             channel.disabled_cats = ",".join(sorted(self.disabled_cats)) if self.disabled_cats else ""
             await channel.save()
-            
+
             enabled_count = len(spawnable_cattypes) - len(self.disabled_cats)
-            await interaction.response.send_message(
+            success_message = (
                 f"✅ Cat selection saved!\n"
-                f"📊 **{enabled_count}** cats enabled, **{len(self.disabled_cats)}** cats disabled",
-                ephemeral=True
+                f"📊 **{enabled_count}** cats enabled, **{len(self.disabled_cats)}** cats disabled"
             )
+            revert_fields = {"disabled_cats": old_disabled}
+            if await check_local_lock_warning(interaction, channel, revert_fields, success_message):
+                self.stop()
+                return
+            await interaction.response.send_message(success_message, ephemeral=True)
             self.stop()
         else:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
@@ -23579,12 +23697,16 @@ class RaceFrequencySelectView(discord.ui.View):
         
         # Save to in-memory dictionary (bypasses DB issues)
         global race_frequencies
+        old_freq_val = race_frequencies.get(self.channel_id, 600)
         race_frequencies[self.channel_id] = freq_val
         print(f"[RACE_FREQ] Set frequency to {freq_val} seconds for channel {self.channel_id}", flush=True)
         
         # Also try to save to DB (best effort)
         channel = await Channel.get_or_none(channel_id=self.channel_id)
         if channel:
+            old_db_freq = getattr(channel, 'race_frequency', None)
+            if old_db_freq is None:
+                old_db_freq = old_freq_val
             try:
                 channel.race_frequency = freq_val
                 await channel.save()
@@ -23601,17 +23723,20 @@ class RaceFrequencySelectView(discord.ui.View):
                 
                 # Show when the next race will be
                 next_race_time = int(next_race["start_time"])
-                await interaction.response.send_message(
+                success_message = (
                     f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
-                    f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)",
-                    ephemeral=True
+                    f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)"
                 )
             else:
-                await interaction.response.send_message(
+                success_message = (
                     f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
-                    f"⏰ Next race will be scheduled with the new frequency.",
-                    ephemeral=True
+                    f"⏰ Next race will be scheduled with the new frequency."
                 )
+
+            revert_fields = {"race_frequency": old_db_freq}
+            if await check_local_lock_warning(interaction, channel, revert_fields, success_message):
+                return
+            await interaction.response.send_message(success_message, ephemeral=True)
         else:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
 
