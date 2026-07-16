@@ -3249,35 +3249,8 @@ async def start_ffa_setup(interaction: discord.Interaction, initiator: discord.M
     
     await interaction.channel.send(embed=embed)
 
-
-# Lightweight diagnostics: report whether the fights extension and cog are present
-@bot.tree.command(name="fights", description="Check fights system status")
-async def fights_status(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=True)
-    mod_ok = True
-    try:
-        import importlib
-
-        importlib.import_module("fights")
-    except Exception:
-        mod_ok = False
-
-    try:
-        cog_present = bool(bot.get_cog("Fights"))
-    except Exception:
-        cog_present = False
-
-    text = f"fights module importable: {'yes' if mod_ok else 'no'}\nFights cog loaded: {'yes' if cog_present else 'no'}"
-    await interaction.followup.send(text, ephemeral=True)
-
-
 # Temporary placeholder for `/fight` while the Fights cog is diagnosed
-@bot.tree.command(name="fight", description="Challenge other players to a cat fight")
+@bot.tree.command(name="fight", description="grr im gonna fight u")
 async def fight_placeholder(interaction: discord.Interaction, opponent: discord.Member | None = None):
     """Interactive challenge flow with battle mode selection"""
     executor = interaction.user
@@ -5066,7 +5039,7 @@ async def show_tournament_hub(interaction: discord.Interaction):
 # --- END TOURNAMENT SYSTEM ---
 
 
-@bot.tree.command(name="battles", description="Battle hub - manage your deck and view battle stats")
+@bot.tree.command(name="battles", description="battle hub - manage decks and stuffs")
 async def battles_command(interaction: discord.Interaction):
     """Main battle hub with buttons for all battle-related actions."""
     
@@ -5821,7 +5794,7 @@ async def end_ranked_season(season: int):
         season + 1, current_time, end_time
     )
 
-@bot.tree.command(name="ranked", description="View ranked battle information and your rank")
+@bot.tree.command(name="ranked", description="so we in plastic")
 async def ranked_command(interaction: discord.Interaction):
     """View ranked battle stats and leaderboard"""
     # Global command cooldown check (5 seconds)
@@ -6058,94 +6031,6 @@ async def ranked_command(interaction: discord.Interaction):
     view = RankedView()
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-# ==================== END RANKED BATTLE SYSTEM ====================
-
-
-@bot.tree.command(name="updatecatstats", description="Update all your cats to use the new battle stat system")
-async def update_cat_stats_command(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Update all existing cats to use the new CAT_BATTLE_STATS system."""
-    await interaction.response.defer(ephemeral=True)
-    
-    guild_id = interaction.guild.id if interaction.guild else 0
-    user_id = interaction.user.id
-    
-    # Update cat stats
-    updated = await update_cat_stats_from_battle_stats(guild_id, user_id)
-    
-    if updated:
-        # Get cat counts by type
-        cats = await get_user_cats(guild_id, user_id)
-        type_counts = {}
-        for cat in cats:
-            cat_type = cat.get('type', 'Unknown')
-            type_counts[cat_type] = type_counts.get(cat_type, 0) + 1
-        
-        embed = discord.Embed(
-            title="✅ Cat Stats Updated!",
-            description=f"All {len(cats)} of your cats have been updated with the new battle stat system.\n\n**Your Cats:**\n" + 
-                       "\n".join([f"• {count}x {cat_type}" for cat_type, count in sorted(type_counts.items(), key=lambda x: type_dict.get(x[0], 0), reverse=True)]),
-            color=0x2ecc71
-        )
-        embed.set_footer(text="Your cats now have proper HP, DMG, abilities, and weaknesses!")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-    else:
-        await interaction.followup.send("You don't have any cats to update! If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=True)
-
-
-@bot.tree.command(name="syncats", description="Sync your cat instances with database counts (admin/troubleshooting)")
-async def sync_cats_command(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    """Manually trigger cat instance sync for your account."""
-    await interaction.response.defer(ephemeral=True)
-    
-    guild_id = interaction.guild.id if interaction.guild else 0
-    user_id = interaction.user.id
-    
-    try:
-        # Get profile
-        profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
-        
-        # Run auto-sync
-        created = await auto_sync_cat_instances(profile)
-        
-        # Get current cats
-        cats = await get_user_cats(guild_id, user_id)
-        
-        if created:
-            type_counts = {}
-            for cat in cats:
-                cat_type = cat.get('type', 'Unknown')
-                type_counts[cat_type] = type_counts.get(cat_type, 0) + 1
-            
-            embed = discord.Embed(
-                title="✅ Cats Synced!",
-                description=f"Your cat instances have been synced with the database.\n\n**Total Cats: {len(cats)}**\n\n**By Type:**\n" + 
-                           "\n".join([f"• {count}x {cat_type}" for cat_type, count in sorted(type_counts.items(), key=lambda x: type_dict.get(x[0], 0), reverse=True)]),
-                color=0x3498db
-            )
-            embed.set_footer(text="All missing instances have been created!")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        else:
-            embed = discord.Embed(
-                title="✅ Already Synced",
-                description=f"Your cats are already in sync! You have {len(cats)} cat instances.\n\n" +
-                           "All your database counts match your instance counts.",
-                color=0x2ecc71
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error during sync: {e}", ephemeral=True)
-
-
 async def _start_pvp_challenge(interaction: discord.Interaction, executor: discord.Member, opponent: discord.Member):
     """Start a PvP challenge - reuses ChallengeView from fight command."""
     # Just call the existing fight command logic
@@ -6263,185 +6148,6 @@ async def _start_bot_fight(interaction: discord.Interaction, executor: discord.M
         await interaction.channel.send(f"{opponent.display_name} (the bot) accepted the challenge! Coin flip: {first.display_name} goes first!")
     except Exception:
         pass
-
-
-@bot.tree.command(name="debug_battles", description="Debug the Battles cog loading and helpers")
-async def debug_battles(interaction: discord.Interaction):
-    # Global command cooldown check (5 seconds)
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=True)
-    import importlib, importlib.util, os, traceback, sys
-
-    lines = []
-    try:
-        initial_keys = list(bot.cogs.keys())
-        lines.append(f"Initial cog keys: {initial_keys}")
-        lines.append(f"Bot id: {id(bot)}")
-    except Exception as e:
-        lines.append(f"Error reading initial cogs: {e}")
-
-    # Try normal import
-    try:
-        mod = importlib.import_module("battles")
-        lines.append(f"import battles: OK (module name: {getattr(mod, '__name__', '')})")
-        lines.append(f"has setup: {hasattr(mod, 'setup')}, has BattlesCog: {hasattr(mod, 'BattlesCog')}")
-    except Exception:
-        tb = traceback.format_exc()
-        lines.append("import battles: FAILED")
-        lines.append(tb[:1900])
-
-    # Try file-based import
-    try:
-        path = os.path.join(os.path.dirname(__file__), "battles.py")
-        if os.path.exists(path):
-            spec = importlib.util.spec_from_file_location("battles_file", path)
-            modf = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(modf)  # type: ignore
-            lines.append(f"file import: OK (path: {path})")
-            lines.append(f"has setup: {hasattr(modf, 'setup')}, has BattlesCog: {hasattr(modf, 'BattlesCog')}")
-        else:
-            lines.append(f"file import: NOT FOUND at {path}")
-    except Exception:
-        tb = traceback.format_exc()
-        lines.append("file import: FAILED")
-        lines.append(tb[:1900])
-
-    # Try to call setup() if module available but cog missing
-    try:
-        before_keys = list(bot.cogs.keys())
-        lines.append(f"Cog keys before setup attempts: {before_keys}")
-        if not bot.get_cog("BattlesCog"):
-            try:
-                mod = importlib.import_module("battles")
-                if hasattr(mod, "setup"):
-                    try:
-                        mod.setup(bot)
-                        lines.append("Called battles.setup(bot)")
-                    except Exception:
-                        lines.append("battles.setup(bot) raised:")
-                        lines.append(traceback.format_exc()[:1900])
-                # try instantiating class if present
-                if hasattr(mod, "BattlesCog") and not bot.get_cog("BattlesCog"):
-                    try:
-                        inst = mod.BattlesCog(bot)
-                        added = False
-                        try:
-                            bot.add_cog(inst)
-                            added = True
-                        except Exception:
-                            lines.append("bot.add_cog raised during dynamic instantiation:")
-                            lines.append(traceback.format_exc()[:1900])
-                        lines.append(f"Instantiated BattlesCog class: {inst.__class__.__name__}, added={added}")
-                        lines.append(f"Inst type id: {id(inst)}, inst qualified name: {getattr(inst, 'qualified_name', getattr(inst, '__class__').__name__)}")
-                        lines.append(f"Cog keys after add attempt: {list(bot.cogs.keys())}")
-                    except Exception:
-                        lines.append("Instantiating or adding BattlesCog failed:")
-                        lines.append(traceback.format_exc()[:1900])
-            except Exception:
-                lines.append("Attempt to call setup/instantiate failed:")
-                lines.append(traceback.format_exc()[:1900])
-    except Exception:
-        lines.append(f"Unexpected error during setup attempts: {traceback.format_exc()[:1900]}")
-
-    # Final status
-    try:
-        cog = bot.get_cog("BattlesCog")
-        lines.append(f"Final cog present: {bool(cog)}")
-        lines.append(f"Final cog keys: {list(bot.cogs.keys())}")
-    except Exception:
-        lines.append(f"Error checking final cog: {traceback.format_exc()[:1900]}")
-
-    out = "\n".join(lines)
-    if len(out) > 1900:
-        out = out[:1900] + "..."
-    msg = "```\n" + out + "\n```"
-    await interaction.followup.send(msg, ephemeral=True)
-    # If we have recorded add_cog diagnostics, send a short preview of the log.
-    try:
-        addlog = globals().get("ADD_COG_LOG", None)
-        if addlog is None:
-            await interaction.followup.send("```\nADD_COG_LOG: <not set>\n```", ephemeral=True)
-        else:
-            # show at most the last 8 entries, keep message small
-            preview = addlog[-8:]
-            lines2 = ["ADD_COG_LOG preview:"]
-            for e in preview:
-                try:
-                    lines2.append(str(e))
-                except Exception:
-                    lines2.append(repr(e))
-            text2 = "\n".join(lines2)
-            if len(text2) > 1800:
-                text2 = text2[:1800] + "..."
-            await interaction.followup.send("```\n" + text2 + "\n```", ephemeral=True)
-    except Exception:
-        pass
-    # --- Additional runtime sanity checks: try adding a temporary TestCog ---
-    more = []
-    try:
-        import inspect
-
-        more.append(f"bot repr: {repr(bot)}")
-        more.append(f"bot class: {bot.__class__}, id: {id(bot)}")
-        add_cog_fn = getattr(bot, "add_cog", None)
-        if add_cog_fn is None:
-            more.append("bot.add_cog: MISSING")
-        else:
-            try:
-                more.append(f"bot.add_cog is bound method: {hasattr(add_cog_fn, '__self__')}, self id: {getattr(add_cog_fn, '__self__', None)}")
-            except Exception:
-                more.append(f"bot.add_cog repr: {repr(add_cog_fn)}")
-
-        class TestCog(commands.Cog):
-            pass
-
-        test_inst = TestCog()
-        try:
-            bot.add_cog(test_inst)
-            more.append("Called bot.add_cog(TestCog instance)")
-        except Exception as e:
-            more.append(f"bot.add_cog raised: {e}")
-
-        try:
-            more.append(f"After add, cog keys: {list(bot.cogs.keys())}")
-            more.append(f"bot.__dict__ keys: {list(bot.__dict__.keys())}")
-            more.append(f"has _cogs attr: {hasattr(bot, '_cogs')}")
-            c = getattr(bot, '_cogs', None)
-            try:
-                more.append(f"_cogs type: {type(c)}, repr: {repr(c)[:200]}")
-            except Exception:
-                more.append(f"_cogs type: {type(c)}")
-            try:
-                more.append(f"len(_cogs): {len(c) if c is not None else 'N/A'}")
-            except Exception:
-                pass
-            try:
-                func = getattr(bot.add_cog, '__func__', None)
-                more.append(f"add_cog __func__ module: {getattr(func, '__module__', None)}, qualname: {getattr(func, '__qualname__', None)}")
-            except Exception:
-                pass
-        except Exception as e:
-            more.append(f"Reading bot.cogs failed: {e}")
-
-        # cleanup if it registered
-        try:
-            if bot.get_cog("TestCog"):
-                bot.remove_cog("TestCog")
-                more.append("Removed TestCog after check")
-        except Exception:
-            pass
-    except Exception:
-        more.append(f"Runtime sanity checks failed: {traceback.format_exc()[:1900]}")
-
-    if more:
-        full = "\n".join(more)
-        if len(full) > 1900:
-            full = full[:1900] + "..."
-        await interaction.followup.send("```\n" + full + "\n```", ephemeral=True)
-
 
 def _default_wiki_pages_index() -> list[dict]:
     # Seeded from the original hardcoded sidebar, so existing installs keep
@@ -9024,7 +8730,7 @@ async def schedule_daily_rain():
         pass
 
 
-@bot.tree.command(description="Send one of your cats on an adventure for 3 hours")
+@bot.tree.command(description="go out and make me proud son")
 @discord.app_commands.autocomplete(cat=cat_command_autocomplete)
 async def adventure(interaction: discord.Interaction, cat: Optional[str] = None):
     # Global command cooldown check (5 seconds)
@@ -9127,7 +8833,7 @@ async def adventure(interaction: discord.Interaction, cat: Optional[str] = None)
 
 
 
-@bot.tree.command(description="Show your active adventure (if any)")
+@bot.tree.command(description="check active adventureessss")
 async def adventures(interaction: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
@@ -10619,7 +10325,7 @@ def _get_bot_version() -> str:
     return _version_cache["value"] or "1.2.?"
 
 
-@bot.tree.command(description="Learn to use the bot")
+@bot.tree.command(description="monkey thinking gif")
 async def help(message):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -10787,7 +10493,7 @@ async def help(message):
     await message.response.send_message(embeds=[embed1, embed2], view=view)
 
 
-@bot.tree.command(description="Get support and help with KITTAYYYYYYY")
+@bot.tree.command(description="HELP ME")
 async def support(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -10868,7 +10574,7 @@ def format_timedelta(start_timestamp, end_timestamp):
     return f"{days}d {hours}h {minutes}m {seconds}s"
 
 
-@bot.tree.command(description="View various bot information and stats")
+@bot.tree.command(description="the numbers...")
 async def info(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -12014,7 +11720,7 @@ async def admin(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=AdminPanel(guild=interaction.guild), ephemeral=True)
 
-@bot.tree.command(description="Submit a suggestion to the bot owner")
+@bot.tree.command(description="brain blast boom")
 @discord.app_commands.describe(suggestion="Your suggestion for the bot")
 async def suggestion(interaction: discord.Interaction, suggestion: str):
     # Global command cooldown check (5 seconds)
@@ -12384,7 +12090,7 @@ async def catalogue(message: discord.Interaction):
     await message.followup.send(embed=make_embed(0), view=view)
 
 
-@bot.tree.command(name="catpedia", description="Show detailed information about a cat (Catpedia)")
+@bot.tree.command(name="catpedia", description="The free online encyclopedia that anyone can edit!")
 @discord.app_commands.describe(catname="Name of the cat type to view")
 async def catpedia(message: discord.Interaction, catname: str):
     # Global command cooldown check (5 seconds)
@@ -13191,7 +12897,7 @@ class AdvancedCatSelector(discord.ui.View):
         return ""
 
 
-@bot.tree.command(name="play", description="Play with one of your cats to increase its bond")
+@bot.tree.command(name="play", description="hi herbert")
 @discord.app_commands.describe(name="Optional: specific cat name (leave blank to browse all)")
 async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
     # Global command cooldown check (5 seconds)
@@ -13591,7 +13297,7 @@ async def play_with_cat_cmd(message: discord.Interaction, name: str = None):
     await message.followup.send(f"Multiple cats named '{name}' found — choose which one to play with:", view=view, ephemeral=True)
 
 
-@bot.tree.command(name="renamecat", description="Rename one of your cats")
+@bot.tree.command(name="renamecat", description="change the name of cat")
 @discord.app_commands.autocomplete(catname=cat_type_autocomplete)
 @discord.app_commands.describe(catname="Cat type", index="Index from /cats view (1-based)", new_name="New name for the cat")
 async def rename_cat_cmd(message: discord.Interaction, catname: str, index: int, new_name: str):
@@ -15318,7 +15024,7 @@ You currently have **{user.rain_minutes}** minutes of rains{server_rains}.""",
     await message.response.send_message(embed=embed, view=view)
 
 
-@bot.tree.command(description="Open the Kibble Shop — items rotate/reset every 6 hours")
+@bot.tree.command(description="kinda like fortnite")
 async def shop(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -15453,7 +15159,7 @@ async def store(message: discord.Interaction):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
     
-    await message.response.send_message("☔ Cat rains make cats spawn instantly! Make your server active, get more cats and have fun!\n<https://catbot.shop>")
+    await message.response.send_message("☔ Cat rains make cats spawn instantly! However, I don't sell them! Sorry!")
 
 
 if config.DONOR_CHANNEL_ID:
@@ -16075,7 +15781,7 @@ class PacksView(discord.ui.View):
         new_view = PacksView(self.user)
         await interaction.edit_original_response(view=new_view)
 
-@bot.tree.command(description="View and open packs")
+@bot.tree.command(description="GOLD GOLD GOLD")
 async def packs(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -16361,7 +16067,7 @@ async def packs(message: discord.Interaction):
         await asyncio.sleep(1)
         await interaction.edit_original_response(view=gen_view(user))
 
-@bot.tree.command(description="Attempt to steal a cat from another player (1 hour cooldown)")
+@bot.tree.command(description="muahaha steal cat from player")
 @discord.app_commands.describe(target="The player to attempt to steal from")
 async def steal(interaction: discord.Interaction, target: discord.User):
     # Global command cooldown check (5 seconds)
@@ -18506,7 +18212,7 @@ async def profile(message: discord.Interaction, person_id: Optional[discord.User
     await message.followup.send(embed=view.get_current_embed(), view=view)
 
 
-@bot.tree.command(description="View your equipped cosmetics!")
+@bot.tree.command(description="what am i wearing")
 async def mystyle(message: discord.Interaction, person_id: Optional[discord.User] = None):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
@@ -19188,7 +18894,7 @@ async def trade(message: discord.Interaction, person_id: discord.User):
         await achemb(message, "introvert", "send")
 
 
-@bot.tree.command(description="Get Cat Image, does not add a cat to your inventory")
+@bot.tree.command(description="trolled :troll:")
 @discord.app_commands.rename(cat_type="type")
 @discord.app_commands.describe(cat_type="select a cat type ok")
 @discord.app_commands.autocomplete(cat_type=cat_command_autocomplete)
@@ -19225,7 +18931,7 @@ async def cursed(message: discord.Interaction):
     await message.response.send_message(file=file)
 
 
-@bot.tree.command(description="Get Your balance")
+@bot.tree.command(description="Check your Kibble balance")
 async def bal(message: discord.Interaction):
     perms = await fetch_perms(message)
     if not perms.send_messages:
@@ -19236,7 +18942,7 @@ async def bal(message: discord.Interaction):
     await message.response.send_message(embed=embed)
 
 
-@bot.tree.command(description="Convert cats to Kibble via the CatATM (irreversible)")
+@bot.tree.command(description="Convert cats to kibble via the catATM™️")
 async def atm(message: discord.Interaction):
     """Open an ATM with advanced cat selector to convert cats into Kibble."""
     await message.response.defer()
@@ -20135,7 +19841,7 @@ async def bounty(message, user, cattype):
         await user.save()
 
 
-@bot.tree.command(description="Join the mafia and hunt down bounties for powerful perks")
+@bot.tree.command(description="Join the mafia and find the gabagool")
 async def catnip(message: discord.Interaction):
     await message.response.defer(ephemeral=True)
     user = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
@@ -22301,7 +22007,7 @@ async def remind(
     await progress(message, profile, "reminder")  # the ai autocomplete thing also suggested this though profile wasnt defined
 
 
-@bot.tree.command(name="random", description="Get a random cat")
+@bot.tree.command(name="random", description="random cat generator")
 async def random_cat(message: discord.Interaction):
     await message.response.defer()
     async with aiohttp.ClientSession() as session:
@@ -24016,7 +23722,7 @@ async def setup_channel(message: discord.Interaction):
     await message.response.send_message(embed=embed, view=view)
 
 
-@bot.tree.command(description="(ADMIN) Undo the setup")
+@bot.tree.command(description="(ADMIN) undo setup + alzheimers")
 @discord.app_commands.default_permissions(manage_guild=True)
 async def forget(message: discord.Interaction):
     # Global command cooldown check (5 seconds)
@@ -24231,7 +23937,7 @@ async def sendmessage(
         await message.followup.send(f"❌ Error sending message: {str(e)[:200]}", ephemeral=True)
 
 
-@bot.tree.command(description="(ADMIN) Reset people")
+@bot.tree.command(description="(ADMIN) full tax a dude")
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.rename(person_id="user")
 @discord.app_commands.describe(person_id="who")
@@ -25486,7 +25192,7 @@ def _pick_breed_result(parent_a: str, parent_b: str, parent_a_inst: dict = None,
     return (choice, inherited_mods)
 
 
-@bot.tree.command(description="Breed two cats to get an offspring (chances are based on parents' averaged rarity)")
+@bot.tree.command(description="Breed two cats to get another one (cat!sex)")
 @discord.app_commands.describe(
     first_cat="Optional: Type of first parent cat for instant breeding (e.g. Fine)",
     second_cat="Optional: Type of second parent cat for instant breeding (e.g. Fine)"
