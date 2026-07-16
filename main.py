@@ -25589,7 +25589,6 @@ async def breed(
                     result_text = "\n".join(result_lines[:15]) + f"\n... and {len(results)-15} more!"
                 
                 await btn_it.followup.send(f"🧬 **Bred {len(results)} pairs!**\n\n{result_text}", ephemeral=False)
-                await message.channel.send(f"{message.user.mention} bred {len(results)} pairs of cats!")
                 
                 # Achievement
                 try:
