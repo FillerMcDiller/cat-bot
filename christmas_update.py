@@ -1,5 +1,3 @@
-# Christmas Update Features - December 1st, 2025
-# This file contains all Christmas features to be integrated into main.py
 
 import discord
 import datetime
@@ -7,11 +5,6 @@ import time
 from database import Profile
 from catpg import pool
 
-# NOTE: achemb() function is imported from main.py at runtime
-# It's called in advent_command() and update_naughty_score()
-# Make sure main.py imports from this module AFTER defining achemb
-
-# Suppress undefined name warnings for achemb - it comes from main.py
 achemb = None  # type: ignore
 
 # =============================================================================
