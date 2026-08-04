@@ -234,7 +234,7 @@ class Model:
         await pool.execute(query_string, *values)
 
     @classmethod
-    async def filter(self, filter: str | RawSQL | None = None, *args, refetch: bool = True, **kwargs) -> AsyncGenerator[ModelInstance]:
+    async def filter(self, filter: str | RawSQL | None = None, *args, refetch: bool = True, **kwargs) -> AsyncGenerator[ModelInstance, None]:
         table = self.__name__.lower()
         select = "*"
         if "fields" in kwargs:
@@ -261,14 +261,14 @@ class Model:
     @classmethod
     async def limit(
         self, fields: str | RawSQL | None | list[str | RawSQL] = None, filter: str | RawSQL | None = None, *args, refetch: bool = True
-    ) -> AsyncGenerator[ModelInstance]:
+    ) -> AsyncGenerator[ModelInstance, None]:
         if isinstance(fields, str):
             fields = [fields]
         async for row in self.filter(filter, refetch=refetch, *args, fields=fields):
             yield row
 
     @classmethod
-    async def all(self) -> AsyncGenerator[ModelInstance]:
+    async def all(self) -> AsyncGenerator[ModelInstance, None]:
         async for row in self.filter():
             yield row
 

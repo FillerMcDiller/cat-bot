@@ -19,6 +19,7 @@ import importlib
 import os
 import time
 import logging
+import traceback
 
 import discord
 import winuvloop
@@ -34,28 +35,53 @@ winuvloop.install()
 intents = discord.Intents(messages=True, guilds=True)
 intents.message_content = True
 
-bot = commands.AutoShardedBot(
-    command_prefix="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    help_command=None,
-    chunk_guilds_at_startup=False,
-    allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=False, private_channel=False),
-    intents=intents,
-    member_cache_flags=discord.MemberCacheFlags.none(),
-    allowed_mentions=discord.AllowedMentions.none(),
-)
+bot: commands.AutoShardedBot
+SOURCE_WATCHER_TASK = None
 
 
-@bot.event
+def _create_bot() -> commands.AutoShardedBot:
+    global bot, SOURCE_WATCHER_TASK
+
+    SOURCE_WATCHER_TASK = None
+    bot = commands.AutoShardedBot(
+        command_prefix="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        help_command=None,
+        chunk_guilds_at_startup=False,
+        allowed_contexts=discord.app_commands.AppCommandContext(guild=True, dm_channel=False, private_channel=False),
+        intents=intents,
+        member_cache_flags=discord.MemberCacheFlags.none(),
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+    bot.setup_hook = setup_hook  # pyright: ignore[method-assign]
+    bot.cat_bot_reload_hook = reload  # pyright: ignore[attr-defined]
+    return bot
+
+
 async def setup_hook():
     print("\n" + "="*60)
     print("[BOT.PY] SETUP_HOOK STARTING!")
     print("="*60 + "\n")
     
     try:
-        # Connect to database FIRST
-        print("[BOT.PY] Connecting to database...")
-        await database.connect()
-        print("[BOT.PY] OK Database connected!")
+        # Connect to database FIRST. If Postgres is temporarily unavailable,
+        # keep retrying here instead of crashing the whole bot process.
+        db_retry_delay = 5.0
+        while True:
+            try:
+                print("[BOT.PY] Connecting to database...")
+                await database.connect()
+                print("[BOT.PY] OK Database connected!")
+                break
+            except Exception as db_err:
+                print(f"[BOT.PY] WARNING database connection failed: {db_err}")
+                traceback.print_exc()
+                try:
+                    await database.close()
+                except Exception:
+                    pass
+                print(f"[BOT.PY] Retrying database connection in {db_retry_delay:.1f}s...")
+                await asyncio.sleep(db_retry_delay)
+                db_retry_delay = min(db_retry_delay * 2, 60.0)
         
         # Load the main extension
         print("[BOT.PY] Loading main.py extension...")
@@ -64,7 +90,6 @@ async def setup_hook():
             print("[BOT.PY] OK main.py loaded successfully!")
         except Exception as ext_err:
             print(f"[BOT.PY] FAILED to load main.py: {ext_err}")
-            import traceback
             traceback.print_exc()
             raise
         # Try to load the cat competition extension (optional)
@@ -149,7 +174,6 @@ async def setup_hook():
 
     except Exception as e:
         print(f"\n[BOT.PY] ERROR in setup_hook: {e}")
-        import traceback
         traceback.print_exc()
         print()
         raise  # Re-raise to prevent silent failure
@@ -158,12 +182,9 @@ async def setup_hook():
     print("[BOT.PY] SETUP_HOOK COMPLETE!")
     print("="*60 + "\n")
 
-bot.setup_hook = setup_hook
-
 MAIN_FILE = os.path.join(os.path.dirname(__file__), "main.py")
 CATPG_FILE = os.path.join(os.path.dirname(__file__), "catpg.py")
 DATABASE_FILE = os.path.join(os.path.dirname(__file__), "database.py")
-SOURCE_WATCHER_TASK = None
 
 
 def _get_reload_signature() -> tuple[float, float, float]:
@@ -205,29 +226,53 @@ async def reload(reload_db):
         await database.connect()
     await bot.load_extension("main")
 
-
-bot.cat_bot_reload_hook = reload  # pyright: ignore
-
 def _start_webhook_process():
     # legacy: no-op; we now start the webhook in-process via setup_hook
     return None
 
-try:
-    config.HARD_RESTART_TIME = time.time()
-    print("[BOT.PY] >>> Starting bot.run()...")
-    print(f"[BOT.PY] Token length: {len(config.TOKEN) if config.TOKEN else 0} chars")
-    print(f"[BOT.PY] Token starts with: {config.TOKEN[:20] if config.TOKEN else 'NONE'}...")
+def _close_database_connection():
+    try:
+        print("[BOT.PY] Closing database connection...")
+        asyncio.run(database.close())
+    except Exception as close_err:
+        print(f"[BOT.PY] WARNING database close failed: {close_err}")
+        traceback.print_exc()
+
+
+def _run_bot_with_restart_loop():
     if not config.TOKEN:
         raise RuntimeError("TOKEN is empty or not set!")
-    bot.run(config.TOKEN)
-except KeyboardInterrupt:
-    print("[BOT.PY] STOPPED: Bot interrupted by user")
-except Exception as e:
-    print(f"[BOT.PY] ERROR during bot.run(): {e}")
-    import traceback
-    traceback.print_exc()
-    raise
-finally:
-    print("[BOT.PY] Closing database connection...")
-    asyncio.run(database.close())
-    print("[BOT.PY] Bot shutdown complete")
+
+    restart_delay = 5.0
+    restart_attempt = 1
+
+    while True:
+        current_bot = _create_bot()
+        config.HARD_RESTART_TIME = time.time()
+        print(f"[BOT.PY] >>> Starting bot.run() attempt {restart_attempt}...")
+        print(f"[BOT.PY] Token length: {len(config.TOKEN)} chars")
+        print(f"[BOT.PY] Token starts with: {config.TOKEN[:20]}...")
+
+        try:
+            current_bot.run(config.TOKEN)
+            print("[BOT.PY] bot.run() returned cleanly; stopping restart loop.")
+            break
+        except KeyboardInterrupt:
+            print("[BOT.PY] STOPPED: Bot interrupted by user")
+            break
+        except (discord.LoginFailure, discord.PrivilegedIntentsRequired) as fatal_err:
+            print(f"[BOT.PY] FATAL bot startup failure: {fatal_err}")
+            traceback.print_exc()
+            break
+        except Exception as e:
+            print(f"[BOT.PY] ERROR during bot.run(): {e}")
+            traceback.print_exc()
+            print(f"[BOT.PY] Restarting in {restart_delay:.1f}s...")
+            time.sleep(restart_delay)
+            restart_delay = min(restart_delay * 2, 60.0)
+            restart_attempt += 1
+        finally:
+            _close_database_connection()
+
+
+_run_bot_with_restart_loop()

@@ -279,6 +279,7 @@ CREATE TABLE IF NOT EXISTS public.profile (
     full_stack boolean DEFAULT false,
     unfunny boolean DEFAULT false,
     genetically_gifted boolean DEFAULT false,
+    tylenol boolean DEFAULT false,
     you_failure boolean DEFAULT false,
     grinder boolean DEFAULT false,
     owned_cosmetics TEXT DEFAULT '',

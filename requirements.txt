@@ -10,3 +10,4 @@ psutil
 asyncpg
 openai
 topggpy
+dotenv
