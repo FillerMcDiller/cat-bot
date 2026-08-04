@@ -1,5 +1,5 @@
 # KITTAYYYYYYY - A Discord bot about catching cats.
-# Copyright (C) 2025 Lia Milenakos & KITTAYYYYYYY Contributors
+# Copyright (C) 2026 FillerMcDiller, Lia Milenakos & KITTAYYYYYYY Contributors
 # -*- coding: utf-8 -*-
 #
 # This program is free software: you can redistribute it and/or modify
@@ -6903,14 +6903,65 @@ daily_reminded = {}
 casino_lock = []
 slots_lock = []
 race_lock = []
+roulette_lock = []
 
-# Scheduled race system
-next_race = None  # Will store {cats, names, start_time, channel_id, message_id, bets: {user_id: {lane, amount}}}
+# Scheduled race system - each guild now runs its own fully independent race,
+# on its own timer, with its own bet pool. Previously this was a single global
+# race broadcast to every guild at once, with the interval forced to the
+# minimum frequency set by ANY guild using the bot (so it almost always sat
+# at the 600s default no matter what an individual admin picked).
+next_races: Dict[int, dict] = {}  # {guild_id: {cats, names, start_time, bets}}
 race_channels = {}  # {guild_id: channel_id} - guilds that have opted into auto-races
 race_frequencies = {}  # {channel_id: frequency_in_seconds} - override for race frequency per channel
+_race_in_progress: set = set()  # guild_ids currently mid-race, to avoid double-triggering
 
 # ???
 rigged_users = []
+
+
+SLOTS_COST = 100  # kibble per spin
+JACKPOT_BASE = 1000  # what the jackpot resets to after being won
+
+# global slots jackpot, persisted to disk so it survives restarts
+CASINO_JACKPOT_PATH = os.path.join(BASE_PATH, "data", "casino_jackpot.json")
+casino_jackpot = JACKPOT_BASE
+
+
+def load_casino_jackpot():
+    """Load the global slots jackpot from disk (falls back to base amount)."""
+    global casino_jackpot
+    try:
+        with open(CASINO_JACKPOT_PATH, "r", encoding="utf-8") as f:
+            casino_jackpot = max(JACKPOT_BASE, int(json.load(f).get("jackpot", JACKPOT_BASE)))
+    except Exception:
+        casino_jackpot = JACKPOT_BASE
+
+
+def save_casino_jackpot():
+    try:
+        os.makedirs(os.path.dirname(CASINO_JACKPOT_PATH), exist_ok=True)
+        with open(CASINO_JACKPOT_PATH, "w", encoding="utf-8") as f:
+            json.dump({"jackpot": casino_jackpot}, f)
+    except Exception:
+        pass
+
+
+# fruit reels = normal prize, 7s = jackpot
+SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐"]
+SLOT_JACKPOT_SYMBOL = ":seven:"
+
+# rarest/highest tier cats (lowest spawn weight in type_dict) - used as slot machine prizes
+HIGH_TIER_CATS = [t for t in ["Donut", "TV", "eGirl", "Ultimate", "Real", "Alien", "Divine", "Candy", "Water", "Fire", "Professor"] if t in type_dict]
+
+# ---- Roulette ----
+ROULETTE_ROUND_SECONDS = 120  # the wheel spins globally every 2 minutes
+ROULETTE_COLORS = {
+    "red": {"emoji": "🔴", "multiplier": 2, "weight": 18},
+    "black": {"emoji": "⚫", "multiplier": 2, "weight": 18},
+    "yellow": {"emoji": "🟡", "multiplier": 10, "weight": 1},
+}
+# {"ends_at": float, "bets": {user_id: [{"color","amount","guild_id"}]}, "channels": set(channel_id)}
+roulette_round = None
 
 
 # WELCOME TO THE TEMP_.._STORAGE HELL
@@ -8590,6 +8641,21 @@ async def on_ready():
     
     on_ready_debounce = True
     print(f"cat is now online in {len(bot.guilds)} servers")
+
+    try:
+        load_casino_jackpot()
+        global roulette_round
+        if roulette_round is None:
+            roulette_round = {
+                "ends_at": time.time() + ROULETTE_ROUND_SECONDS,
+                "bets": {},
+                "channels": set(),
+            }
+        if not roulette_scheduler.is_running():
+            roulette_scheduler.start()
+    except Exception as e:
+        print(f"[CATSINO] Failed to initialize during on_ready: {e}")
+
     # flush any pending logs that were recorded before bot was ready
     try:
         for msg in list(_pending_discord_logs):
@@ -8607,10 +8673,11 @@ async def on_ready():
     # Load race channels from database
     await load_race_channels_from_db()
     
-    # Start the auto race scheduler and generate first race
-    global next_race
-    if next_race is None:
-        next_race = await generate_race_data()
+    # Start the auto race scheduler and generate first race for each guild
+    global next_races
+    for guild_id in race_channels:
+        if guild_id not in next_races:
+            next_races[guild_id] = await generate_race_data(guild_id)
     if not auto_race_scheduler.is_running():
         auto_race_scheduler.start()
     
@@ -8622,6 +8689,7 @@ async def on_ready():
     if not stock_market_loop.is_running():
         await ensure_stock_market_state()
         stock_market_loop.start()
+
 
 
 async def load_race_channels_from_db():
@@ -19228,8 +19296,18 @@ async def stock_market_loop():
 
     for stock in stock_data:
         current_price = await get_stock_price(stock["ticker"])
-        swing = random.uniform(-0.10, 0.12)
-        new_price = max(1, int(round(current_price * (1 + swing))))
+        baseline_price = next((s["init_price"] for s in stock_data if s["ticker"] == stock["ticker"]), current_price)
+
+        # Symmetric swing: previously (-0.10, 0.12) had a +1% average drift per tick,
+        # which compounds every 20 minutes into runaway exponential growth over time.
+        swing = random.uniform(-0.11, 0.11)
+
+        # Gentle pull back toward the baseline price so the walk can't wander off
+        # to infinity even over a very long time horizon, and can't collapse to 0 either.
+        mean_reversion = (baseline_price - current_price) * 0.02
+
+        new_price = current_price * (1 + swing) + mean_reversion
+        new_price = max(1, min(int(round(new_price)), baseline_price * 25))
         if new_price == current_price:
             continue
 
@@ -19403,8 +19481,15 @@ async def resolve_stock_order(order):
         await seller_profile.save()
 
     if display_price:
-        await StockPriceHistory.create(ticker=order.ticker, price=display_price, time=int(time.time()))
-        temp_stock_prices[order.ticker] = display_price
+        # Clamp to +/-50% of the current market price. Without this, a single
+        # matched order at a wild price (fat-fingered or exploited) would become
+        # the new market price outright and then keep compounding from there.
+        current_price = await get_stock_price(order.ticker)
+        clamped_price = max(1, min(display_price, int(current_price * 1.5)))
+        clamped_price = max(clamped_price, int(current_price * 0.5)) if current_price > 1 else clamped_price
+
+        await StockPriceHistory.create(ticker=order.ticker, price=clamped_price, time=int(time.time()))
+        temp_stock_prices[order.ticker] = clamped_price
 
     if remaining_quantity > 0:
         order.quantity = remaining_quantity
@@ -20883,185 +20968,62 @@ async def sort_inventory_cmd(message: discord.Interaction):
     await message.followup.send(embed=view.embed, view=view)
 
 
-@bot.tree.command(description="Gamble your life savings away in our totally-not-rigged catsino!")
-async def casino(message: discord.Interaction):
-    if message.user.id + message.guild.id in casino_lock:
-        await message.response.send_message(
-            "you get kicked out of the catsino because you are already there, and two of you playing at once would cause a glitch in the universe",
-            ephemeral=True,
-        )
-        await achemb(message, "paradoxical_gambler", "send")
+async def slots_spin_flow(interaction: discord.Interaction):
+    """Runs one slot machine spin for whoever clicked the button - handles cost, locking,
+    the reel animation, and payout (prizes + the global jackpot)."""
+    global casino_jackpot
+
+    if interaction.guild is None:
+        await interaction.response.send_message("The slots only work inside a server!", ephemeral=True)
         return
 
-    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-    # funny global gamble counter cus funny
-    total_sum = await Profile.sum("gambles", "gambles > 0")
-    embed = discord.Embed(
-        title="🎲 The Catsino",
-        description=f"One spin costs 5 {get_emoji('finecat')} Fine cats\nSo far you gambled {profile.gambles} times.\nAll KITTAYYYYYYY users gambled {total_sum:,} times.",
-        color=Colors.maroon,
-    )
-
-    async def spin(interaction):
-        nonlocal message
-        if interaction.user.id != message.user.id:
-            await do_funny(interaction)
-            return
-        if message.user.id + message.guild.id in casino_lock:
-            await interaction.response.send_message(
-                "you get kicked out of the catsino because you are already there, and two of you playing at once would cause a glitch in the universe",
-                ephemeral=True,
-            )
-            return
-
-        await profile.refresh_from_db()
-        if profile.cat_Fine < 5:
-            await interaction.response.send_message("you are too broke now", ephemeral=True)
-            await achemb(interaction, "broke", "send")
-            return
-
-        await interaction.response.defer()
-        amount = random.randint(1, 5)
-        casino_lock.append(message.user.id + message.guild.id)
-        profile.cat_Fine += amount - 5
-        profile.gambles += 1
-        await profile.save()
-        
-        # Auto-sync instances for Fine cats
-        await auto_sync_cat_instances(profile, "Fine")
-
-        if profile.gambles >= 10:
-            await achemb(message, "gambling_one", "send")
-        if profile.gambles >= 50:
-            await achemb(message, "gambling_two", "send")
-
-        variants = [
-            f"{get_emoji('egirlcat')} 1 eGirl cats",
-            f"{get_emoji('egirlcat')} 3 eGirl cats",
-            f"{get_emoji('ultimatecat')} 2 Ultimate cats",
-            f"{get_emoji('corruptcat')} 7 Corrupt cats",
-            f"{get_emoji('divinecat')} 4 Divine cats",
-            f"{get_emoji('epiccat')} 10 Epic cats",
-            f"{get_emoji('professorcat')} 5 Professor cats",
-            f"{get_emoji('realcat')} 2 Real cats",
-            f"{get_emoji('legendarycat')} 5 Legendary cats",
-            f"{get_emoji('mythiccat')} 2 Mythic cats",
-            f"{get_emoji('8bitcat')} 7 8bit cats",
-        ]
-
-        random.shuffle(variants)
-        icon = "🎲"
-
-        for i in variants:
-            embed = discord.Embed(title=f"{icon} The Catsino", description=f"**{i}**", color=Colors.maroon)
-            try:
-                await interaction.edit_original_response(embed=embed, view=None)
-            except Exception:
-                pass
-            await asyncio.sleep(1)
-
-        embed = discord.Embed(
-            title=f"{icon} The Catsino",
-            description=f"You won:\n**{get_emoji('finecat')} {amount} Fine cats**",
-            color=Colors.maroon,
-        )
-
-        button = Button(label="Spin", style=ButtonStyle.blurple)
-        button.callback = spin
-
-        myview = View(timeout=VIEW_TIMEOUT)
-        myview.add_item(button)
-
-        casino_lock.remove(message.user.id + message.guild.id)
-
-        try:
-            await interaction.edit_original_response(embed=embed, view=myview)
-        except Exception:
-            await interaction.followup.send(embed=embed, view=myview)
-
-    button = Button(label="Spin", style=ButtonStyle.blurple)
-    button.callback = spin
-
-    myview = View(timeout=VIEW_TIMEOUT)
-    myview.add_item(button)
-
-    await message.response.send_message(embed=embed, view=myview)
-
-
-@bot.tree.command(description="oh no")
-async def slots(message: discord.Interaction):
-    if message.user.id + message.guild.id in slots_lock:
-        await message.response.send_message(
+    user_key = interaction.user.id + interaction.guild.id
+    if user_key in slots_lock:
+        await interaction.response.send_message(
             "you get kicked from the slot machine because you are already there, and two of you playing at once would cause a glitch in the universe",
             ephemeral=True,
         )
-        await achemb(message, "paradoxical_gambler", "send")
         return
 
-    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
-    total_spins, total_wins, total_big_wins = (
-        await Profile.sum("slot_spins", "slot_spins > 0"),
-        await Profile.sum("slot_wins", "slot_wins > 0"),
-        await Profile.sum("slot_big_wins", "slot_big_wins > 0"),
-    )
-    embed = discord.Embed(
-        title=":slot_machine: The Slot Machine",
-        description=f"__Your stats__\n{profile.slot_spins:,} spins\n{profile.slot_wins:,} wins\n{profile.slot_big_wins:,} big wins\n\n__Global stats__\n{total_spins:,} spins\n{total_wins:,} wins\n{total_big_wins:,} big wins",
-        color=Colors.maroon,
-    )
+    profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+    if (profile.kibble or 0) < SLOTS_COST:
+        await interaction.response.send_message(
+            f"You need **{SLOTS_COST}** kibble to play the slots! You only have **{profile.kibble or 0:,}**.",
+            ephemeral=True,
+        )
+        return
 
-    async def remove_debt(interaction):
-        nonlocal message
-        if interaction.user.id != message.user.id:
-            await do_funny(interaction)
-            return
-        await profile.refresh_from_db()
+    await interaction.response.defer()
+    slots_lock.append(user_key)
 
-        # remove debt
-        for i in cattypes:
-            profile[f"cat_{i}"] = max(0, profile[f"cat_{i}"])
-
-        await profile.save()
-        await interaction.response.send_message("You have removed your debts! Life is wonderful!", ephemeral=True)
-        await achemb(interaction, "debt", "send")
-
-    async def spin(interaction):
-        nonlocal message
-        if interaction.user.id != message.user.id:
-            await do_funny(interaction)
-            return
-        if message.user.id + message.guild.id in slots_lock:
-            await interaction.response.send_message(
-                "you get kicked from the slot machine because you are already there, and two of you playing at once would cause a glitch in the universe",
-                ephemeral=True,
-            )
-            return
-        await profile.refresh_from_db()
-
-        await interaction.response.defer()
-        slots_lock.append(message.user.id + message.guild.id)
+    try:
+        profile.kibble = (profile.kibble or 0) - SLOTS_COST
         profile.slot_spins += 1
         await profile.save()
 
-        await achemb(interaction, "slots", "send")
-        await progress(message, profile, "slots")
-        await progress(message, profile, "slots2")
+        # the jackpot grows globally every single spin, anywhere, win or lose
+        casino_jackpot += random.randint(10, 200)
+        save_casino_jackpot()
 
-        variants = ["🍒", "🍋", "🍇", "🔔", "⭐", ":seven:"]
-        reel_durations = [random.randint(9, 12), random.randint(15, 22), random.randint(25, 28)]
+        await achemb(interaction, "slots", "send")
+        await progress(interaction, profile, "slots")
+        await progress(interaction, profile, "slots2")
+
+        variants = SLOT_SYMBOLS + [SLOT_JACKPOT_SYMBOL]
+        reel_durations = [random.randint(4, 6), random.randint(6, 8), random.randint(8, 10)]
         random.shuffle(reel_durations)
 
-        # the k number is much cycles it will go before stopping + 1
         col1 = random.choices(variants, k=reel_durations[0])
         col2 = random.choices(variants, k=reel_durations[1])
         col3 = random.choices(variants, k=reel_durations[2])
 
-        if message.user.id in rigged_users:
-            col1[len(col1) - 2] = ":seven:"
-            col2[len(col2) - 2] = ":seven:"
-            col3[len(col3) - 2] = ":seven:"
+        if interaction.user.id in rigged_users:
+            col1[len(col1) - 2] = SLOT_JACKPOT_SYMBOL
+            col2[len(col2) - 2] = SLOT_JACKPOT_SYMBOL
+            col3[len(col3) - 2] = SLOT_JACKPOT_SYMBOL
 
         blank_emoji = get_emoji("empty")
+        current1 = current2 = current3 = 0
         for slot_loop_ind in range(1, max(reel_durations) - 1):
             current1 = min(len(col1) - 2, slot_loop_ind)
             current2 = min(len(col2) - 2, slot_loop_ind)
@@ -21074,67 +21036,333 @@ async def slots(message: discord.Interaction):
                     desc += f"{blank_emoji} {col1[current1 + offset]} {col2[current2 + offset]} {col3[current3 + offset]} {blank_emoji}\n"
             embed = discord.Embed(
                 title=":slot_machine: The Slot Machine",
-                description=desc,
+                description=f"{desc}\n🏆 Jackpot: **{casino_jackpot:,}** kibble",
                 color=Colors.maroon,
             )
             try:
                 await interaction.edit_original_response(embed=embed, view=None)
             except Exception:
                 pass
-            await asyncio.sleep(0.5)
+            # faster spins than before - short frame delay
+            await asyncio.sleep(0.22)
 
         await profile.refresh_from_db()
+
         big_win = False
         if col1[current1] == col2[current2] == col3[current3]:
             profile.slot_wins += 1
-            if col1[current1] == ":seven:":
-                desc = "**BIG WIN!**\n\n" + desc
+            if col1[current1] == SLOT_JACKPOT_SYMBOL:
+                # JACKPOT! take the whole global pot
+                won_amount = casino_jackpot
+                profile.kibble = (profile.kibble or 0) + won_amount
                 profile.slot_big_wins += 1
                 big_win = True
-                await profile.save()
+                casino_jackpot = JACKPOT_BASE
+                save_casino_jackpot()
+                desc = (
+                    f"🎉 **JACKPOT!!! Triple 7️⃣!** 🎉\n\n"
+                    f"You take the entire jackpot:\n**{get_emoji('kibble')} {won_amount:,} Kibble**\n\n" + desc
+                )
                 await achemb(interaction, "big_win_slots", "send")
             else:
-                desc = "**You win!**\n\n" + desc
-                await profile.save()
+                # regular triple match: a random high tier cat + fluctuating kibble
+                prize_lines = []
+                kibble_prize = random.randint(200, 1500)
+                profile.kibble = (profile.kibble or 0) + kibble_prize
+                prize_lines.append(f"{get_emoji('kibble')} {kibble_prize:,} Kibble")
+                if HIGH_TIER_CATS:
+                    prize_cat = random.choice(HIGH_TIER_CATS)
+                    cat_amount = random.randint(1, 2)
+                    profile[f"cat_{prize_cat}"] = (profile[f"cat_{prize_cat}"] or 0) + cat_amount
+                    await auto_sync_cat_instances(profile, prize_cat)
+                    prize_lines.append(f"{get_cat_emoji(prize_cat)} {cat_amount} {prize_cat} cat(s)")
+                desc = "**You win!**\n\n" + desc + "\n" + "\n".join(prize_lines)
+            await profile.save()
             await achemb(interaction, "win_slots", "send")
         else:
             desc = "**You lose!**\n\n" + desc
 
-        button = Button(label="Spin", style=ButtonStyle.blurple)
-        button.callback = spin
+        if profile.slot_spins >= 10:
+            await achemb(interaction, "gambling_one", "send")
+        if profile.slot_spins >= 50:
+            await achemb(interaction, "gambling_two", "send")
+
+        desc += f"\n\n🏆 Jackpot: **{casino_jackpot:,}** kibble"
+
+        button = Button(label=f"Spin ({SLOTS_COST} kibble)", style=ButtonStyle.blurple)
+        button.callback = slots_spin_flow
 
         myview = View(timeout=VIEW_TIMEOUT)
         myview.add_item(button)
 
-        if big_win:
-            # check if user has debt in any cat type
-            has_debt = False
-            for i in cattypes:
-                if profile[f"cat_{i}"] < 0:
-                    has_debt = True
-                    break
-            if has_debt:
-                desc += "\n\n**You can remove your debt!**"
-                button = Button(label="Remove Debt", style=ButtonStyle.blurple)
-                button.callback = remove_debt
-                myview.add_item(button)
-
-        slots_lock.remove(message.user.id + message.guild.id)
-
         embed = discord.Embed(title=":slot_machine: The Slot Machine", description=desc, color=Colors.maroon)
-
         try:
             await interaction.edit_original_response(embed=embed, view=myview)
         except Exception:
             await interaction.followup.send(embed=embed, view=myview)
+    finally:
+        if user_key in slots_lock:
+            slots_lock.remove(user_key)
 
-    button = Button(label="Spin", style=ButtonStyle.blurple)
-    button.callback = spin
+
+@bot.tree.command(description="Spin the slots! 100 kibble a spin, match 3 to win, match 7\ufe0f\u20e3\u20e3 for the jackpot!")
+async def slots(message: discord.Interaction):
+    profile = await Profile.get_or_create(guild_id=message.guild.id, user_id=message.user.id)
+    total_spins, total_wins, total_big_wins = (
+        await Profile.sum("slot_spins", "slot_spins > 0"),
+        await Profile.sum("slot_wins", "slot_wins > 0"),
+        await Profile.sum("slot_big_wins", "slot_big_wins > 0"),
+    )
+    embed = discord.Embed(
+        title=":slot_machine: The Slot Machine",
+        description=(
+            f"Costs **{SLOTS_COST}** kibble a spin. Match all 3 for a prize, match all 7️⃣ for the **entire jackpot**!\n\n"
+            f"🏆 Jackpot: **{casino_jackpot:,}** kibble\n\n"
+            f"__Your stats__\n{profile.slot_spins:,} spins\n{profile.slot_wins:,} wins\n{profile.slot_big_wins:,} big wins\n\n"
+            f"__Global stats__\n{total_spins:,} spins\n{total_wins:,} wins\n{total_big_wins:,} big wins"
+        ),
+        color=Colors.maroon,
+    )
+
+    button = Button(label=f"Spin ({SLOTS_COST} kibble)", style=ButtonStyle.blurple)
+    button.callback = slots_spin_flow
 
     myview = View(timeout=VIEW_TIMEOUT)
     myview.add_item(button)
 
     await message.response.send_message(embed=embed, view=myview)
+
+
+# ==================== ROULETTE ====================
+
+
+def ensure_roulette_round():
+    """Lazily creates a roulette round if one doesn't exist yet.
+
+    Normally the round is created in on_ready() and kept alive by roulette_scheduler,
+    but this acts as a safety net (e.g. if on_ready never got a chance to run, or the
+    scheduler died silently) so the game self-heals instead of being stuck forever
+    showing "the wheel is resetting".
+    """
+    global roulette_round
+    if roulette_round is None:
+        roulette_round = {
+            "ends_at": time.time() + ROULETTE_ROUND_SECONDS,
+            "bets": {},
+            "channels": set(),
+        }
+    if not roulette_scheduler.is_running():
+        try:
+            roulette_scheduler.start()
+        except Exception:
+            pass
+    return roulette_round
+
+
+def build_roulette_embed(user_id: int = None) -> discord.Embed:
+    ensure_roulette_round()
+
+    totals = {c: 0 for c in ROULETTE_COLORS}
+    for bets in roulette_round["bets"].values():
+        for bet in bets:
+            totals[bet["color"]] += bet["amount"]
+
+    lines = [f"{info['emoji']} {c.title()} ({info['multiplier']}x): **{totals[c]:,}** kibble" for c, info in ROULETTE_COLORS.items()]
+
+    desc = (
+        "Bet on **Red** or **Black** (2x), or go all in on **Yellow** (10x)!\n"
+        f"The wheel spins <t:{int(roulette_round['ends_at'])}:R>\n\n"
+        "**Bets this round:**\n" + "\n".join(lines) + f"\n\n{len(roulette_round['bets'])} player(s) in this round"
+    )
+
+    if user_id is not None and user_id in roulette_round["bets"]:
+        my_bets = roulette_round["bets"][user_id]
+        my_lines = "\n".join(f"{ROULETTE_COLORS[b['color']]['emoji']} {b['amount']:,} on {b['color'].title()}" for b in my_bets)
+        desc += f"\n\n**Your bets:**\n{my_lines}"
+
+    return discord.Embed(title="🎡 Roulette", description=desc, color=Colors.yellow)
+
+
+class RouletteBetModal(discord.ui.Modal, title="Place Your Bet"):
+    bet_amount = discord.ui.TextInput(
+        label="Bet Amount (kibble)",
+        placeholder="Enter amount (10-1000000)",
+        required=True,
+        max_length=7,
+    )
+
+    def __init__(self, color):
+        super().__init__()
+        self.color = color
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global roulette_round
+
+        try:
+            amount = int(self.bet_amount.value)
+        except ValueError:
+            await interaction.response.send_message("Invalid amount! Must be a whole number.", ephemeral=True)
+            return
+
+        if amount < 10:
+            await interaction.response.send_message("Minimum bet is 10 kibble!", ephemeral=True)
+            return
+        if amount > 1000000:
+            await interaction.response.send_message("Maximum bet is 1,000,000 kibble!", ephemeral=True)
+            return
+        ensure_roulette_round()
+
+        profile = await Profile.get_or_create(guild_id=interaction.guild.id, user_id=interaction.user.id)
+        if (profile.kibble or 0) < amount:
+            await interaction.response.send_message(f"You only have {profile.kibble or 0:,} kibble!", ephemeral=True)
+            return
+
+        profile.kibble = (profile.kibble or 0) - amount
+        await profile.save()
+
+        roulette_round["bets"].setdefault(interaction.user.id, []).append(
+            {"color": self.color, "amount": amount, "guild_id": interaction.guild.id}
+        )
+        roulette_round["channels"].add(interaction.channel.id)
+
+        color_info = ROULETTE_COLORS[self.color]
+        await interaction.response.send_message(
+            f"{color_info['emoji']} Bet placed! **{amount:,}** kibble on **{self.color.title()}** ({color_info['multiplier']}x)\n"
+            f"The wheel spins <t:{int(roulette_round['ends_at'])}:R>.\nRemaining kibble: {profile.kibble:,}",
+            ephemeral=True,
+        )
+
+
+class RouletteView(View):
+    def __init__(self):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        for color, info in ROULETTE_COLORS.items():
+            button = Button(
+                label=f"{color.title()} ({info['multiplier']}x)",
+                emoji=info["emoji"],
+                style=ButtonStyle.blurple,
+            )
+            button.callback = self.make_callback(color)
+            self.add_item(button)
+
+    def make_callback(self, color):
+        async def callback(interaction: discord.Interaction):
+            ensure_roulette_round()
+            await interaction.response.send_modal(RouletteBetModal(color))
+
+        return callback
+
+
+async def resolve_roulette_round():
+    """Spins the wheel, pays out winners, and announces the result to every channel that placed a bet this round."""
+    global roulette_round, casino_jackpot
+    if roulette_round is None:
+        return
+
+    round_data = roulette_round
+    colors = list(ROULETTE_COLORS.keys())
+    weights = [ROULETTE_COLORS[c]["weight"] for c in colors]
+    winning_color = random.choices(colors, weights=weights, k=1)[0]
+    win_emoji = ROULETTE_COLORS[winning_color]["emoji"]
+
+    totals = {c: 0 for c in colors}
+    winners_lines = []
+    for user_id, bets in round_data["bets"].items():
+        user_win = 0
+        guild_id = bets[0]["guild_id"]
+        for bet in bets:
+            totals[bet["color"]] += bet["amount"]
+            if bet["color"] == winning_color:
+                user_win += bet["amount"] * ROULETTE_COLORS[winning_color]["multiplier"]
+        if user_win > 0:
+            try:
+                profile = await Profile.get_or_create(guild_id=guild_id, user_id=user_id)
+                profile.kibble = (profile.kibble or 0) + user_win
+                await profile.save()
+                winners_lines.append(f"<@{user_id}>: +{user_win:,} kibble")
+            except Exception:
+                pass
+
+    total_wagered = sum(totals.values())
+    desc = f"The ball landed on... {win_emoji} **{winning_color.upper()}**!\n\n**Bets this round:**\n"
+    desc += "\n".join(f"{ROULETTE_COLORS[c]['emoji']} {c.title()}: {totals[c]:,} kibble wagered" for c in colors)
+    desc += f"\n\n**Total wagered:** {total_wagered:,} kibble\n"
+    if winners_lines:
+        desc += "\n**Winners:**\n" + "\n".join(winners_lines[:20])
+        if len(winners_lines) > 20:
+            desc += f"\n...and {len(winners_lines) - 20} more!"
+    else:
+        desc += "\n*No winners this round!*"
+
+    embed = discord.Embed(title="🎡 Roulette Results!", description=desc, color=Colors.yellow)
+
+    for channel_id in list(round_data["channels"]):
+        try:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                await channel.send(embed=embed)
+        except Exception:
+            pass
+
+
+@tasks.loop(seconds=ROULETTE_ROUND_SECONDS)
+async def roulette_scheduler():
+    """Resolves the current roulette round and opens a new one, globally, every 2 minutes."""
+    global roulette_round
+    if roulette_round is not None:
+        try:
+            await resolve_roulette_round()
+        except Exception as e:
+            print(f"[ROULETTE] Failed to resolve round: {e}")
+    roulette_round = {
+        "ends_at": time.time() + ROULETTE_ROUND_SECONDS,
+        "bets": {},
+        "channels": set(),
+    }
+
+
+@bot.tree.command(description="Bet on red, black, or yellow! The wheel spins globally every 2 minutes.")
+async def roulette(message: discord.Interaction):
+    embed = build_roulette_embed(message.user.id)
+    view = RouletteView()
+    await message.response.send_message(embed=embed, view=view)
+    if roulette_round is not None:
+        roulette_round["channels"].add(message.channel.id)
+
+
+@bot.tree.command(name="catsino", description="its gambling time, alright!")
+async def catsino(message: discord.Interaction):
+    embed = discord.Embed(
+        title="🎫 The Catsino",
+        description=(
+            "Welcome to the Catsino! not rigged, we swear.\n\n"
+            f"🎰 **Slots** - {SLOTS_COST} kibble/spin. Match 3 for a prize, match 7️⃣7️⃣7️⃣ for the jackpot!\n"
+            f"🏆 Current Jackpot: **{casino_jackpot:,}** kibble\n\n"
+            "🎡 **Roulette** - Bet on Red/Black (2x) or Yellow (10x). The wheel spins every 2 minutes."
+        ),
+        color=Colors.maroon,
+    )
+
+    slots_button = Button(label="🎰 Slots", style=ButtonStyle.blurple)
+    slots_button.callback = slots_spin_flow
+
+    roulette_button = Button(label="🎡 Roulette", style=ButtonStyle.blurple)
+
+    async def open_roulette(interaction: discord.Interaction):
+        r_embed = build_roulette_embed(interaction.user.id)
+        r_view = RouletteView()
+        await interaction.response.send_message(embed=r_embed, view=r_view)
+        if roulette_round is not None:
+            roulette_round["channels"].add(interaction.channel.id)
+
+    roulette_button.callback = open_roulette
+
+    myview = View(timeout=VIEW_TIMEOUT)
+    myview.add_item(slots_button)
+    myview.add_item(roulette_button)
+
+    await message.response.send_message(embed=embed, view=myview)
+
 
 
 # ==================== CAT RACING SYSTEM ====================
@@ -21194,123 +21422,121 @@ CAT_SPEEDS = {
 }
 
 
-async def generate_race_data():
-    """Generate a new race with 5 random cats and names"""
+async def generate_race_data(guild_id: int):
+    """Generate a new race for a single guild, timed off that guild's own
+    race_frequency setting only (no more cross-guild minimum)."""
     race_cats = random.sample(cattypes, 5)
     race_names = random.sample(RACING_NAMES, 5)
-    
-    # Dynamic race frequency: get minimum race_frequency from all active race channels
+
     global race_frequencies
-    print(f"[RACE_GEN] race_channels: {race_channels}", flush=True)
-    print(f"[RACE_GEN] race_frequencies: {race_frequencies}", flush=True)
-    min_frequency = None
-    for guild_id, channel_id in race_channels.items():
-        try:
-            # Check in-memory override first
-            if channel_id in race_frequencies:
-                freq = race_frequencies[channel_id]
-                print(f"[RACE_GEN] Found in-memory frequency for channel {channel_id}: {freq}", flush=True)
-                if freq > 0:
-                    if min_frequency is None:
-                        min_frequency = freq
-                    else:
-                        min_frequency = min(min_frequency, freq)
-                continue
-            
-            # Fall back to database
-            channel_db = await Channel.get_or_none(channel_id=channel_id)
-            if channel_db and hasattr(channel_db, 'race_frequency') and channel_db.race_frequency is not None and channel_db.race_frequency > 0:
-                print(f"[RACE_GEN] Found DB frequency for channel {channel_id}: {channel_db.race_frequency}", flush=True)
-                if min_frequency is None:
-                    min_frequency = channel_db.race_frequency
-                else:
-                    min_frequency = min(min_frequency, channel_db.race_frequency)
-        except Exception as e:
-            print(f"[RACE_GEN] Exception checking channel {channel_id}: {e}", flush=True)
-    
-    # Default to 10 minutes if no valid frequency found
-    if min_frequency is None or min_frequency <= 0:
-        min_frequency = 600
-        print(f"[RACE_GEN] No valid frequency found, using default: {min_frequency}", flush=True)
-    else:
-        print(f"[RACE_GEN] Using frequency: {min_frequency}", flush=True)
-    
+    channel_id = race_channels.get(guild_id)
+    frequency = None
+
+    if channel_id is not None:
+        if channel_id in race_frequencies:
+            frequency = race_frequencies[channel_id]
+            print(f"[RACE_GEN] Guild {guild_id}: using in-memory frequency {frequency}", flush=True)
+        else:
+            try:
+                channel_db = await Channel.get_or_none(channel_id=channel_id)
+                if channel_db and getattr(channel_db, 'race_frequency', None):
+                    frequency = channel_db.race_frequency
+                    print(f"[RACE_GEN] Guild {guild_id}: using DB frequency {frequency}", flush=True)
+            except Exception as e:
+                print(f"[RACE_GEN] Exception checking channel {channel_id}: {e}", flush=True)
+
+    if not frequency or frequency <= 0:
+        frequency = 600
+        print(f"[RACE_GEN] Guild {guild_id}: no valid frequency found, using default {frequency}", flush=True)
+
     return {
         "cats": race_cats,
         "names": race_names,
-        "start_time": time.time() + min_frequency,
+        "start_time": time.time() + frequency,
         "bets": {},  # {user_id: {lane, amount, guild_id}}
     }
 
 
-@tasks.loop(seconds=60)  # Check every minute instead of fixed 10 minutes
+@tasks.loop(seconds=60)
 async def auto_race_scheduler():
-    """Automatically schedule and run races at configurable intervals"""
-    global next_race
-    
-    # Generate initial race if none exists
-    if next_race is None:
-        next_race = await generate_race_data()
-        return
-    
-    # Check if it's time for the race (30 seconds before start)
-    if time.time() >= next_race["start_time"] - 30:
-        # Send "Race starting soon" notification to all channels
-        for guild_id, channel_id in list(race_channels.items()):
-            try:
-                channel = bot.get_channel(channel_id)
-                if channel:
-                    embed = discord.Embed(
-                        title="🏁 RACE STARTING IN 30 SECONDS! 🏁",
-                        description="Use `/race` now to place your bets!",
-                        color=Colors.yellow,
-                    )
-                    await channel.send(embed=embed)
-            except Exception:
-                pass
-        
-        # Wait 30 seconds
-        await asyncio.sleep(30)
-        
-        # Run the race
-        await run_scheduled_race()
-        
-        # Generate next race
-        next_race = await generate_race_data()
+    """Check every guild's own race independently and kick off whichever ones are due.
+    Each guild's race runs as its own task so a slow/busy guild never delays races
+    in other guilds sharing the same 60s tick."""
+    global next_races
 
-
-async def run_scheduled_race():
-    """Execute the scheduled race and payout bets"""
-    global next_race
-    
-    if not next_race:
-        return
-    
-    race_cats = next_race["cats"]
-    race_names = next_race["names"]
-    
-    # Send initial race start messages to all channels and store message references
-    race_messages = {}  # {guild_id: message}
-    
     for guild_id, channel_id in list(race_channels.items()):
+        if guild_id in _race_in_progress:
+            continue
+
+        if guild_id not in next_races:
+            next_races[guild_id] = await generate_race_data(guild_id)
+            continue
+
+        race = next_races[guild_id]
+        if time.time() >= race["start_time"] - 30:
+            _race_in_progress.add(guild_id)
+            asyncio.create_task(_run_guild_race_cycle(guild_id, channel_id))
+
+
+async def _run_guild_race_cycle(guild_id: int, channel_id: int):
+    """Send the 30s warning, wait, run the race, and schedule the next one for this guild only."""
+    global next_races
+    try:
         try:
             channel = bot.get_channel(channel_id)
             if channel:
-                # Build initial lanes display
-                lanes_display = ""
-                for i, cat in enumerate(race_cats, 1):
-                    emoji = get_cat_emoji(cat)
-                    lanes_display += f"**Lane {i}:** {emoji} **{race_names[i-1]}** ({cat})\n"
-                
                 embed = discord.Embed(
-                    title="🏁 Cat Racing Track 🏁",
-                    description=f"{lanes_display}\n**Race starting now!**",
-                    color=Colors.blue,
+                    title="🏁 RACE STARTING IN 30 SECONDS! 🏁",
+                    description="Use `/race` now to place your bets!",
+                    color=Colors.yellow,
                 )
-                msg = await channel.send(embed=embed)
-                race_messages[guild_id] = msg
+                await channel.send(embed=embed)
         except Exception:
             pass
+
+        await asyncio.sleep(30)
+
+        await run_scheduled_race(guild_id)
+
+        next_races[guild_id] = await generate_race_data(guild_id)
+    finally:
+        _race_in_progress.discard(guild_id)
+
+
+async def run_scheduled_race(guild_id: int):
+    """Execute the scheduled race for a single guild and payout that guild's bets only."""
+    global next_races
+
+    race = next_races.get(guild_id)
+    if not race:
+        return
+
+    race_cats = race["cats"]
+    race_names = race["names"]
+
+    channel_id = race_channels.get(guild_id)
+
+    # Send initial race start message to this guild's channel only
+    race_messages = {}  # {guild_id: message}
+
+    try:
+        channel = bot.get_channel(channel_id) if channel_id else None
+        if channel:
+            # Build initial lanes display
+            lanes_display = ""
+            for i, cat in enumerate(race_cats, 1):
+                emoji = get_cat_emoji(cat)
+                lanes_display += f"**Lane {i}:** {emoji} **{race_names[i-1]}** ({cat})\n"
+
+            embed = discord.Embed(
+                title="🏁 Cat Racing Track 🏁",
+                description=f"{lanes_display}\n**Race starting now!**",
+                color=Colors.blue,
+            )
+            msg = await channel.send(embed=embed)
+            race_messages[guild_id] = msg
+    except Exception:
+        pass
     
     await asyncio.sleep(1)
     
@@ -21397,7 +21623,7 @@ async def run_scheduled_race():
     winners_text = "\n\n**Winners:**"
     had_winners = False
     
-    for user_id, bet_data in next_race["bets"].items():
+    for user_id, bet_data in race["bets"].items():
         if bet_data["lane"] == winner_lane:
             try:
                 profile = await Profile.get_or_create(guild_id=bet_data["guild_id"], user_id=user_id)
@@ -21426,8 +21652,8 @@ async def run_scheduled_race():
         except Exception:
             pass
     
-    # Clear race data
-    next_race = None
+    # Clear this guild's race data (a fresh one is scheduled right after by the caller)
+    next_races.pop(guild_id, None)
 
 
 class RaceBettingView(View):
@@ -21520,36 +21746,43 @@ async def race(message: discord.Interaction):
     View the scheduled cat race and place your bets!
     Races happen automatically every 10 minutes.
     """
-    global next_race
-    
-    if not next_race:
+    global next_races
+
+    if not message.guild:
+        await message.response.send_message("This command only works in a server.", ephemeral=True)
+        return
+
+    guild_id = message.guild.id
+    race = next_races.get(guild_id)
+
+    if not race:
         await message.response.send_message("No race scheduled yet! Check back soon.", ephemeral=True)
         return
-    
-    time_until_race = next_race["start_time"] - time.time()
-    
+
+    time_until_race = race["start_time"] - time.time()
+
     if time_until_race < 0:
         await message.response.send_message("Race is about to start! Wait for results...", ephemeral=True)
         return
-    
+
     minutes = int(time_until_race // 60)
     seconds = int(time_until_race % 60)
-    
+
     # Build lanes display
     lanes_display = ""
-    for i, cat in enumerate(next_race["cats"], 1):
+    for i, cat in enumerate(race["cats"], 1):
         emoji = get_cat_emoji(cat)
-        lanes_display += f"**Lane {i}:** {emoji} **{next_race['names'][i-1]}** ({cat})\n"
-    
+        lanes_display += f"**Lane {i}:** {emoji} **{race['names'][i-1]}** ({cat})\n"
+
     # Show user's current bet if any
     user_bet_text = ""
-    if message.user.id in next_race["bets"]:
-        bet = next_race["bets"][message.user.id]
-        bet_cat = next_race["cats"][bet["lane"] - 1]
-        bet_name = next_race["names"][bet["lane"] - 1]
+    if message.user.id in race["bets"]:
+        bet = race["bets"][message.user.id]
+        bet_cat = race["cats"][bet["lane"] - 1]
+        bet_name = race["names"][bet["lane"] - 1]
         bet_emoji = get_cat_emoji(bet_cat)
         user_bet_text = f"\n\n💰 **Your current bet:** {bet['amount']:,} kibble on Lane {bet['lane']}: {bet_emoji} {bet_name}"
-    
+
     embed = discord.Embed(
         title="🏁 Upcoming Cat Race! 🏁",
         description=f"{lanes_display}\n⏰ **Race starts in:** {minutes}m {seconds}s\n\n"
@@ -21557,8 +21790,8 @@ async def race(message: discord.Interaction):
                    f"**Win = 4x payout** (3x profit + original bet){user_bet_text}",
         color=Colors.blue,
     )
-    
-    view = RaceBettingView(next_race)
+
+    view = RaceBettingView(race)
     await message.response.send_message(embed=embed, view=view)
 
 
@@ -23419,16 +23652,19 @@ class RaceFrequencySelectView(discord.ui.View):
             except Exception as e:
                 print(f"[RACE_FREQ] DB save failed (using in-memory fallback): {e}", flush=True)
             
-            # Regenerate the next race to apply new timing immediately
-            global next_race
-            if next_race is not None:
+            # Regenerate this guild's own next race to apply the new timing immediately
+            global next_races
+            guild_id = interaction.guild.id
+            existing_race = next_races.get(guild_id)
+            if existing_race is not None:
                 # Keep existing bets if any
-                existing_bets = next_race.get("bets", {})
-                next_race = await generate_race_data()
-                next_race["bets"] = existing_bets
-                
+                existing_bets = existing_race.get("bets", {})
+                new_race = await generate_race_data(guild_id)
+                new_race["bets"] = existing_bets
+                next_races[guild_id] = new_race
+
                 # Show when the next race will be
-                next_race_time = int(next_race["start_time"])
+                next_race_time = int(new_race["start_time"])
                 success_message = (
                     f"✅ Race frequency set to {freq_val} seconds ({freq_val // 60} minutes)!\n"
                     f"⏰ Next race will start <t:{next_race_time}:R> (at <t:{next_race_time}:t>)"
@@ -23589,12 +23825,14 @@ class SetupConfigView(discord.ui.View):
             await channel.save()
             
             # Remove from global race_channels dict
-            global race_channels, race_frequencies
+            global race_channels, race_frequencies, next_races
             if interaction.guild.id in race_channels:
                 del race_channels[interaction.guild.id]
             if self.channel_id in race_frequencies:
                 del race_frequencies[self.channel_id]
-            
+            next_races.pop(interaction.guild.id, None)
+            _race_in_progress.discard(interaction.guild.id)
+
             await interaction.response.send_message(
                 f"✅ Races disabled in this channel!",
                 ephemeral=True
@@ -23732,9 +23970,11 @@ async def forget(message: discord.Interaction):
     
     if channel := await Channel.get_or_none(channel_id=message.channel.id):
         # Remove from race_channels if it was a race channel
-        global race_channels
+        global race_channels, next_races
         if message.guild.id in race_channels and race_channels[message.guild.id] == message.channel.id:
             del race_channels[message.guild.id]
+            next_races.pop(message.guild.id, None)
+            _race_in_progress.discard(message.guild.id)
         
         await channel.delete()
         await message.response.send_message(f"ok, now i wont send cats in <#{message.channel.id}>")
