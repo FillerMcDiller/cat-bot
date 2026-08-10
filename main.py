@@ -7131,7 +7131,7 @@ ON_MESSAGE_ACH_RULES_BASE = [
     ["pineapple", "exact", "pineapple"],
     ["cat!i_like_cat_website", "exact", "website_user"],
     ["cat!i_clicked_there", "exact", "click_here"],
-    ["cat!lia_is_cute", "exact", "nerd"],
+    ["cat!kittay_is_cute", "exact", "nerd"],
     ["i read help", "exact", "patient_reader"],
     ["lol_i_have_dmed_the_cat_bot_and_got_an_ach", "exact", "dm"],
     ["dog", "exact", "not_quite"],
@@ -7282,7 +7282,63 @@ async def achemb(message, ach_id, send_type, author_string=None):
             result = await message.followup.send(embed=embed, ephemeral=True)
         elif send_type == "response":
             result = await message.response.send_message(embed=embed)
-        await progress(message, profile, "achievement")
+        # Award battlepass XP for this achievement and milestone rewards.
+        try:
+            cat = ach_data.get("category", "Random")
+            xp_ranges = {
+                "Hard": (200, 500),
+                "Cat Hunt": (100, 300),
+                "Commands": (50, 150),
+                "Random": (30, 100),
+                "Silly": (20, 80),
+                "Christmas": (80, 200),
+                "Hidden": (150, 350),
+            }
+            min_xp, max_xp = xp_ranges.get(cat, (20, 100))
+            bp_xp = random.randint(min_xp, max_xp)
+
+            profile.progress = (profile.progress or 0) + bp_xp
+
+            unlocked_count = 0
+            for k in ach_names:
+                try:
+                    if getattr(profile, k, False) and ach_list[k]["category"] != "Hidden":
+                        unlocked_count += 1
+                except Exception:
+                    pass
+
+            milestone_text = None
+            if unlocked_count % 20 == 0 and unlocked_count > 0:
+                try:
+                    chosen_cat = random.choice(list(cattypes))
+                    setattr(profile, f"cat_{chosen_cat}", getattr(profile, f"cat_{chosen_cat}", 0) + 1)
+                except Exception:
+                    chosen_cat = None
+                profile.pack_platinum = (profile.pack_platinum or 0) + 2
+                milestone_text = f"Large reward: {('1 ' + chosen_cat + ' cat') if chosen_cat else ''} and 2 Platinum packs"
+            elif unlocked_count % 10 == 0 and unlocked_count > 0:
+                profile.pack_platinum = (profile.pack_platinum or 0) + 1
+                profile.kibble = (profile.kibble or 0) + 1000
+                milestone_text = "Medium reward: 1 Platinum pack and 1,000 Kibble"
+            elif unlocked_count % 5 == 0 and unlocked_count > 0:
+                profile.pack_gold = (profile.pack_gold or 0) + 3
+                milestone_text = "Small reward: 3 Gold packs"
+
+            try:
+                embed.description = embed.description + f"\n\n🎉 Battlepass XP: +{bp_xp}"
+                if milestone_text:
+                    embed.description = embed.description + f"\n🎁 Milestone: {milestone_text}"
+            except Exception:
+                pass
+
+            await profile.save()
+
+            if milestone_text:
+                await send_achievement_reward_notice(message, milestone_text, send_type)
+        except Exception:
+            pass
+
+        await progress(message, profile, "achievement", xp_gain=bp_xp)
         await finale(message, profile)
     except Exception:
         pass
@@ -7437,7 +7493,7 @@ async def refresh_quests(user):
         await generate_quest(user, "extra")
 
 
-async def progress(message: discord.Message | discord.Interaction, user: Profile, quest: str, is_belated: Optional[bool] = False):
+async def progress(message: discord.Message | discord.Interaction, user: Profile, quest: str, is_belated: Optional[bool] = False, xp_gain: Optional[int] = None):
     await refresh_quests(user)
     await user.refresh_from_db()
 
@@ -7498,6 +7554,11 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             current_xp = user.progress + (user.extra_reward or 0)
             user.extra_progress = 0
             user.reminder_extra = 1
+    elif quest == "achievement":
+        # achievement flow: `achemb` already updated profile.progress with the awarded XP
+        quest_data = {"title": "Achievement Reward"}
+        current_xp = user.progress
+        quest_complete = True
     else:
         return
 
@@ -7505,9 +7566,17 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
     if not quest_complete:
         return
 
-    user.quests_completed += 1
+    # don't count achievements as generic quests
+    if quest != "achievement":
+        user.quests_completed += 1
 
     old_xp = user.progress
+    if quest == "achievement" and xp_gain is not None:
+        old_xp = max(0, current_xp - xp_gain)
+    else:
+        old_xp = user.progress
+
+    diff = xp_gain if quest == "achievement" and xp_gain is not None else current_xp - old_xp
     perms = await fetch_perms(message)
     level_complete_embeds = []
     if user.battlepass >= len(battle["seasons"][str(user.season)]):
@@ -7568,7 +7637,7 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             xp_progress,
             0,
             quest_data,
-            current_xp - old_xp,
+            diff,
             new_level_text,
         )
 
@@ -7582,7 +7651,7 @@ async def progress(message: discord.Message | discord.Interaction, user: Profile
             current_xp,
             old_xp,
             quest_data,
-            current_xp - old_xp,
+            diff,
             level_text,
         )
 
@@ -22583,6 +22652,62 @@ async def dark_market(message):
         await message.followup.send(embed=embed, ephemeral=True)
 
 
+ACHIEVEMENT_REWARD_TIERS = {
+    5: "3 Gold packs",
+    10: "1 Platinum pack + 1,000 Kibble",
+    20: "1 random cat + 2 Platinum packs",
+}
+
+
+def get_achievement_completion_count(profile: Profile) -> int:
+    completed = 0
+    for k in ach_names:
+        try:
+            if getattr(profile, k, False) and ach_list[k]["category"] != "Hidden":
+                completed += 1
+        except Exception:
+            pass
+    return completed
+
+
+def build_achievement_reward_summary(profile: Profile) -> str:
+    completed = get_achievement_completion_count(profile)
+    filled = min(completed, 20)
+    bar = "🟩" * filled + "⬜" * (20 - filled)
+
+    milestone_lines = [f"{tier}: {reward}" for tier, reward in ACHIEVEMENT_REWARD_TIERS.items()]
+    if completed >= 20:
+        next_text = "All milestone rewards unlocked"
+    elif completed >= 10:
+        next_text = "Next reward: 20 achievements"
+    elif completed >= 5:
+        next_text = "Next reward: 10 achievements"
+    else:
+        next_text = "Next reward: 5 achievements"
+
+    return (
+        f"Reward Track: {bar}\n"
+        f"{completed}/20 achievements completed\n"
+        f"Milestones: {', '.join(milestone_lines)}\n"
+        f"{next_text}"
+    )
+
+
+async def send_achievement_reward_notice(message, reward_text: str, send_type: str):
+    notice = f"🎁 Achievement reward claimed: {reward_text}"
+    try:
+        if send_type == "followup":
+            await message.followup.send(notice, ephemeral=True)
+        elif send_type == "response":
+            await message.followup.send(notice, ephemeral=True)
+        elif send_type == "reply":
+            await message.reply(notice)
+        else:
+            await message.channel.send(notice)
+    except Exception:
+        pass
+
+
 @bot.tree.command(description="View your achievements")
 async def achievements(message: discord.Interaction):
     # this is very close to /inv's ach counter
@@ -22608,7 +22733,7 @@ async def achievements(message: discord.Interaction):
     hidden_counter = 0
 
     # this is a single page of the achievement list
-    async def gen_new(category):
+    async def gen_new(category, page=0):
         nonlocal message, unlocked, total_achs, hidden_counter
 
         unlocked = 0
@@ -22640,9 +22765,20 @@ async def achievements(message: discord.Interaction):
         else:
             hidden_counter = 0
 
+        reward_summary = build_achievement_reward_summary(user)
+        category_achievements = [(k, v) for k, v in ach_list.items() if v["category"] == category]
+        page_size = 25
+        total_pages = max(1, (len(category_achievements) + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        visible_achievements = category_achievements[page * page_size:(page + 1) * page_size]
+
+        title = category if total_pages <= 1 else f"{category} ({page + 1}/{total_pages})"
         newembed = discord.Embed(
-            title=category,
-            description=f"Achievements unlocked (total): {unlocked}/{total_achs}{minus_achs}{hidden_suffix}",
+            title=title,
+            description=(
+                f"Achievements unlocked (total): {unlocked}/{total_achs}{minus_achs}{hidden_suffix}\n\n"
+                f"{reward_summary}"
+            ),
             color=Colors.brown,
         ).set_footer(text=rain_shill)
 
@@ -22650,41 +22786,40 @@ async def achievements(message: discord.Interaction):
         if len(news_list) > len(global_user.news_state.strip()) or "0" in global_user.news_state.strip()[-4:]:
             newembed.set_author(name="You have unread news! /news")
 
-        for k, v in ach_list.items():
-            if v["category"] == category:
-                if k == "thanksforplaying":
-                    if user[k]:
-                        newembed.add_field(
-                            name=str(get_emoji("demonic_ach")) + " Cataine Addict",
-                            value="Defeat the dog mafia",
-                            inline=True,
-                        )
-                    else:
-                        newembed.add_field(
-                            name=str(get_emoji("no_demonic_ach")) + " Thanks For Playing",
-                            value="Complete the story",
-                            inline=True,
-                        )
-                    continue
-
-                icon = str(get_emoji("no_ach")) + " "
+        for k, v in visible_achievements:
+            if k == "thanksforplaying":
                 if user[k]:
                     newembed.add_field(
-                        name=str(get_emoji("ach")) + " " + v["title"],
-                        value=v["description"],
+                        name=str(get_emoji("demonic_ach")) + " Cataine Addict",
+                        value="Defeat the dog mafia",
                         inline=True,
                     )
-                elif category != "Hidden":
+                else:
                     newembed.add_field(
-                        name=icon + v["title"],
-                        value="???" if v["is_hidden"] else v["description"],
+                        name=str(get_emoji("no_demonic_ach")) + " Thanks For Playing",
+                        value="Complete the story",
                         inline=True,
                     )
+                continue
+
+            icon = str(get_emoji("no_ach")) + " "
+            if user[k]:
+                newembed.add_field(
+                    name=str(get_emoji("ach")) + " " + v["title"],
+                    value=v["description"],
+                    inline=True,
+                )
+            elif category != "Hidden":
+                newembed.add_field(
+                    name=icon + v["title"],
+                    value="???" if v["is_hidden"] else v["description"],
+                    inline=True,
+                )
 
         return newembed
 
     # creates buttons at the bottom of the full view
-    def insane_view_generator(category):
+    def insane_view_generator(category, page=0):
         myview = View(timeout=VIEW_TIMEOUT)
         buttons_list = []
 
@@ -22692,7 +22827,19 @@ async def achievements(message: discord.Interaction):
             thing = interaction.data["custom_id"]
             await interaction.response.defer()
             try:
-                await interaction.edit_original_response(embed=await gen_new(thing), view=insane_view_generator(thing))
+                if thing.startswith("page:"):
+                    _, direction, target_category, page_str = thing.split(":", 3)
+                    page_num = int(page_str)
+                    new_page = page_num + (-1 if direction == "prev" else 1)
+                    target_category = target_category
+                else:
+                    target_category = thing
+                    new_page = 0
+
+                await interaction.edit_original_response(
+                    embed=await gen_new(target_category, page=new_page),
+                    view=insane_view_generator(target_category, page=new_page),
+                )
             except Exception:
                 pass
 
@@ -22713,6 +22860,19 @@ async def achievements(message: discord.Interaction):
             else:
                 buttons_list.append(Button(label=i, custom_id=i, style=ButtonStyle.blurple, row=num // 3))
             buttons_list[-1].callback = callback_hell
+
+        category_achievements = [(k, v) for k, v in ach_list.items() if v["category"] == category]
+        page_size = 25
+        total_pages = max(1, (len(category_achievements) + page_size - 1) // page_size)
+        if total_pages > 1:
+            prev_button = Button(label="◀", custom_id=f"page:prev:{category}:{page}", style=ButtonStyle.gray, row=2)
+            next_button = Button(label="▶", custom_id=f"page:next:{category}:{page}", style=ButtonStyle.gray, row=2)
+            prev_button.disabled = page <= 0
+            next_button.disabled = page >= total_pages - 1
+            prev_button.callback = callback_hell
+            next_button.callback = callback_hell
+            myview.add_item(prev_button)
+            myview.add_item(next_button)
 
         for j in buttons_list:
             myview.add_item(j)
