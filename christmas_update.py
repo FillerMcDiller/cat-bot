@@ -549,11 +549,9 @@ async def track_advent_claim(user_id: int, guild_id: int):
 
 async def increment_festive_pack_progress(user_id: int, guild_id: int, amount: int) -> int:
     """Atomically increment festive pack progress and return new total"""
-    print(f"[PACK DEBUG] increment_festive_pack_progress start user={user_id} guild={guild_id} amount={amount}")
     if amount < 1:
         profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
         current = getattr(profile, 'pack_festive_opened', 0) or 0
-        print(f"[PACK DEBUG] amount<1 returning current={current}")
         return current
 
     query = (
@@ -564,16 +562,13 @@ async def increment_festive_pack_progress(user_id: int, guild_id: int, amount: i
     )
 
     row = await pool.fetchrow(query, user_id, guild_id, amount)
-    print(f"[PACK DEBUG] SQL update result row={row}")
     if row and 'pack_festive_opened' in row:
         new_value = row['pack_festive_opened']
-        print(f"[PACK DEBUG] SQL path new_value={new_value}")
         return new_value
 
     profile = await Profile.get_or_create(user_id=user_id, guild_id=guild_id)
     profile.pack_festive_opened = (profile.pack_festive_opened or 0) + amount
     await profile.save()
-    print(f"[PACK DEBUG] fallback path new_value={profile.pack_festive_opened}")
     return profile.pack_festive_opened
 
 async def track_nice_score(user_id: int, guild_id: int):

@@ -1636,10 +1636,6 @@ async def bot_perform_attack(s, attacker_id: int, atk_cat: dict, defender_id: in
     Now uses ability-based combat with weakness calculations.
     """
     try:
-        try:
-            print(f"[DEBUG] bot_perform_attack called: attacker={attacker_id} defender={defender_id} ability={ability_name}")
-        except Exception:
-            pass
         aid = atk_cat.get('id')
         did = def_cat.get('id')
         atk_type = atk_cat.get('type')
@@ -1906,7 +1902,6 @@ async def maybe_bot_act(s):
                 turn_id = raw_turn.id if hasattr(raw_turn, 'id') else int(raw_turn)
             except Exception:
                 turn_id = raw_turn
-            print(f"[DEBUG] maybe_bot_act: raw_turn={raw_turn} resolved_turn={turn_id} bot_id={getattr(bot, 'user').id if getattr(bot, 'user', None) else None}")
         except Exception:
             turn_id = getattr(s, 'turn', None)
 
@@ -2469,7 +2464,7 @@ _discord_handler.setLevel(logging.WARNING)  # only forward warnings and above by
 _discord_handler.setFormatter(formatter)
 
 _console_handler = logging.StreamHandler(sys.stdout)
-_console_handler.setLevel(logging.INFO)
+_console_handler.setLevel(logging.WARNING)
 _console_handler.setFormatter(formatter)
 
 LOG_DIR = os.path.join(BASE_PATH, "logs")
@@ -2679,12 +2674,6 @@ async def scheduled_restart():
 async def cleanup_cooldowns():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        try:
-            # your actual cleanup logic here
-            print("🧹 Cleaning up cooldowns...")
-            # Example: catchcooldown.clear()
-        except Exception as e:
-            print(f"Cleanup error: {e}")
         await asyncio.sleep(300)  # wait 5 minutes before next cleanup
 
 
@@ -2770,13 +2759,8 @@ async def monitor_latency():
                     _last_latency_warning = now
             
             # Log periodically (every 60 seconds)
-            if len(latency_history) == MAX_HISTORY:
-                # Only print when history is full, avoiding excessive logging
-                if len(latency_history) % MAX_HISTORY == 0:
-                    print(f"📊 [LATENCY] Current: {current_latency}ms | 10-Sample Avg: {avg_latency:.0f}ms | History: {latency_history}")
-        
         except Exception as e:
-            print(f"[LATENCY MONITOR ERROR] {e}")
+            logging.exception("Latency monitor failed")
         
         # Check latency every 5 seconds
         await asyncio.sleep(5)
@@ -2896,8 +2880,6 @@ async def _gemini_chat_reply(transcript: str) -> str:
 
 async def _openrouter_chat_reply(transcript: str) -> str:
     api_key = getattr(config, "OPENROUTER_API_KEY", None)
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
     model_name = str(getattr(config, "OPENROUTER_MODEL", "openai/gpt-4o-mini") or "openai/gpt-4o-mini")
 
@@ -2940,8 +2922,6 @@ async def _openrouter_chat_reply(transcript: str) -> str:
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as resp:
             text = await resp.text()
-            if resp.status != 200:
-                raise RuntimeError(f"OpenRouter API error {resp.status}: {text[:400]}")
             data = json.loads(text)
 
     choices = data.get("choices") or []
@@ -2959,11 +2939,9 @@ async def _generate_chat_reply(transcript: str) -> str:
         return await _gemini_chat_reply(transcript)
     except Exception as gemini_error:
         err = str(gemini_error).lower()
-        quota_or_rate_limited = ("429" in err) or ("quota" in err) or ("rate limit" in err)
+
         if not quota_or_rate_limited:
             raise
-
-        logging.warning("Gemini quota/rate limit hit; trying OpenRouter fallback")
         try:
             return await _openrouter_chat_reply(transcript)
         except Exception as fallback_error:
@@ -3623,7 +3601,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                             async def callback(self, interaction2: discord.Interaction):
                                 s2 = self.session
                                 try:
-                                    print(f"[DEBUG] AttackSelect.callback invoked by {interaction2.user.id} (turn={getattr(s2,'turn',None)})")
+                                    logging.debug("AttackSelect.callback invoked by %s (turn=%s)", interaction2.user.id, getattr(s2, "turn", None))
                                 except Exception:
                                     pass
                                 ability_idx = int(self.values[0])
@@ -4306,7 +4284,7 @@ async def start_1v1_battle(interaction: discord.Interaction, challenger: discord
                         async def callback(self, interaction2: discord.Interaction):
                             s2 = self.session
                             try:
-                                print(f"[DEBUG] AttackSelectLocal.callback invoked by {interaction2.user.id} (turn={getattr(s2,'turn',None)})")
+                                logging.debug("AttackSelectLocal.callback invoked by %s (turn=%s)", interaction2.user.id, getattr(s2, "turn", None))
                             except Exception:
                                 pass
                             ability_idx = int(self.values[0])
@@ -5063,25 +5041,18 @@ async def battles_command(interaction: discord.Interaction):
             guild_id = interaction.guild.id if interaction.guild else 0
             user_id = it.user.id
             
-            # Debug: Check what we have before ensure
             cats_before = await get_user_cats(guild_id, user_id) or []
-            print(f"[DECK DEBUG] User {user_id} in guild {guild_id} - Cats before ensure: {len(cats_before)}")
             
             # Ensure user instances are synced from DB
             try:
                 await ensure_user_instances(guild_id, user_id)
-                print(f"[DECK DEBUG] ensure_user_instances completed")
                 # Update stats for existing cats
                 await update_cat_stats_from_battle_stats(guild_id, user_id)
-                print(f"[DECK DEBUG] update_cat_stats_from_battle_stats completed")
             except Exception as e:
-                print(f"[DECK DEBUG] Error ensuring instances: {e}")
-                import traceback
-                traceback.print_exc()
+                logging.exception("Error ensuring deck instances")
             
             # Get user's cats
             all_cats = await get_user_cats(guild_id, user_id) or []
-            print(f"[DECK DEBUG] User {user_id} - Cats after ensure: {len(all_cats)}")
             
             if not all_cats:
                 await it.followup.send("You don't have any cats yet! Catch some cats first.\n\n**Tip:** If you think you should have cats, try running `/syncats` to sync your cat instances.", ephemeral=True)
@@ -11456,21 +11427,18 @@ class AdminPanelModal(discord.ui.Modal):
     async def find_member(self, name: str) -> discord.Member:
         """Find a member by name, nickname, ID, or mention"""
         name = name.strip()
-        print(f"[DEBUG] Searching for user: {name}")
         
         # Try to parse as ID first
         try:
             if name.isdigit():
                 member = self.guild.get_member(int(name))
                 if member:
-                    print(f"[DEBUG] Found user by ID: {member}")
                     return member
                 member = await self.guild.fetch_member(int(name))
                 if member:
-                    print(f"[DEBUG] Found user by ID (fetched): {member}")
                     return member
-        except (ValueError, discord.NotFound, discord.HTTPException) as e:
-            print(f"[DEBUG] ID lookup failed: {str(e)}")
+        except (ValueError, discord.NotFound, discord.HTTPException):
+            pass
 
         # Try mention format (strips <@!> or <@>)
         if name.startswith('<@') and name.endswith('>'):
@@ -11478,30 +11446,25 @@ class AdminPanelModal(discord.ui.Modal):
                 user_id = int(''.join(c for c in name if c.isdigit()))
                 member = self.guild.get_member(user_id)
                 if member:
-                    print(f"[DEBUG] Found user by mention: {member}")
                     return member
                 member = await self.guild.fetch_member(user_id)
                 if member:
-                    print(f"[DEBUG] Found user by mention (fetched): {member}")
                     return member
-            except (ValueError, discord.NotFound, discord.HTTPException) as e:
-                print(f"[DEBUG] Mention lookup failed: {str(e)}")
+            except (ValueError, discord.NotFound, discord.HTTPException):
+                pass
 
         # Search by username and display name (case-insensitive)
         name_lower = name.lower()
         for member in self.guild.members:
             # Check exact matches first (case-insensitive)
             if name_lower in [member.name.lower(), member.display_name.lower(), str(member).lower()]:
-                print(f"[DEBUG] Found user by exact name match: {member}")
                 return member
         
         # Then check partial matches
         for member in self.guild.members:
             if name_lower in member.name.lower() or name_lower in member.display_name.lower() or name_lower in str(member).lower():
-                print(f"[DEBUG] Found user by partial name match: {member}")
                 return member
 
-        print(f"[DEBUG] No user found for: {name}")
         return None
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -13647,7 +13610,6 @@ async def stats_command(message: discord.Interaction, person_id: Optional[discor
                 try:
                     member = await message.guild.fetch_member(person_id.id)
                 except discord.NotFound:
-                    print(f"[DEBUG] User not found in guild: {person_id.id}")
                     await message.followup.send("Couldn't find that user in this server!", ephemeral=True)
                     return
             person_id = member
@@ -13898,7 +13860,6 @@ async def inventory(message: discord.Interaction, person_id: Optional[discord.Us
                 try:
                     member = await message.guild.fetch_member(person_id.id)
                 except discord.NotFound:
-                    print(f"[DEBUG] User not found in guild: {person_id.id}")
                     await message.followup.send("Couldn't find that user in this server!", ephemeral=True)
                     return
             person_id = member
@@ -15966,18 +15927,14 @@ async def packs(message: discord.Interaction):
         await message.followup.send(f"Error loading packs: {str(e)}", ephemeral=True)
     def gen_view(user):
         try:
-            print("[DEBUG] Starting view generation")
             view = discord.ui.View(timeout=VIEW_TIMEOUT)
             empty = True
             total_amount = 0
-            print("[DEBUG] Checking packs:", pack_data)
             
             for pack in pack_data:
                 try:
                     pack_name = pack['name'].lower()
-                    print(f"[DEBUG] Checking pack {pack_name}")
                     pack_count = user[f"pack_{pack_name}"]
-                    print(f"[DEBUG] User has {pack_count} of {pack_name}")
                     
                     if pack_count < 1:
                         continue
@@ -15993,12 +15950,10 @@ async def packs(message: discord.Interaction):
                     )
                     button.callback = open_pack
                     view.add_item(button)
-                    print(f"[DEBUG] Added button for {pack_name}")
                 except Exception as e:
                     print(f"[ERROR] Failed to process pack {pack.get('name', 'unknown')}: {e}")
                     continue
             
-            print(f"[DEBUG] View generation complete. Empty: {empty}, Total: {total_amount}")
             if empty:
                 view.add_item(discord.ui.Button(label="No packs left!", disabled=True))
                 
