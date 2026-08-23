@@ -11034,7 +11034,7 @@ async def news(message: discord.Interaction):
                     "name": "10000 XP"
                 }
             ]
-         },
+        }
     ]
 
     class NewsView(View):
