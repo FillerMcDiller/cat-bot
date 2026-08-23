@@ -11008,6 +11008,33 @@ async def news(message: discord.Interaction):
                 }
             ]
        },
+          {
+            "title": "AUGUST UPDATE: GAMBLING, BP S20, FIXES AND MORE",
+            "emoji": "🎰",
+            "desc": "yeah",
+            "body": (
+                "Hello, I've released the August Update.\n"
+                "With the August update comes a new battlepass season, a gambling overhaul, and some bug fixes.\n"
+                "To start, running `/catsino` now opens a hub with more gambling to choose from. Right now there's an overhauled slots and roulette. \n"
+                "Anyhow, battlepass season 20 is also released.. at the end of August. So to apologise for that, I'll be giving you a fair bit of xp.\n"
+                "Enjoy."
+                
+                "**Filler <3**"
+            ),
+            "rewards": [
+                {
+                    "type": "pack",
+                    "amount": 10,
+                    "pack_name": "Platinum",
+                    "name": "10 Platinum Packs"
+                }
+                {
+                    "type": "xp",
+                    "amount": 10000,
+                    "name": "10000 XP
+                }
+            ]
+       },
     ]
 
     class NewsView(View):
