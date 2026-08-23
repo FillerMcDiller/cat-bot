@@ -3150,36 +3150,42 @@ async def setup_hook():
         except Exception:
             logging.exception("Fallback import of 'battles' failed")
 
-    # Try to load Fights cog (cat battles) so main.py controls feature loading
-    try:
-        print("Attempting to load 'fights' extension...", flush=True)
-        await bot.load_extension("fights")
-        print("Called load_extension('fights')", flush=True)
-    except discord.ext.commands.errors.ExtensionAlreadyLoaded:
-        print("Fights extension already loaded; skipping duplicate load", flush=True)
-    except Exception:
-        import traceback
-
-        print("Failed to load 'fights' extension via load_extension:")
-        traceback.print_exc()
-        # Fallback: try to import and call setup() if present (some extension layouts)
+    # Try to load Fights cog (cat battles) so main.py controls feature loading.
+    # setup_hook can run again during an in-process reload, so do not call
+    # load_extension when Discord already has the extension registered.
+    fight_command_exists = bot.get_command("fight") is not None or bot.tree.get_command("fight") is not None
+    if "fights" not in getattr(bot, "extensions", {}) and not fight_command_exists:
         try:
-            import importlib
-
-            mod = importlib.import_module("fights")
-            print("Imported fights module; attempting fallback setup() if available", flush=True)
-            if hasattr(mod, "setup"):
-                try:
-                    maybe = mod.setup(bot)
-                    if asyncio.iscoroutine(maybe):
-                        await maybe
-                    print("Called fights.setup(bot) fallback", flush=True)
-                except Exception:
-                    print("fights.setup(bot) fallback raised:", flush=True)
-                    traceback.print_exc()
+            print("Attempting to load 'fights' extension...", flush=True)
+            await bot.load_extension("fights")
+            print("Called load_extension('fights')", flush=True)
+        except discord.ext.commands.errors.ExtensionAlreadyLoaded:
+            pass
+        except discord.ext.commands.errors.CommandRegistrationError:
+            pass
         except Exception:
-            print("Fallback import/setup for 'fights' also failed:", flush=True)
+            import traceback
+
+            print("Failed to load 'fights' extension via load_extension:")
             traceback.print_exc()
+            # Fallback: try to import and call setup() if present (some extension layouts)
+            try:
+                import importlib
+
+                mod = importlib.import_module("fights")
+                print("Imported fights module; attempting fallback setup() if available", flush=True)
+                if hasattr(mod, "setup"):
+                    try:
+                        maybe = mod.setup(bot)
+                        if asyncio.iscoroutine(maybe):
+                            await maybe
+                        print("Called fights.setup(bot) fallback", flush=True)
+                    except Exception:
+                        print("fights.setup(bot) fallback raised:", flush=True)
+                        traceback.print_exc()
+            except Exception:
+                print("Fallback import/setup for 'fights' also failed:", flush=True)
+                traceback.print_exc()
 
     # Ensure application commands are registered
     try:
@@ -25286,28 +25292,8 @@ async def setup(bot2):
         flush=True,
     )
 
-    # Attempt to load the Fights extension into the real bot instance so its cog
-    # registers with the running bot (helps when main is loaded as an extension).
-    try:
-        await bot2.load_extension("fights")
-    except discord.ext.commands.errors.ExtensionAlreadyLoaded:
-        logging.warning("Fights extension already loaded; skipping duplicate load")
-    except discord.app_commands.errors.CommandAlreadyRegistered:
-        logging.warning("Fights commands already registered; skipping duplicate load")
-    except Exception:
-        try:
-            logging.exception("Failed to load 'fights' extension in main.setup; will attempt fallback setup")
-            # Fallback: import and call setup(bot2) if present
-            import importlib
-
-            mod = importlib.import_module("fights")
-            if hasattr(mod, "setup"):
-                try:
-                    await mod.setup(bot2)
-                except Exception:
-                    logging.exception("fights.setup(bot2) failed in fallback")
-        except Exception:
-            logging.exception("Fallback import for 'fights' also failed in main.setup")
+    # The Fights extension is loaded by setup_hook. Avoid loading it a second
+    # time when this module is itself loaded as an extension.
 
     # finally replace the fake bot with the real one
     bot = bot2
