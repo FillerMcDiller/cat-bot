@@ -11031,7 +11031,7 @@ async def news(message: discord.Interaction):
                 {
                     "type": "xp",
                     "amount": 10000,
-                    "name": "10000 XP
+                    "name": "10000 XP"
                 }
             ]
        },
