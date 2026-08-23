@@ -11027,7 +11027,7 @@ async def news(message: discord.Interaction):
                     "amount": 10,
                     "pack_name": "Platinum",
                     "name": "10 Platinum Packs"
-                }
+                },
                 {
                     "type": "xp",
                     "amount": 10000,
