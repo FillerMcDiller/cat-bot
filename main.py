@@ -3155,6 +3155,8 @@ async def setup_hook():
         print("Attempting to load 'fights' extension...", flush=True)
         await bot.load_extension("fights")
         print("Called load_extension('fights')", flush=True)
+    except discord.ext.commands.errors.ExtensionAlreadyLoaded:
+        print("Fights extension already loaded; skipping duplicate load", flush=True)
     except Exception:
         import traceback
 
@@ -25288,6 +25290,8 @@ async def setup(bot2):
     # registers with the running bot (helps when main is loaded as an extension).
     try:
         await bot2.load_extension("fights")
+    except discord.ext.commands.errors.ExtensionAlreadyLoaded:
+        logging.warning("Fights extension already loaded; skipping duplicate load")
     except discord.app_commands.errors.CommandAlreadyRegistered:
         logging.warning("Fights commands already registered; skipping duplicate load")
     except Exception:
