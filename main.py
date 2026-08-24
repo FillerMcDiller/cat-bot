@@ -24771,8 +24771,7 @@ def _get_wiki_web_ui_url() -> str:
 
 
 def _get_wiki_api_base_url() -> str | None:
-    # Hardcoded Cloudflare tunnel URL (temporary override while .env is unavailable)
-    url = "https://pork-munich-recognised-electronic.trycloudflare.com"
+    url = getattr(config, "WIKI_API_BASE_URL", None) or os.getenv("WIKI_API_BASE_URL")
     if not url:
         url = _get_inventory_api_base_url()
     if not url:
@@ -24801,8 +24800,15 @@ def _get_inventory_web_ui_url() -> str | None:
 
 
 def _get_inventory_api_base_url() -> str | None:
-    # Hardcoded Cloudflare tunnel URL (temporary override while .env is unavailable)
-    return "https://pork-munich-recognised-electronic.trycloudflare.com"
+    url = getattr(config, "INVENTORY_API_BASE_URL", None) or os.getenv("INVENTORY_API_BASE_URL")
+    if not url:
+        return None
+    normalizer = getattr(config, "_normalize_public_base_url", None)
+    if callable(normalizer):
+        normalized = normalizer(url)
+        if normalized:
+            return normalized
+    return str(url).strip().rstrip("/")
 
 
 def _get_catcomp_api_base_url() -> str | None:

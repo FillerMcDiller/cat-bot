@@ -70,13 +70,16 @@ INVENTORY_API_BASE_URL = _normalize_public_base_url(os.getenv("INVENTORY_API_BAS
 INVENTORY_API_BACKUPS = _normalize_public_base_url_list(os.getenv("INVENTORY_API_BACKUPS"))
 
 # Public API base URL for the Cat Competition submission form.
-# Falls back to the inventory API base when both features share the same backend,
-# and then to the current perma URL if neither env var is set.
+# Falls back to the inventory API base when both features share the same backend.
 CATCOMP_API_BASE_URL = (
     _normalize_public_base_url(os.getenv("CATCOMP_API_BASE_URL"))
     or INVENTORY_API_BASE_URL
-    or _normalize_public_base_url("https://far-probably.gl.at.ply.gg:41565")
 )
+
+# Optional comma/space-separated backup API endpoints for cat competition.
+CATCOMP_API_BACKUPS = _normalize_public_base_url_list(os.getenv("CATCOMP_API_BACKUPS"))
+if not CATCOMP_API_BACKUPS:
+    CATCOMP_API_BACKUPS = list(INVENTORY_API_BACKUPS)
 
 # Allowed CORS origin for web UI (set to your GitHub Pages URL in production)
 WEB_UI_ORIGIN = os.getenv("WEB_UI_ORIGIN", "fillermcdiller.github.io/cat-bot")
