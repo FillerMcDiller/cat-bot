@@ -710,7 +710,7 @@
       {"xp": 1000, "reward": "Donut", "amount": 1},
       {"xp": 1000, "reward": "Rain", "amount": 15}
     ],
-    "20": [
+    "21": [
       {"xp": 550, "reward": "dogtreat_I", "amount": 1},
       {"xp": 550, "reward": "Rare", "amount": 1},
       {"xp": 550, "reward": "Bronze", "amount": 1},
@@ -746,6 +746,43 @@
       {"xp": 1000, "reward": "Celestial", "amount": 1},
       {"xp": 1000, "reward": "Donut", "amount": 1},
       {"xp": 1000, "reward": "Rain", "amount": 15}
+    ],
+    "22": [
+      {"xp": 550, "reward": "ball_I", "amount": 1},
+      {"xp": 550, "reward": "Trash", "amount": 1},
+      {"xp": 550, "reward": "Platinum", "amount": 1},
+      {"xp": 600, "reward": "Platinum", "amount": 1},
+      {"xp": 600, "reward": "Gold", "amount": 1},
+
+      {"xp": 600, "reward": "luck_III", "amount": 1},
+      {"xp": 650, "reward": "Stone", "amount": 1},
+      {"xp": 650, "reward": "Stone", "amount": 1},
+      {"xp": 650, "reward": "Stone", "amount": 1},
+      {"xp": 700, "reward": "Stone", "amount": 1},
+
+      {"xp": 700, "reward": "xp_III", "amount": 1},
+      {"xp": 700, "reward": "Stone", "amount": 1},
+      {"xp": 750, "reward": "Stone", "amount": 1},
+      {"xp": 750, "reward": "Stone", "amount": 3},
+      {"xp": 750, "reward": "Stone", "amount": 1},
+
+      {"xp": 800, "reward": "luck_III", "amount": 1},
+      {"xp": 800, "reward": "Stone", "amount": 1},
+      {"xp": 800, "reward": "Stone", "amount": 3},
+      {"xp": 850, "reward": "Stone", "amount": 1},
+      {"xp": 850, "reward": "Stone", "amount": 1},
+
+      {"xp": 850, "reward": "xp_III", "amount": 1},
+      {"xp": 900, "reward": "Stone", "amount": 1},
+      {"xp": 900, "reward": "Stone", "amount": 1},
+      {"xp": 900, "reward": "Stone", "amount": 1},
+      {"xp": 950, "reward": "Stone", "amount": 1},
+
+      {"xp": 950, "reward": "Platinum", "amount": 10},
+      {"xp": 950, "reward": "pancakes_I", "amount": 5},
+      {"xp": 1000, "reward": "Celestial", "amount": 5},
+      {"xp": 1000, "reward": "Donut", "amount": 3},
+      {"xp": 1000, "reward": "Rain", "amount": 30}
     ]
   },
     
