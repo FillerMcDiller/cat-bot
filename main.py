@@ -23955,31 +23955,35 @@ class SetupConfigView(discord.ui.View):
     async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = await Channel.get_or_none(channel_id=self.channel_id)
         if channel:
-            # Older deployments may not have the optional race columns yet.
-            try:
-                race_channel_id = channel["race_channel_id"]
-            except KeyError:
-                race_channel_id = None
+            def setting(name: str, default=None):
+                try:
+                    return channel[name]
+                except (KeyError, TypeError):
+                    return default
+
+            race_channel_id = setting("race_channel_id")
             race_status = "✅ Enabled" if race_channel_id else "❌ Disabled"
             # Calculate enabled cats
-            disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
+            disabled_cats_value = setting("disabled_cats", "")
+            disabled_cats = set(disabled_cats_value.split(",")) if disabled_cats_value else set()
             disabled_cats = {cat for cat in disabled_cats if cat}
             enabled_count = len(spawnable_cattypes) - len(disabled_cats)
+            spawn_min = setting("spawn_times_min", 120)
+            spawn_max = setting("spawn_times_max", 1200)
+            spawn_luck = setting("spawn_luck_multiplier", 1.0) or 1.0
+            pack_luck = setting("pack_luck_multiplier", 1.0) or 1.0
             
             summary = (
                 f"**Setup Complete!** 🎉\n\n"
                 f"📊 **Configuration Summary:**\n"
-                f"⏰ Spawn Frequency: {channel.spawn_times_min}-{channel.spawn_times_max} seconds\n"
-                f"🍀 Spawn Luck: {channel.spawn_luck_multiplier if hasattr(channel, 'spawn_luck_multiplier') and channel.spawn_luck_multiplier else 1.0}x\n"
-                f"📦 Pack Luck: {channel.pack_luck_multiplier if hasattr(channel, 'pack_luck_multiplier') and channel.pack_luck_multiplier else 1.0}x\n"
+                f"⏰ Spawn Frequency: {spawn_min}-{spawn_max} seconds\n"
+                f"🍀 Spawn Luck: {spawn_luck}x\n"
+                f"📦 Pack Luck: {pack_luck}x\n"
                 f"🐱 Enabled Cats: {enabled_count}/{len(spawnable_cattypes)}\n"
                 f"🏁 Races: {race_status}"
             )
             if race_channel_id:
-                try:
-                    race_frequency = channel["race_frequency"] or 600
-                except KeyError:
-                    race_frequency = 600
+                race_frequency = setting("race_frequency", 600) or 600
                 summary += f"\n⚙️ Race Frequency: {race_frequency} seconds"
             
             await interaction.response.send_message(summary, ephemeral=False)
