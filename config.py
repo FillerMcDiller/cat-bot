@@ -37,7 +37,6 @@ else:
     raise RuntimeError("TOKEN not found in .env!")
 # PostgreSQL settings. DATABASE_URL takes precedence over the individual values.
 # The defaults retain the original local development setup.
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 DB_USER = os.getenv("DB_USER", "cat_bot")
 DB_NAME = os.getenv("DB_NAME", "cat_bot")
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
