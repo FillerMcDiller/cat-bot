@@ -25060,12 +25060,46 @@ async def web_ui_inventory_get(request: web.Request) -> web.Response:
     return _web_json({"ok": True, "inventory": payload}, status=200, origin=origin)
 
 
+_application_command_resync_task = None
+
+
+async def _resync_application_commands(client):
+    try:
+        await client.tree.sync()
+    except Exception:
+        logging.exception("Failed to resync application commands")
+
+
+async def on_app_command_error(interaction: discord.Interaction, error: Exception):
+    global _application_command_resync_task
+
+    if isinstance(error, discord.app_commands.errors.CommandNotFound):
+        logging.warning("Ignoring stale application command interaction: %s", error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "That command is outdated. Please try it again in a moment.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
+
+        if (
+            _application_command_resync_task is None
+            or _application_command_resync_task.done()
+        ):
+            _application_command_resync_task = asyncio.create_task(
+                _resync_application_commands(interaction.client)
+            )
+        return
+
+    logging.error("Application command failed: %s", error, exc_info=error)
+
+
 # KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
 async def on_error(*args, **kwargs):
-    # Discord.py calls this hook without an active exception context, so
-    # logging.exception() would misleadingly emit an empty traceback.
     try:
-        logging.error("Discord event failed: args=%s kwargs=%s", args, kwargs)
+        logging.exception("Discord event failed: args=%s kwargs=%s", args, kwargs)
     except Exception:
         pass
     return
@@ -25140,6 +25174,7 @@ async def setup(bot2):
     bot2.on_message = on_message
     bot2.on_connect = on_connect
     bot2.on_error = on_error
+    bot2.tree.on_error = on_app_command_error
 
     webhook_secret = _get_vote_webhook_secret()
     if not webhook_secret:
