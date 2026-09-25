@@ -3078,10 +3078,6 @@ async def setup_hook():
     bot.loop.create_task(rest_watchdog())
     print("[SETUP_HOOK] Resolving bot version from GitHub (once, at startup)...", flush=True)
     bot.loop.create_task(_refresh_bot_version())
-    global chat_reader_task
-    if chat_reader_task is None or chat_reader_task.done():
-        print("[SETUP_HOOK] Creating chat reader task...", flush=True)
-        chat_reader_task = bot.loop.create_task(_chat_reader_loop())
     # start background indexing of per-instance cats to keep JSON and DB counters in sync
     print("[STARTUP] Creating background_index_all_cats task...", flush=True)
     bot.loop.create_task(background_index_all_cats())
@@ -9015,34 +9011,6 @@ async def adventure_list(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
-@bot.tree.command(name="readchat", description="Force the AI chat reader to respond to recent chat in this channel")
-async def readchat(interaction: discord.Interaction):
-    if not await check_global_cooldown(interaction.user.id, cooldown_seconds=5):
-        await interaction.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
-        return
-
-    if interaction.guild is None or interaction.channel is None:
-        await interaction.response.send_message("This command can only be used in a server channel.", ephemeral=True)
-        return
-
-    settings = get_guild_chat_reader_settings(interaction.guild.id)
-    if not settings.get("enabled", True):
-        await interaction.response.send_message("Chat reader is disabled in this server. Enable it in /setup.", ephemeral=True)
-        return
-
-    whitelist = set(settings.get("whitelist_channels", []))
-    if whitelist and interaction.channel.id not in whitelist:
-        await interaction.response.send_message("This channel is not in the chat reader whitelist. Add it in /setup.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    sent, reason = await _run_chat_reader_for_channel(interaction.channel, forced=True)
-    if sent:
-        await interaction.followup.send("AI read the recent chat and sent a response.", ephemeral=True)
-    else:
-        await interaction.followup.send(f"No response sent: {reason}", ephemeral=True)
-
-
 # this is all the code which is ran on every message sent
 # a lot of it is for easter eggs and achievements
 async def on_message(message: discord.Message):
@@ -9080,9 +9048,6 @@ async def on_message(message: discord.Message):
                 await dm_user.save()
                 await message.channel.send('good job! please send "lol_i_have_dmed_the_cat_bot_and_got_an_ach" in server to get your ach!')
         return
-
-    # Keep a rolling in-memory transcript for periodic AI read/respond behavior.
-    _record_chat_message(message)
 
     perms = await fetch_perms(message)
 
@@ -23909,43 +23874,6 @@ class SetupConfigView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
 
-    @discord.ui.button(label="🤖 Toggle AI Chat", style=ButtonStyle.secondary, row=1)
-    async def toggle_ai_chat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None:
-            await interaction.response.send_message("❌ This can only be used in a server.", ephemeral=True)
-            return
-
-        settings = get_guild_chat_reader_settings(interaction.guild.id)
-        settings["enabled"] = not bool(settings.get("enabled", True))
-        settings = save_guild_chat_reader_settings(interaction.guild.id, settings)
-        status = "enabled" if settings.get("enabled", True) else "disabled"
-        await interaction.response.send_message(
-            f"✅ AI chat reader is now **{status}** for this server.",
-            ephemeral=True,
-        )
-
-    @discord.ui.button(label="⏱️ AI Interval", style=ButtonStyle.secondary, row=1)
-    async def ai_interval_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None:
-            await interaction.response.send_message("❌ This can only be used in a server.", ephemeral=True)
-            return
-        await interaction.response.send_modal(ChatReaderIntervalModal(interaction.guild.id))
-
-    @discord.ui.button(label="📋 Toggle Channel Whitelist", style=ButtonStyle.secondary, row=1)
-    async def ai_whitelist_toggle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None or interaction.channel is None:
-            await interaction.response.send_message("❌ This can only be used in a server channel.", ephemeral=True)
-            return
-
-        settings, added = toggle_guild_chat_whitelist_channel(interaction.guild.id, interaction.channel.id)
-        action = "added to" if added else "removed from"
-        whitelist_text = _format_whitelist_channels(settings.get("whitelist_channels", []))
-        await interaction.response.send_message(
-            f"✅ This channel was {action} the AI chat whitelist.\n"
-            f"📋 Current whitelist: {whitelist_text}",
-            ephemeral=True,
-        )
-
     @discord.ui.button(label="🏁 Enable Races", style=ButtonStyle.success, row=2)
     async def race_channel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = await Channel.get_or_none(channel_id=self.channel_id)
@@ -24000,12 +23928,6 @@ class SetupConfigView(discord.ui.View):
         channel = await Channel.get_or_none(channel_id=self.channel_id)
         if channel:
             race_status = "✅ Enabled" if channel.race_channel_id else "❌ Disabled"
-            ai_settings = get_guild_chat_reader_settings(interaction.guild.id)
-            ai_status = "✅ Enabled" if ai_settings.get("enabled", True) else "❌ Disabled"
-            ai_interval = int(ai_settings.get("interval_seconds", CHAT_INTERVAL_SECONDS) or CHAT_INTERVAL_SECONDS)
-            whitelist_channels = ai_settings.get("whitelist_channels", [])
-            whitelist_count = len(whitelist_channels)
-            
             # Calculate enabled cats
             disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
             disabled_cats = {cat for cat in disabled_cats if cat}
@@ -24018,15 +23940,10 @@ class SetupConfigView(discord.ui.View):
                 f"🍀 Spawn Luck: {channel.spawn_luck_multiplier if hasattr(channel, 'spawn_luck_multiplier') and channel.spawn_luck_multiplier else 1.0}x\n"
                 f"📦 Pack Luck: {channel.pack_luck_multiplier if hasattr(channel, 'pack_luck_multiplier') and channel.pack_luck_multiplier else 1.0}x\n"
                 f"🐱 Enabled Cats: {enabled_count}/{len(spawnable_cattypes)}\n"
-                f"🏁 Races: {race_status}\n"
-                f"🤖 AI Chat Reader: {ai_status}\n"
-                f"⏱️ AI Interval: {ai_interval} seconds\n"
-                f"📋 AI Whitelist Channels: {whitelist_count}"
+                f"🏁 Races: {race_status}"
             )
             if channel.race_channel_id:
                 summary += f"\n⚙️ Race Frequency: {channel.race_frequency if hasattr(channel, 'race_frequency') and channel.race_frequency else 600} seconds"
-            if whitelist_channels:
-                summary += f"\n🧾 Whitelist: {_format_whitelist_channels(whitelist_channels)}"
             
             await interaction.response.send_message(summary, ephemeral=False)
             self.stop()
@@ -24100,9 +24017,6 @@ async def setup_channel(message: discord.Interaction):
             f"🐱 **Select Cats** - Choose which cats can spawn\n"
             f"🏁 **Enable Races** - Turn on automatic cat races\n"
             f"⚙️ **Race Frequency** - How often races happen (default: 10 min)\n\n"
-            f"🤖 **Toggle AI Chat** - Enable/disable periodic AI chat replies\n"
-            f"⏱️ **AI Interval** - Set AI read/reply interval in seconds\n"
-            f"📋 **Toggle Channel Whitelist** - Add/remove this channel from AI whitelist\n\n"
             f"Click the buttons below to customize your settings, or click **Done** to finish!"
         ),
         color=Colors.green,
@@ -25316,10 +25230,6 @@ async def setup(bot2):
         await _load_application_emojis()
     except Exception:
         logging.exception("Failed to load application emojis during setup()")
-
-    global chat_reader_task
-    if chat_reader_task is None or chat_reader_task.done():
-        chat_reader_task = bot.loop.create_task(_chat_reader_loop())
 
     config.SOFT_RESTART_TIME = time.time()
 
