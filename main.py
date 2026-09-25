@@ -2552,6 +2552,16 @@ class _ConsoleToBackupChannel:
         if len(text) > 1000:
             text = text[:1000] + "..."
 
+        # Discord's HTTP client already retries 429s. Do not mirror those
+        # internal retry notices back into Discord and create a feedback loop.
+        lower_text = text.lower()
+        if (
+            "we are being rate limited" in lower_text
+            or "retrying in" in lower_text
+            or "rate limited" in lower_text
+        ):
+            return
+
         try:
             if not bot or not getattr(bot, "is_ready", lambda: False)():
                 # Bot not ready yet (e.g. very early startup) - buffer will
@@ -23927,7 +23937,12 @@ class SetupConfigView(discord.ui.View):
     async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = await Channel.get_or_none(channel_id=self.channel_id)
         if channel:
-            race_status = "✅ Enabled" if channel.race_channel_id else "❌ Disabled"
+            # Older deployments may not have the optional race columns yet.
+            try:
+                race_channel_id = channel["race_channel_id"]
+            except KeyError:
+                race_channel_id = None
+            race_status = "✅ Enabled" if race_channel_id else "❌ Disabled"
             # Calculate enabled cats
             disabled_cats = set(channel.disabled_cats.split(",")) if channel.disabled_cats else set()
             disabled_cats = {cat for cat in disabled_cats if cat}
@@ -23942,8 +23957,12 @@ class SetupConfigView(discord.ui.View):
                 f"🐱 Enabled Cats: {enabled_count}/{len(spawnable_cattypes)}\n"
                 f"🏁 Races: {race_status}"
             )
-            if channel.race_channel_id:
-                summary += f"\n⚙️ Race Frequency: {channel.race_frequency if hasattr(channel, 'race_frequency') and channel.race_frequency else 600} seconds"
+            if race_channel_id:
+                try:
+                    race_frequency = channel["race_frequency"] or 600
+                except KeyError:
+                    race_frequency = 600
+                summary += f"\n⚙️ Race Frequency: {race_frequency} seconds"
             
             await interaction.response.send_message(summary, ephemeral=False)
             self.stop()
@@ -25021,10 +25040,10 @@ async def web_ui_inventory_get(request: web.Request) -> web.Response:
 
 # KITTAYYYYYYY uses glitchtip (sentry alternative) for errors, here u can instead implement some other logic like dming the owner
 async def on_error(*args, **kwargs):
-    # Previously this raised, which could crash the bot process on uncaught errors.
-    # Instead, log the error and continue so the process doesn't exit silently.
+    # Discord.py calls this hook without an active exception context, so
+    # logging.exception() would misleadingly emit an empty traceback.
     try:
-        logging.exception("on_error called with args=%s kwargs=%s", args, kwargs)
+        logging.error("Discord event failed: args=%s kwargs=%s", args, kwargs)
     except Exception:
         pass
     return
