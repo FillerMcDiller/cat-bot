@@ -23958,6 +23958,9 @@ async def setup_channel(message: discord.Interaction):
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
+
+    # A new setup may need database work and an initial spawn before the UI is ready.
+    await message.response.defer()
     
     # Check if channel already exists
     existing_channel = await Channel.get_or_none(channel_id=message.channel.id)
@@ -23982,14 +23985,14 @@ async def setup_channel(message: discord.Interaction):
             missing_perms = list(needed_perms.keys())
             if len(missing_perms) != 0:
                 needed_perms = "\n- ".join(missing_perms)
-                await message.response.send_message(
+                await message.followup.send(
                     f":x: Missing Permissions! Please give me the following:\n- {needed_perms}\nHint: try setting channel permissions if server ones don't work."
                 )
                 return
 
             await Channel.create(channel_id=message.channel.id)
         except Exception:
-            await message.response.send_message("this channel gives me bad vibes.")
+            await message.followup.send("this channel gives me bad vibes.")
             return
 
         # Spawn initial cat with default modifiers
@@ -24021,7 +24024,7 @@ async def setup_channel(message: discord.Interaction):
         ),
         color=Colors.green,
     )
-    await message.response.send_message(embed=embed, view=view)
+    await message.followup.send(embed=embed, view=view)
 
 
 @bot.tree.command(description="(ADMIN) undo setup + alzheimers")
