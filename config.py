@@ -35,9 +35,18 @@ if TOKEN:
     TOKEN = TOKEN.strip().replace('\ufeff', '')  # remove BOM and whitespace
 else:
     raise RuntimeError("TOKEN not found in .env!")
-# db password for postgres
-# user - cat_bot, database - cat_bot, ip - localhost, port - default
-DB_PASS = os.environ["DBPASS"] = "cat"
+# PostgreSQL settings. DATABASE_URL takes precedence over the individual values.
+# The defaults retain the original local development setup.
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
+DB_USER = os.getenv("DB_USER", "cat_bot")
+DB_NAME = os.getenv("DB_NAME", "cat_bot")
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_PASS = (
+    os.getenv("DB_PASSWORD")
+    or os.getenv("DB_PASS")
+    or os.getenv("DBPASS")
+)
 
 #
 # all the following are optional (setting them to None will disable the feature)

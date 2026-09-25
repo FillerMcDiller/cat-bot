@@ -20,7 +20,21 @@ import config
 
 async def connect():
     # Increased pool size for better concurrency - each shard can have multiple pending queries
-    await catpg.connect(user="cat_bot", password=config.DB_PASS, database="cat_bot", host="127.0.0.1", max_size=50, min_size=10)
+    connection_args = {
+        "max_size": 50,
+        "min_size": 10,
+    }
+    if config.DATABASE_URL:
+        connection_args["dsn"] = config.DATABASE_URL
+    else:
+        connection_args.update(
+            user=config.DB_USER,
+            password=config.DB_PASS,
+            database=config.DB_NAME,
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+        )
+    await catpg.connect(**connection_args)
 
 
 async def close():
