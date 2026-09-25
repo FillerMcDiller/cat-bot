@@ -24,15 +24,16 @@ async def connect():
         "max_size": 50,
         "min_size": 10,
     }
-    if config.DATABASE_URL:
-        connection_args["dsn"] = config.DATABASE_URL
+    database_url = getattr(config, "DATABASE_URL", None)
+    if database_url:
+        connection_args["dsn"] = database_url
     else:
         connection_args.update(
-            user=config.DB_USER,
-            password=config.DB_PASS,
-            database=config.DB_NAME,
-            host=config.DB_HOST,
-            port=config.DB_PORT,
+            user=getattr(config, "DB_USER", "cat_bot"),
+            password=getattr(config, "DB_PASS", None),
+            database=getattr(config, "DB_NAME", "cat_bot"),
+            host=getattr(config, "DB_HOST", "127.0.0.1"),
+            port=getattr(config, "DB_PORT", 5432),
         )
     await catpg.connect(**connection_args)
 
