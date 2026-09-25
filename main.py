@@ -2336,6 +2336,36 @@ _discord_log_buffer: list[str] = []
 _discord_flush_scheduled = False
 _DISCORD_FLUSH_INTERVAL = 5.0  # seconds to wait before flushing accumulated logs
 _DISCORD_MAX_LINES = 200
+_DISCORD_FORWARD_TIMEOUT = 10.0
+_DISCORD_FORWARD_COOLDOWN = 60.0
+_discord_forward_lock = asyncio.Lock()
+_discord_forward_blocked_until = 0.0
+
+
+async def _send_log_payload(channel, payload: str):
+    """Send diagnostic output without allowing Discord throttling to snowball."""
+    global _discord_forward_blocked_until
+
+    now = time.monotonic()
+    if now < _discord_forward_blocked_until or _discord_forward_lock.locked():
+        return
+
+    async with _discord_forward_lock:
+        if time.monotonic() < _discord_forward_blocked_until:
+            return
+        try:
+            maxlen = 1900
+            for i in range(0, len(payload), maxlen):
+                await asyncio.wait_for(
+                    channel.send(f"```\n{payload[i:i + maxlen]}\n```"),
+                    timeout=_DISCORD_FORWARD_TIMEOUT,
+                )
+        except Exception:
+            # A 429 or a stuck connection must disable diagnostic forwarding
+            # briefly; otherwise the logger can keep generating more sends.
+            _discord_forward_blocked_until = (
+                time.monotonic() + _DISCORD_FORWARD_COOLDOWN
+            )
 
 async def _post_log_batch_to_discord(lines: list[str]):
     try:
@@ -2360,14 +2390,7 @@ async def _post_log_batch_to_discord(lines: list[str]):
         payload = "\n".join(send_lines)
         if dropped > 0:
             payload += f"\n...+{dropped} more lines suppressed..."
-
-        # break into chunks respecting Discord message length
-        maxlen = 1900
-        if len(payload) <= maxlen:
-            await ch.send(f"```\n{payload}\n```")
-        else:
-            for i in range(0, len(payload), maxlen):
-                await ch.send(f"```\n{payload[i:i+maxlen]}\n```")
+        await _send_log_payload(ch, payload)
     except Exception:
         pass
 
@@ -2502,12 +2525,7 @@ async def _post_console_batch_to_backup(lines: list[str]):
         payload = "\n".join(send_lines)
         if dropped > 0:
             payload += f"\n...+{dropped} more lines suppressed..."
-        maxlen = 1900
-        if len(payload) <= maxlen:
-            await ch.send(f"```\n{payload}\n```")
-        else:
-            for i in range(0, len(payload), maxlen):
-                await ch.send(f"```\n{payload[i:i+maxlen]}\n```")
+        await _send_log_payload(ch, payload)
     except Exception:
         pass
 
