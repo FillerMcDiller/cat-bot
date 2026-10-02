@@ -7953,6 +7953,15 @@ def get_random_spawn_modifiers(luck_multiplier=1.0):
         if random.randint(1, 5) == 1:
             modifiers.append("snowy")
     
+    # Check if it's Halloween time (Oct 1-31)
+    now = datetime.datetime.now()
+    is_halloween = now.month == 10 and now.day <= 31
+    
+    if is_halloween:
+        # 1/5 chance for pumpkin modifier during Halloween
+        if random.randint(1, 5) == 1:
+            modifiers.append("pumpkin")
+
     return modifiers
 
 
@@ -7987,17 +7996,8 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, modifiers=None):
     
     icon = get_emoji(localcat.lower() + "cat")
     
-    # Check if enchanted or snowy modifier to determine image
-    image_suffix = ""
-    if "enchanted" in modifiers:
-        image_suffix = "_enchanted"
-    elif "snowy" in modifiers:
-        image_suffix = "_snowy"
-    
-    image_filename = f"{localcat.lower()}_cat{image_suffix}.png"
-    file = discord.File(
-        f"images/spawn/{image_filename}",
-    )
+    image_path = get_image_path({"type": localcat, "modifiers": modifiers})
+    file = discord.File(image_path)
     channeley = bot.get_partial_messageable(int(ch_id))
 
     # Add modifier emojis to appear string
@@ -8028,7 +8028,6 @@ async def spawn_cat(ch_id, localcat=None, force_spawn=None, modifiers=None):
     channel.yet_to_spawn = 0
     channel.forcespawned = bool(force_spawn)
     channel.cattype = localcat
-    channel.modifiers = json.dumps(modifiers)
     await channel.save()
     
     # Store modifiers in memory for when cat is caught
@@ -24125,14 +24124,30 @@ async def fake(message: discord.Interaction):
 @bot.tree.command(description="(ADMIN) Force cats to appear")
 @discord.app_commands.default_permissions(manage_guild=True)
 @discord.app_commands.rename(cat_type="type")
-@discord.app_commands.describe(cat_type="select a cat type ok", modifiers="Add modifiers (comma-separated, e.g. Snowy, Enchanted)")
+@discord.app_commands.describe(
+    cat_type="select a cat type ok",
+    modifier="Add a modifier (e.g. Pumpkin or Snowy)",
+    modifiers="Legacy: add modifiers comma-separated",
+)
 @discord.app_commands.autocomplete(cat_type=cat_type_autocomplete)
-async def forcespawn(message: discord.Interaction, cat_type: Optional[str], modifiers: Optional[str] = None):
+async def forcespawn(
+    message: discord.Interaction,
+    cat_type: Optional[str],
+    modifier: Optional[str] = None,
+    modifiers: Optional[str] = None,
+):
     # Global command cooldown check (5 seconds)
     if not await check_global_cooldown(message.user.id, cooldown_seconds=5):
         await message.response.send_message("slow down! you're using commands too fast (5 second cooldown)", ephemeral=True)
         return
     
+    # Allow a modifier such as "Pumpkin" in the type field as shorthand for
+    # a random cat carrying that modifier.
+    modifier_list = []
+    if cat_type and cat_type.lower() in CAT_MODIFIERS and cat_type not in cattypes:
+        modifier_list.append(cat_type.lower())
+        cat_type = None
+
     if cat_type and cat_type not in cattypes:
         await message.response.send_message("bro what", ephemeral=True)
         return
@@ -24146,12 +24161,12 @@ async def forcespawn(message: discord.Interaction, cat_type: Optional[str], modi
         return
     
     # Parse modifiers (comma-separated, e.g. "Snowy, Enchanted")
-    modifier_list = []
-    if modifiers:
+    modifier_text = ",".join(value for value in (modifier, modifiers) if value)
+    if modifier_text:
         # Split by comma and strip whitespace
-        raw_mods = [m.strip().lower() for m in modifiers.split(",")]
+        raw_mods = [m.strip().lower() for m in modifier_text.split(",")]
         for mod in raw_mods:
-            if mod in CAT_MODIFIERS:
+            if mod in CAT_MODIFIERS and mod not in modifier_list:
                 modifier_list.append(mod)
     
     modifier_display = " " + " ".join([CAT_MODIFIERS[m]["emoji"] for m in modifier_list]) if modifier_list else ""

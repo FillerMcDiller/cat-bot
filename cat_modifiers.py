@@ -4,6 +4,7 @@
 
 import random
 import json
+import os
 
 # Import type_dict to calculate spawn rates dynamically
 # NOTE: This should be updated when imported from main.py
@@ -17,26 +18,38 @@ CAT_MODIFIERS = {
     "enchanted": {
         "name": "✨ Enchanted",
         "description": "A magical cat with doubled stats and value",
-        "rarity_divisor": 3.0,  # Spawn rate is 1/3 of the cat's base rarity
-        "stat_multiplier": 2.0,  # Double all stats (hp, dmg)
-        "kibble_multiplier": 3.0,  # 3x kibble value
-        "adventure_multiplier": 3.0,  # 3x adventure rewards
-        "steal_resistance": 0.8,  # 80% harder to steal (20% steal chance instead of normal)
-        "pack_rarity": ["Platinum", "Diamond"],  # Can spawn from these pack types only
+        "rarity_divisor": 3.0,
+        "stat_multiplier": 2.0,  
+        "kibble_multiplier": 3.0, 
+        "adventure_multiplier": 3.0,  
+        "steal_resistance": 0.8,  
+        "pack_rarity": ["Platinum", "Diamond"],  
         "emoji": "✨",
         "display_name": "Enchanted",
     },
     "snowy": {
         "name": "❄️ Snowy",
         "description": "A festive cat covered in snow (December only)",
-        "rarity_divisor": 2.0,  # Spawn rate is 1/2 of the cat's base rarity (higher chance in December)
-        "stat_multiplier": 1.1,  # 10% stat boost
-        "kibble_multiplier": 1.5,  # 50% more kibble
-        "adventure_multiplier": 1.3,  # 30% more adventure rewards
-        "steal_resistance": 0.3,  # 30% harder to steal
+        "rarity_divisor": 2.0,  
+        "stat_multiplier": 1.1,  
+        "kibble_multiplier": 1.5,  
+        "adventure_multiplier": 1.3,  
+        "steal_resistance": 0.3,  
         "emoji": "❄️",
         "display_name": "Snowy",
-    }
+    },
+    "pumpkin": {
+        "name": "🎃 Pumpkin",
+        "description": "A festive cat with a pumpkin theme (October only)",
+        "rarity_divisor": 2.0,
+        "stat_multiplier": 1.1,
+        "kibble_multiplier": 1.5,
+        "adventure_multiplier": 1.3,
+        "steal_resistance": 0.3,
+        "pack_rarity": [],
+        "emoji": "🎃",
+        "display_name": "Pumpkin",
+    },
 }
 
 # =============================================================================
@@ -79,16 +92,16 @@ def get_image_path(cat: dict, base_path: str = "images/spawn") -> str:
     """Get the correct image path for a cat, accounting for modifiers"""
     cat_type = cat.get("type", "Fine").lower()
     modifiers = cat.get("modifiers", [])
-    
-    # Check for snowy modifier first (December exclusive)
-    if "snowy" in modifiers:
-        return f"{base_path}/{cat_type}_snowy.png"
-    
-    # Check for enchanted modifier
-    if "enchanted" in modifiers:
-        return f"{base_path}/{cat_type}_cat_enchanted.png"
-    
-    return f"{base_path}/{cat_type}_cat.png"
+
+    # Use the first available variant so a new modifier can be enabled before
+    # its complete set of image assets has been deployed.
+    for modifier_name in ("pumpkin", "snowy", "enchanted"):
+        if modifier_name in modifiers:
+            variant_path = os.path.join(base_path, f"{cat_type}_cat_{modifier_name}.png")
+            if os.path.exists(variant_path):
+                return variant_path
+
+    return os.path.join(base_path, f"{cat_type}_cat.png")
 
 
 def apply_stat_multipliers(cat: dict) -> dict:
@@ -215,84 +228,4 @@ def format_modifier_stats(modifier_name: str) -> str:
     return "\n".join(lines)
 
 
-# =============================================================================
-# INTEGRATION POINTS
-# =============================================================================
-
-"""
-INTEGRATION GUIDE:
-
-1. SPAWNING CATS (add_cat_instances and create_instance_if_missing):
-   
-   At the TOP of main.py, import and initialize type_dict:
-   ```python
-   from cat_modifiers import should_apply_random_modifier, add_modifier
-   ```
-   
-   Then in add_cat_instances() and repair_cat_instances(), after creating instance dict:
-   ```python
-   # Check for random modifiers (enchanted, etc)
-   # Enchanted spawn rate: cat_rarity / (3.0 * 1000)
-   # Example: Fine cat (1000) -> 1000/(3*1000) = 0.333 = 1 in 3 Fine cats
-   should_apply, modifier_name = should_apply_random_modifier(cat_type, type_dict)
-   if should_apply:
-       add_modifier(instance, modifier_name)
-   ```
-
-2. DISPLAYING CAT STATS (in battle, team, etc):
-   ```python
-   # When showing cat stats, apply multipliers
-   base_stats = get_cat_display_name(cat)  # For display name
-   stats = apply_stat_multipliers(cat)     # For battle
-   img_path = get_image_path(cat)          # For image
-   ```
-
-3. ADVENTURE REWARDS (kibble calculation):
-   ```python
-   # When calculating adventure rewards
-   kibble_base = 100  # or whatever base is
-   multiplier = get_kibble_multiplier(cat)
-   kibble_amount = int(kibble_base * multiplier)
-   ```
-
-4. ADVENTURE EXPLORATION (adventure rewards):
-   ```python
-   # When calculating adventure rewards
-   adventure_mult = get_adventure_multiplier(cat)
-   rewards = apply_adventure_multiplier(base_rewards, adventure_mult)
-   ```
-
-5. PACK OPENING (when generating cat from pack):
-   ```python
-   # After determining cat_type from pack
-   # Check if pack can spawn modifiers (Platinum/Diamond only)
-   if pack_type in ["Platinum", "Diamond"]:
-       should_apply, modifier_name = should_apply_random_modifier(cat_type, type_dict)
-       if should_apply and can_open_from_pack(cat_type, modifier_name, pack_type):
-           add_modifier(instance, modifier_name)
-   ```
-
-6. STEALING CATS (preventcatch or steal logic):
-   ```python
-   # When player tries to steal a cat
-   resistance = get_steal_resistance(cat)
-   steal_chance = 0.5  # Base 50% chance
-   steal_chance *= (1 - resistance)  # Apply resistance
-   if random.random() < steal_chance:
-       # Successfully stole
-   ```
-
-7. DISPLAYING CAT INFO (profile, inventory, etc):
-   ```python
-   # Show full modifier info
-   modifier_info = get_modifier_info(modifier_name)
-   formatted = format_modifier_stats(modifier_name)
-   ```
-
-8. BREEDING (if implemented):
-   ```python
-   # Modifiers could be inherited from parents
-   # Or small chance to create new modifier
-   ```
-"""
 
