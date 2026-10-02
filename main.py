@@ -24181,59 +24181,6 @@ async def forcespawn(
     await message.followup.send(f"done!{modifier_display}\n**Note:** you can use `/gift` to transfer cats, there is no need to spam this")
 
 
-#@bot.tree.command(description="(ADMIN) Give achievements to people")
-#@discord.app_commands.default_permissions(manage_guild=True)
-#@discord.app_commands.rename(person_id="user", ach_id="name")
-#@discord.app_commands.describe(person_id="who", ach_id="name or id of the achievement")
-#@discord.app_commands.autocomplete(ach_id=ach_autocomplete)
-#async def giveachievement(message: discord.Interaction, person_id: discord.User, ach_id: str):
-    # check if ach is real
-    try:
-        valid = ach_id in ach_names
-    except KeyError:
-        valid = False
-
-    if not valid and ach_id.lower() in ach_titles.keys():
-        ach_id = ach_titles[ach_id.lower()]
-        valid = True
-
-    person = await Profile.get_or_create(guild_id=message.guild.id, user_id=person_id.id)
-
-    if valid and ach_id == "thanksforplaying":
-        await message.response.send_message("HAHAHHAHAH\nno", ephemeral=True)
-        return
-
-    if valid:
-        # if it is, do the thing
-        reverse = person[ach_id]
-        person[ach_id] = not reverse
-        await person.save()
-        color, title, icon = (
-            Colors.green,
-            "Achievement forced!",
-            "https://wsrv.nl/?url=raw.githubusercontent.com/staring-cat/emojis/main/ach.png",
-        )
-        if reverse:
-            color, title, icon = (
-                Colors.red,
-                "Achievement removed!",
-                "https://wsrv.nl/?url=raw.githubusercontent.com/staring-cat/emojis/main/no_ach.png",
-            )
-        ach_data = ach_list[ach_id]
-        embed = (
-            discord.Embed(
-                title=ach_data["title"],
-                description=ach_data["description"],
-                color=color,
-            )
-            .set_author(name=title, icon_url=icon)
-            .set_footer(text=f"for {person_id.name}")
-        )
-        await message.response.send_message(person_id.mention, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
-    else:
-        await message.response.send_message("i cant find that achievement! try harder next time.", ephemeral=True)
-
-
 @bot.tree.command(description="(OWNER) Send a message from the bot")
 @discord.app_commands.describe(
     target_type="Where to send the message (User or Server)",
