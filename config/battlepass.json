@@ -783,6 +783,43 @@
       {"xp": 1000, "reward": "Celestial", "amount": 5},
       {"xp": 1000, "reward": "Donut", "amount": 3},
       {"xp": 1000, "reward": "Rain", "amount": 30}
+    ],
+    "23": [
+      {"xp": 550, "reward": "ball_I", "amount": 1},
+      {"xp": 550, "reward": "Rare", "amount": 1},
+      {"xp": 550, "reward": "Wooden", "amount": 1},
+      {"xp": 600, "reward": "Stone", "amount": 1},
+      {"xp": 600, "reward": "Wooden", "amount": 1},
+
+      {"xp": 600, "reward": "luck_I", "amount": 1},
+      {"xp": 650, "reward": "Stone", "amount": 1},
+      {"xp": 650, "reward": "Gold", "amount": 1},
+      {"xp": 650, "reward": "Stone", "amount": 1},
+      {"xp": 700, "reward": "Platinum", "amount": 1},
+
+      {"xp": 700, "reward": "xp_III", "amount": 1},
+      {"xp": 700, "reward": "Wooden", "amount": 1},
+      {"xp": 750, "reward": "Gold", "amount": 1},
+      {"xp": 750, "reward": "Gold", "amount": 3},
+      {"xp": 750, "reward": "Wooden", "amount": 1},
+
+      {"xp": 800, "reward": "luck_III", "amount": 1},
+      {"xp": 800, "reward": "Gold", "amount": 1},
+      {"xp": 800, "reward": "Wooden", "amount": 1},
+      {"xp": 850, "reward": "Gold", "amount": 1},
+      {"xp": 850, "reward": "Stone", "amount": 1},
+
+      {"xp": 850, "reward": "xp_III", "amount": 1},
+      {"xp": 900, "reward": "Platinum", "amount": 1},
+      {"xp": 900, "reward": "Stone", "amount": 1},
+      {"xp": 900, "reward": "Platinum", "amount": 1},
+      {"xp": 950, "reward": "Stone", "amount": 1},
+
+      {"xp": 950, "reward": "Diamond", "amount": 1},
+      {"xp": 950, "reward": "pancakes_I", "amount": 1},
+      {"xp": 1000, "reward": "Celestial", "amount": 1},
+      {"xp": 1000, "reward": "Diamond", "amount": 1},
+      {"xp": 1000, "reward": "Rain", "amount": 15}
     ]
   },
     
